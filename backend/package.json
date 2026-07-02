@@ -4,6 +4,13 @@
   "description": "",
   "main": "index.js",
   "scripts": {
+    "start": "node server.js",
+    "import:rules": "node scripts/import_rules.js",
+    "import:sqlite": "node scripts/import_sqlite_to_postgres.js",
+    "reset:accounts": "node scripts/reset_all_accounts.js",
+    "reset:defaults": "node scripts/reset_gvcn_bcs_defaults.js",
+    "seed:accounts": "node scripts/seed_account.js",
+    "seed:admin": "node scripts/seed_admin.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],
@@ -14,7 +21,7 @@
     "exceljs": "^4.4.0",
     "express": "^5.2.1",
     "express-session": "^1.19.0",
-    "sqlite3": "^5.1.7",
+    "pg": "^8.16.3",
     "xlsx": "^0.18.5"
   }
 }

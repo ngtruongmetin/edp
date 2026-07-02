@@ -2,7 +2,7 @@ const express = require("express")
 const bcrypt = require("bcrypt")
 const db = require("../../db")
 const updateExcel = require("../../utils/updateExcel")
-const { get, run, withTransaction, mapSqliteError, isUniqueError } = require("../../utils/dbp")
+const { get, run, withTransaction, mapDatabaseError, isUniqueError } = require("../../utils/dbp")
 
 const requireLogin = require("../../middleware/requireLogin")
 const requireRole = require("../../middleware/requireRole")
@@ -32,7 +32,7 @@ requireRole(["admin"]),
     ON a.class_id = c.id
     ORDER BY
       c.grade ASC,
-      CAST(SUBSTR(c.name, INSTR(c.name,'A')+1) AS INTEGER)
+      CAST(SUBSTRING(c.name FROM POSITION('A' IN c.name) + 1) AS INTEGER)
   `,
   [],
   (err,rows)=>{
@@ -58,7 +58,7 @@ router.get("/", (req,res)=>{
     WHERE is_active = 1
     ORDER BY
       grade ASC,
-      CAST(SUBSTR(name, INSTR(name,'A')+1) AS INTEGER)
+      CAST(SUBSTRING(name FROM POSITION('A' IN name) + 1) AS INTEGER)
   `,
   [],
   (err,rows)=>{
@@ -146,7 +146,7 @@ async (req,res)=>{
     if (isUniqueError(err)) {
       return res.status(409).json({ error: "Lớp đã tồn tại" })
     }
-    const out = mapSqliteError(err, err.message)
+    const out = mapDatabaseError(err, err.message)
     return res.status(out.status).json({ error: out.error })
   }
 
@@ -176,7 +176,7 @@ requireRole(["admin"]),
 
       res.json({ success: true, deleted: out.changes })
     } catch (err) {
-      const out = mapSqliteError(err, err.message)
+      const out = mapDatabaseError(err, err.message)
       res.status(out.status).json({ error: out.error })
     }
   })()
@@ -196,7 +196,7 @@ requireRole(["admin"]),
 
   db.run(`
     UPDATE classes
-    SET is_active = NOT is_active
+    SET is_active = CASE WHEN is_active = 1 THEN 0 ELSE 1 END
     WHERE id = ?
   `,
   [req.params.id],

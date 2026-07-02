@@ -1,6 +1,6 @@
 const bcrypt = require("bcrypt");
-const db = require("./db");
-const updateExcel = require("./utils/updateExcel");
+const db = require("../db");
+const updateExcel = require("../utils/updateExcel");
 
 const DEFAULT_PASSWORD = "Nt@12345";
 const DEFAULT_PIN = "032026";

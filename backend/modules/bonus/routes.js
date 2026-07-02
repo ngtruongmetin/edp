@@ -8,7 +8,7 @@ const requireLogin = require("../../middleware/requireLogin")
 const requireRole = require("../../middleware/requireRole")
 
 const time = require("../../utils/time")
-const { mapSqliteError, get, all, run, withTransaction } = require("../../utils/dbp")
+const { mapDatabaseError, get, all, run, withTransaction } = require("../../utils/dbp")
 
 const router = express.Router()
 
@@ -352,7 +352,7 @@ router.post(
         entry_count: entries.length,
       })
     } catch (err) {
-      const out = mapSqliteError(err, err?.message || "DB error")
+      const out = mapDatabaseError(err, err?.message || "DB error")
       res.status(out.status).json({ error: out.error })
     }
   },
@@ -1110,7 +1110,7 @@ router.post(
             [weekId, date, className],
             (err) => {
               if (err) {
-                const out = mapSqliteError(err, err.message)
+                const out = mapDatabaseError(err, err.message)
                 return res.status(out.status).json({ error: out.error })
               }
               finalizeWeeklyBonus()
@@ -1148,7 +1148,7 @@ router.post(
           ],
           (err) => {
             if (err) {
-              const out = mapSqliteError(err, err.message)
+              const out = mapDatabaseError(err, err.message)
               return res.status(out.status).json({ error: out.error })
             }
             finalizeWeeklyBonus()

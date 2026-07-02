@@ -37,11 +37,11 @@ function ensureDailySessionsForDate({ weekId, date }, cb) {
 
   const now = time.now()
   db.serialize(() => {
-    db.run("BEGIN IMMEDIATE", (err) => {
+    db.run("BEGIN", (err) => {
       if (err) return cb(err)
       db.run(
         `
-          INSERT OR IGNORE INTO duty_sessions(week_id,date,red_class,duty_class,status,created_at)
+          INSERT INTO duty_sessions(week_id,date,red_class,duty_class,status,created_at)
           SELECT
             ? as week_id,
             ? as date,
@@ -58,6 +58,7 @@ function ensureDailySessionsForDate({ weekId, date }, cb) {
                 AND s.date=?
                 AND s.red_class=a.red_class
             )
+          ON CONFLICT (week_id, date, red_class) DO NOTHING
         `,
         [weekId, date, now, weekId, weekId, date],
         function (err2) {
