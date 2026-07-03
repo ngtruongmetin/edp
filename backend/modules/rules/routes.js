@@ -1,6 +1,6 @@
 const express = require("express")
 const db = require("../../db")
-const { isForeignKeyError, mapSqliteError } = require("../../utils/dbp")
+const { isForeignKeyError, mapDatabaseError } = require("../../utils/dbp")
 
 const requireLogin = require("../../middleware/requireLogin")
 const requireRole = require("../../middleware/requireRole")
@@ -151,7 +151,7 @@ requireRole(["admin"]),
               "Không thể xóa lỗi vi phạm vì đã được dùng trong phiếu trực (cần xóa/sửa phiếu trước)",
           })
         }
-        const out = mapSqliteError(err, err.message)
+        const out = mapDatabaseError(err, err.message)
         return res.status(out.status).json({ error: out.error })
       }
 

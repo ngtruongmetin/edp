@@ -1,0 +1,59 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: edp-postgres
+    restart: unless-stopped
+    command: ["postgres", "-c", "timezone=${DB_TIMEZONE:-Asia/Ho_Chi_Minh}"]
+    environment:
+      POSTGRES_DB: ${DB_NAME:-edp}
+      POSTGRES_USER: ${DB_USER:-postgres}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-postgres}
+      TZ: ${DB_TIMEZONE:-Asia/Ho_Chi_Minh}
+      PGTZ: ${DB_TIMEZONE:-Asia/Ho_Chi_Minh}
+    ports:
+      - "${DB_PORT:-5432}:5432"
+    volumes:
+      - edp_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-postgres} -d ${DB_NAME:-edp}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  backend:
+    build:
+      context: ./backend
+    container_name: edp-backend
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    env_file:
+      - ./.env
+    environment:
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: ${DB_NAME:-edp}
+      DB_USER: ${DB_USER:-postgres}
+      DB_PASSWORD: ${DB_PASSWORD:-postgres}
+      DATABASE_URL: ${DATABASE_URL:-}
+      DB_TIMEZONE: ${DB_TIMEZONE:-Asia/Ho_Chi_Minh}
+      PORT: ${PORT:-3000}
+      SESSION_SECRET: ${SESSION_SECRET:-edp-secret-dang-ngoc-truong}
+      BACKEND_ORIGIN: ${BACKEND_ORIGIN:-http://127.0.0.1:3000}
+    ports:
+      - "${PORT:-3000}:3000"
+
+  frontend:
+    build:
+      context: ./frontend
+    container_name: edp-frontend
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_started
+    ports:
+      - "${FRONTEND_PORT:-5173}:80"
+
+volumes:
+  edp_postgres_data:

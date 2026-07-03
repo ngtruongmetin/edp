@@ -2,7 +2,7 @@ const XLSX = require("xlsx")
 const fs = require("fs")
 const path = require("path")
 
-const filePath = path.join(__dirname,"../accounts_passwords.xlsx")
+const filePath = path.join(__dirname, "../sheets/accounts_passwords.xlsx")
 const SHEET_NAME = "accounts"
 
 function updateExcel(className,data){

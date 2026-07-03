@@ -93,14 +93,13 @@ function ensureDailySessionsForDate({ weekId, date }, cb) {
   if (!weekId || !date) return cb(null, { created: 0 })
 
   // Insert for all assignments of the week, but only if missing for that red_class on that date.
-  // No unique constraint exists, so we rely on NOT EXISTS guard (safe with SQLite single-writer).
   const now = time.now()
   db.serialize(() => {
-    db.run("BEGIN IMMEDIATE", (err) => {
+    db.run("BEGIN", (err) => {
       if (err) return cb(err)
       db.run(
         `
-          INSERT OR IGNORE INTO duty_sessions(week_id,date,red_class,duty_class,status,created_at)
+          INSERT INTO duty_sessions(week_id,date,red_class,duty_class,status,created_at)
           SELECT
             ? as week_id,
             ? as date,
@@ -117,6 +116,7 @@ function ensureDailySessionsForDate({ weekId, date }, cb) {
                 AND s.date=?
                 AND s.red_class=a.red_class
             )
+          ON CONFLICT (week_id, date, red_class) DO NOTHING
         `,
         [weekId, date, now, weekId, weekId, date],
         function (err) {
@@ -988,7 +988,16 @@ function aggregateSessions(whereSql, params, cb){
        AND b.class_name = s.duty_class
       ${latestSignatureJoin("ds")}
       ${whereSql}
-      GROUP BY s.id
+      GROUP BY
+        s.id,
+        s.week_id,
+        s.date,
+        s.red_class,
+        s.duty_class,
+        s.status,
+        s.created_at,
+        s.signed_at,
+        ds.photo_path
       ORDER BY s.date DESC, s.id DESC
     `,
     params,
@@ -2243,9 +2252,11 @@ router.post(
           const closedAt = time.now()
           db.run(
             `
-              INSERT OR REPLACE INTO week_closings
+              INSERT INTO week_closings
               (week_id, closed_at)
               VALUES(?,?)
+              ON CONFLICT (week_id) DO UPDATE
+              SET closed_at = EXCLUDED.closed_at
             `,
             [weekId, closedAt],
             (err) => {
@@ -3043,7 +3054,7 @@ router.post(
 
       const now = time.now()
       db.serialize(() => {
-        db.run("BEGIN IMMEDIATE", (errBegin) => {
+        db.run("BEGIN", (errBegin) => {
           if (errBegin) return res.status(500).json({ error: errBegin.message })
 
           const stmt = db.prepare(

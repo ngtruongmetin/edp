@@ -1,6 +1,6 @@
 const express = require("express")
 const db = require("../../db")
-const { all, get, run, withTransaction, mapSqliteError } = require("../../utils/dbp")
+const { all, get, run, withTransaction, mapDatabaseError } = require("../../utils/dbp")
 
 const requireLogin = require("../../middleware/requireLogin")
 const requireRole = require("../../middleware/requireRole")
@@ -257,7 +257,7 @@ requireRole(["admin"]),
 
       res.json({ week_id: newWeekId })
     } catch (err) {
-      const out = mapSqliteError(err, err.message)
+      const out = mapDatabaseError(err, err.message)
       res.status(out.status).json({ error: out.error })
     }
   })()
@@ -296,7 +296,7 @@ router.post(
         )
         res.json({ success: true })
       } catch (err) {
-        const out = mapSqliteError(err, err.message)
+        const out = mapDatabaseError(err, err.message)
         res.status(out.status).json({ error: out.error })
       }
     })()
@@ -321,7 +321,7 @@ requireRole(["admin"]),
       const out = await run("DELETE FROM schedule_weeks WHERE id=?", [id])
       res.json({ success: true, deleted: out.changes })
     } catch (err) {
-      const out = mapSqliteError(err, err.message)
+      const out = mapDatabaseError(err, err.message)
       res.status(out.status).json({ error: out.error })
     }
   })()
@@ -369,7 +369,7 @@ requireRole(["admin"]),
 
       res.json({ success: true })
     } catch (err) {
-      const out = mapSqliteError(err, err.message)
+      const out = mapDatabaseError(err, err.message)
       res.status(out.status).json({ error: out.error })
     }
   })()
