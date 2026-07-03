@@ -988,7 +988,16 @@ function aggregateSessions(whereSql, params, cb){
        AND b.class_name = s.duty_class
       ${latestSignatureJoin("ds")}
       ${whereSql}
-      GROUP BY s.id
+      GROUP BY
+        s.id,
+        s.week_id,
+        s.date,
+        s.red_class,
+        s.duty_class,
+        s.status,
+        s.created_at,
+        s.signed_at,
+        ds.photo_path
       ORDER BY s.date DESC, s.id DESC
     `,
     params,

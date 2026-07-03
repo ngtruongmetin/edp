@@ -144,10 +144,17 @@ export default function BanCanSuDashboard() {
     return sessions.filter((s) => s.status === "signed").length
   }, [sessions])
 
-  const weekScoreSigned = useMemo(() => {
-    return sessions
-      .filter((s) => s.status === "signed")
-      .reduce((sum, s) => sum + Number(s.total_score || 0), 0)
+  const weekScoreStats = useMemo(() => {
+    const signedSessions = sessions.filter((s) => s.status === "signed")
+    const basePoints = 120
+    const bonus = signedSessions.reduce((sum, s) => sum + Number(s.bonus_points || 0), 0)
+    const minus = Math.abs(
+      signedSessions.reduce((sum, s) => sum + Number(s.violation_score || 0), 0),
+    )
+    const plus = basePoints + bonus
+    const total = plus - minus
+
+    return { plus, minus, total }
   }, [sessions])
 
   return (
@@ -176,47 +183,55 @@ export default function BanCanSuDashboard() {
               <div className="text-sm opacity-90">{todayDate}</div>
             </div>
 
-            <div className="mt-4 grid grid-cols-2 gap-3">
-              <div className="rounded-2xl bg-white/10 px-4 py-3">
-                <div className="text-xs opacity-80">Điểm tuần này</div>
-                <div className="mt-0.5 text-lg font-semibold">
-                  {weekScoreSigned > 0 ? `+${weekScoreSigned}` : String(weekScoreSigned)}
-                </div>
-                <div className="mt-0.5 text-[11px] opacity-80">
-                  (chỉ tính phiếu đã ký)
+            <div className="mt-4 grid grid-cols-3 gap-3">
+              <div className="rounded-2xl bg-white/10 px-3 py-3">
+                <div className="text-xs opacity-80">Điểm cộng</div>
+                <div className="mt-0.5 text-base font-semibold">
+                  {weekScoreStats.plus > 0 ? `+${weekScoreStats.plus}` : String(weekScoreStats.plus)}
                 </div>
               </div>
 
-              <div className="rounded-2xl bg-white/10 px-4 py-3">
-                <div className="text-xs opacity-80">Phiếu đã ký</div>
-                <div className="mt-0.5 text-lg font-semibold">
-                  {signedCount}/{sessions.length}
+              <div className="rounded-2xl bg-white/10 px-3 py-3">
+                <div className="text-xs opacity-80">Điểm trừ</div>
+                <div className="mt-0.5 text-base font-semibold">
+                  {weekScoreStats.minus > 0 ? `-${weekScoreStats.minus}` : "0"}
                 </div>
               </div>
+
+              <div className="rounded-2xl bg-white/10 px-3 py-3">
+                <div className="text-xs opacity-80">Tổng điểm tuần</div>
+                <div className="mt-0.5 text-base font-semibold">
+                  {weekScoreStats.total > 0 ? `+${weekScoreStats.total}` : String(weekScoreStats.total)}
+                </div>
+              </div>
+            </div>
+
+            <div className="mt-3 text-[11px] opacity-80">
+              Phiếu đã ký: {signedCount}/{sessions.length}
             </div>
           </div>
         </div>
 
         {week && (
-        <div className="rounded-3xl bg-white p-5 shadow-sm ring-1 ring-blue-50">
-          <div className="text-sm text-gray-600">Chọn tuần</div>
-          <select
-            value={weekId ?? ""}
-            onChange={(e) => setWeekId(Number(e.target.value))}
-            className="mt-2 w-full rounded-2xl border border-blue-100 bg-white px-3 py-2.5 text-sm shadow-sm outline-none focus:border-[#2e77df]"
-          >
-            {weeks.map((w) => (
-              <option key={w.id} value={w.id}>
-                Tuần {w.week_number} ({formatDateVN(w.start_date)} - {formatDateVN(w.end_date)})
-              </option>
-            ))}
-          </select>
-          {week && (
-            <div className="mt-2 text-xs text-gray-500">
-              {formatDateVN(week.start_date)} - {formatDateVN(week.end_date)}
-            </div>
-          )}
-        </div>
+          <div className="rounded-3xl bg-white p-5 shadow-sm ring-1 ring-blue-50">
+            <div className="text-sm text-gray-600">Chọn tuần</div>
+            <select
+              value={weekId ?? ""}
+              onChange={(e) => setWeekId(Number(e.target.value))}
+              className="mt-2 w-full rounded-2xl border border-blue-100 bg-white px-3 py-2.5 text-sm shadow-sm outline-none focus:border-[#2e77df]"
+            >
+              {weeks.map((w) => (
+                <option key={w.id} value={w.id}>
+                  Tuần {w.week_number} ({formatDateVN(w.start_date)} - {formatDateVN(w.end_date)})
+                </option>
+              ))}
+            </select>
+            {week && (
+              <div className="mt-2 text-xs text-gray-500">
+                {formatDateVN(week.start_date)} - {formatDateVN(week.end_date)}
+              </div>
+            )}
+          </div>
         )}
 
         <div className="rounded-3xl bg-white p-5 shadow-sm ring-1 ring-blue-50">
@@ -247,9 +262,8 @@ export default function BanCanSuDashboard() {
                       <div className="mt-0.5 text-xs text-gray-500">
                         Tổng điểm:{" "}
                         <span
-                          className={`font-semibold ${
-                            Number(s.total_score) >= 0 ? "text-emerald-700" : "text-red-600"
-                          }`}
+                          className={`font-semibold ${Number(s.total_score) >= 0 ? "text-emerald-700" : "text-red-600"
+                            }`}
                         >
                           {Number(s.total_score) > 0 ? `+${s.total_score}` : String(s.total_score)}
                         </span>{" "}
@@ -335,9 +349,8 @@ export default function BanCanSuDashboard() {
                       <div className="rounded-2xl bg-slate-50 p-3">
                         <div className="text-[11px] text-gray-500">Tổng điểm</div>
                         <div
-                          className={`mt-0.5 text-sm font-semibold ${
-                            total >= 0 ? "text-emerald-700" : "text-red-600"
-                          }`}
+                          className={`mt-0.5 text-sm font-semibold ${total >= 0 ? "text-emerald-700" : "text-red-600"
+                            }`}
                         >
                           {total > 0 ? `+${total}` : String(total)}
                         </div>

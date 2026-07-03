@@ -55,13 +55,38 @@ On startup the backend:
 - `backend`: Node backend that starts only after PostgreSQL passes `pg_isready`
 - `frontend`: Vite app built to static files and served by Nginx, proxying `/api` and `/assets` to the backend
 
-Run:
+Run locally:
 
 ```bash
-docker compose up --build
+docker compose up -d --build
 ```
 
-Frontend is exposed on `http://127.0.0.1:${FRONTEND_PORT}` and backend remains on `http://127.0.0.1:${PORT}`.
+Local access:
+
+- Frontend: `http://127.0.0.1:${FRONTEND_PORT}`
+- Backend: `http://127.0.0.1:${PORT}`
+
+## Production deploy
+
+This repo is ready for a production-style deploy with:
+
+- PostgreSQL in Docker
+- Backend in Docker
+- Frontend in Docker
+- Host Nginx as the public entrypoint for the domain `ntbd.edp.io.vn`
+
+Recommended flow:
+
+1. Copy `.env.example` to `.env` and fill production values.
+2. Set `DB_HOST=postgres` only when using the compose stack.
+3. Point your public domain `ntbd.edp.io.vn` to the server IP.
+4. Put the Nginx vhost file from `deploy/nginx/ntbd.edp.io.vn.conf` into `/etc/nginx/sites-available/`.
+5. Enable it with a symlink to `/etc/nginx/sites-enabled/` and reload Nginx.
+6. Start the stack with `docker compose up -d --build`.
+
+The provided Nginx sample proxies the domain to the frontend container on `127.0.0.1:5173`, and the frontend container continues proxying `/api` and `/assets` to the backend.
+
+If you want HTTPS, terminate TLS at host Nginx and keep the proxy target unchanged.
 
 ## Deployment notes
 
@@ -69,6 +94,7 @@ Frontend is exposed on `http://127.0.0.1:${FRONTEND_PORT}` and backend remains o
 - Ensure the target database exists and is reachable from the backend container/process
 - The backend schema is initialized automatically from `backend/sql/schema.postgresql.sql`
 - To switch PostgreSQL instances, only update `.env`
+- Keep `CLASS_DEFAULT_PASSWORD`, `CLASS_DEFAULT_PIN`, `SEED_DEFAULT_PASSWORD`, and `SEED_DEFAULT_PIN` in `.env` for seed/reset utilities during test deploys
 
 ## Database layer
 

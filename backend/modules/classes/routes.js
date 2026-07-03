@@ -9,6 +9,9 @@ const requireRole = require("../../middleware/requireRole")
 
 const router = express.Router()
 
+const DEFAULT_PASSWORD = process.env.CLASS_DEFAULT_PASSWORD
+const DEFAULT_PIN = process.env.CLASS_DEFAULT_PIN
+
 
 
 /*
@@ -90,11 +93,14 @@ async (req,res)=>{
 
   const grade = parseInt(name.substring(0,2))
 
-  const gvcnPass = Math.random().toString(36).slice(-6)
-  const bcsPass = Math.random().toString(36).slice(-6)
-  const codoPass = Math.random().toString(36).slice(-6)
+  const gvcnPass = DEFAULT_PASSWORD
+  const bcsPass = DEFAULT_PASSWORD
+  const codoPass = DEFAULT_PASSWORD
+  const pin = DEFAULT_PIN
 
-  const pin = Math.floor(100000 + Math.random()*900000)
+  if (!gvcnPass || !bcsPass || !codoPass || !pin) {
+    return res.status(500).json({ error: "Missing default class credentials" })
+  }
 
   const hash_gvcn = await bcrypt.hash(gvcnPass,10)
   const hash_bcs = await bcrypt.hash(bcsPass,10)
@@ -115,10 +121,10 @@ async (req,res)=>{
       await run(
         `
         INSERT INTO accounts
-        (class_id,password_gvcn,password_bcs,password_codo,pin_bcs)
-        VALUES(?,?,?,?,?)
+        (class_id,password_gvcn,password_bcs,password_codo,pin_bcs,password_changed,password_changed_gvcn,password_changed_bcs,password_changed_codo)
+        VALUES(?,?,?,?,?,1,1,1,1)
       `,
-        [classId, hash_gvcn, hash_bcs, hash_codo, pin],
+      [classId, hash_gvcn, hash_bcs, hash_codo, pin],
       )
 
       return classId
