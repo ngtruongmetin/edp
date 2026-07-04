@@ -1,81 +1,79 @@
 import { useState, useRef, useEffect } from "react"
 
 type ClassType = {
-  id:number
-  name:string
+  id: number
+  name: string
 }
 
 type Props = {
   classes: ClassType[]
   value: string
-  onChange: (v:string)=>void
+  onChange: (v: string) => void
 }
 
-export default function ClassSelector({classes,value,onChange}:Props){
-
-  const [query,setQuery] = useState("")
-  const [open,setOpen] = useState(false)
-  const [index,setIndex] = useState(0)
+export default function ClassSelector({ classes, value, onChange }: Props) {
+  const [query, setQuery] = useState("")
+  const [open, setOpen] = useState(false)
+  const [index, setIndex] = useState(0)
 
   const listRef = useRef<HTMLDivElement>(null)
 
-  const filtered = classes.filter(c =>
-    c.name.toLowerCase().includes(query.toLowerCase())
+  const filtered = classes.filter((c) =>
+    c.name.toLowerCase().includes(query.toLowerCase()),
   )
 
-  useEffect(()=>{
-
+  useEffect(() => {
     const list = listRef.current
-    if(!list) return
+    if (!list) return
 
     const item = list.children[index] as HTMLElement
-    if(!item) return
+    if (!item) return
 
     item.scrollIntoView({
-      block:"nearest"
+      block: "nearest",
     })
+  }, [index])
 
-  },[index])
+  function handleKey(e: React.KeyboardEvent) {
+    if (!open) return
 
-  function handleKey(e:React.KeyboardEvent){
-
-    if(!open) return
-
-    if(e.key==="ArrowDown"){
+    if (e.key === "ArrowDown") {
       e.preventDefault()
-      setIndex(i => Math.min(i+1, filtered.length-1))
+      setIndex((i) => Math.min(i + 1, filtered.length - 1))
     }
 
-    if(e.key==="ArrowUp"){
+    if (e.key === "ArrowUp") {
       e.preventDefault()
-      setIndex(i => Math.max(i-1,0))
+      setIndex((i) => Math.max(i - 1, 0))
     }
 
-    if(e.key==="Enter"){
+    if (e.key === "Enter") {
       e.preventDefault()
 
       const c = filtered[index]
 
-      if(c){
+      if (c) {
         onChange(c.name)
         setQuery("")
         setOpen(false)
       }
     }
 
+    if (e.key === "Escape") {
+      e.preventDefault()
+      setOpen(false)
+    }
   }
 
-  return(
-
+  return (
     <div className="relative">
-
       <input
-        className="w-full p-3 border rounded-lg"
-        placeholder="Chọn lớp"
+        className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-[15px] shadow-sm outline-none transition placeholder:text-slate-400 focus:border-[#2e77df] focus:ring-2 focus:ring-blue-100"
+        placeholder="Tìm hoặc chọn lớp"
         value={value || query}
-        onFocus={()=>setOpen(true)}
+        onFocus={() => setOpen(true)}
         onKeyDown={handleKey}
-        onChange={e=>{
+        onChange={(e) => {
           setQuery(e.target.value)
           setIndex(0)
           onChange("")
@@ -83,38 +81,41 @@ export default function ClassSelector({classes,value,onChange}:Props){
       />
 
       {open && (
-
         <div
           ref={listRef}
-          className="absolute z-50 bg-white border rounded-lg w-full max-h-60 overflow-y-auto mt-1 shadow-lg"
+          className="absolute z-50 mt-2 w-full overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-lg"
         >
+          <div className="max-h-60 overflow-y-auto">
+            {filtered.length === 0 ? (
+              <div className="px-4 py-3 text-sm text-slate-500">
+                Không tìm thấy lớp phù hợp
+              </div>
+            ) : (
+              filtered.map((c, i) => (
+                <button
+                  type="button"
+                  key={c.id}
+                  className={`w-full px-4 py-3 text-left transition ${
+                    i === index ? "bg-blue-50" : "hover:bg-slate-50"
+                  }`}
+                  onMouseEnter={() => setIndex(i)}
+                  onClick={() => {
+                    onChange(c.name)
+                    setQuery("")
+                    setOpen(false)
+                  }}
+                >
+                  <div className="text-[15px] font-medium text-slate-900">{c.name}</div>
+                </button>
+              ))
+            )}
+          </div>
 
-          {filtered.map((c,i)=>(
-
-            <div
-              key={c.id}
-              className={`p-3 cursor-pointer ${
-                i===index
-                  ? "bg-blue-100"
-                  : "hover:bg-gray-100"
-              }`}
-              onClick={()=>{
-                onChange(c.name)
-                setQuery("")
-                setOpen(false)
-              }}
-            >
-              {c.name}
-            </div>
-
-          ))}
-
+          <div className="border-t border-slate-100 px-4 py-2 text-[11px] text-slate-500">
+            Gõ để tìm, Enter để chọn, Esc để đóng
+          </div>
         </div>
-
       )}
-
     </div>
-
   )
-
 }

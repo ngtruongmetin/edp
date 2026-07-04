@@ -24,6 +24,81 @@ router.get("/public/landing-stats", (req, res) => {
   })
 })
 
+/*
+PUBLIC: landing competition summary (no auth)
+*/
+router.get("/public/landing-competition", (req, res) => {
+  db.get(
+    `
+      SELECT
+        w.id,
+        w.week_number,
+        w.start_date,
+        w.end_date,
+        c.closed_at
+      FROM schedule_weeks w
+      INNER JOIN week_closings c
+        ON c.week_id = w.id
+      ORDER BY w.week_number DESC
+      LIMIT 1
+    `,
+    [],
+    (err, week) => {
+      if (err) return res.status(500).json({ error: err.message })
+      if (!week) return res.json({ week: null, top_classes: [] })
+
+      computeWeekScores(week.id, (scoreErr, rows) => {
+        if (scoreErr) return res.status(500).json({ error: scoreErr.message })
+
+        const scoreMap = new Map(
+          (rows || []).map((row) => [String(row.class_name || "").trim().toUpperCase(), Number(row.score || 0)]),
+        )
+
+        db.all(
+          `
+            SELECT name, grade
+            FROM classes
+            WHERE is_active = 1
+            ORDER BY RANDOM()
+          `,
+          [],
+          (classErr, classes) => {
+            if (classErr) return res.status(500).json({ error: classErr.message })
+
+            const bestByGrade = new Map()
+
+            for (const item of classes || []) {
+              const grade = Number(item.grade || 0)
+              if (![10, 11, 12].includes(grade)) continue
+
+              const className = String(item.name || "").trim()
+              const score = scoreMap.get(className.toUpperCase()) ?? 0
+              const current = bestByGrade.get(grade)
+
+              if (!current || score > current.score) {
+                bestByGrade.set(grade, {
+                  grade,
+                  class_name: className,
+                  score,
+                })
+              }
+            }
+
+            const top_classes = [10, 11, 12]
+              .map((grade) => bestByGrade.get(grade))
+              .filter(Boolean)
+
+            res.json({
+              week,
+              top_classes,
+            })
+          },
+        )
+      })
+    },
+  )
+})
+
 function dutyStatusLabel(status) {
   if (status === "signed") return "Đã ký"
   if (status === "draft") return "Nháp"
