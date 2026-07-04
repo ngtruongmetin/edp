@@ -195,9 +195,8 @@ function HeroPreview({
                     key={item.key}
                     type="button"
                     onClick={() => onPanelChange(item.key)}
-                    className={`w-full rounded-2xl px-3 py-2 text-left text-sm font-medium transition ${
-                      active ? "bg-[#2e77df] text-white" : "text-slate-600 hover:bg-slate-100"
-                    }`}
+                    className={`w-full rounded-2xl px-3 py-2 text-left text-sm font-medium transition ${active ? "bg-[#2e77df] text-white" : "text-slate-600 hover:bg-slate-100"
+                      }`}
                   >
                     {item.label}
                   </button>
@@ -277,7 +276,7 @@ function HeroPreview({
 }
 
 export default function Landing() {
-  usePageTitle("EDP")
+  usePageTitle("EduDiscipline Platform")
 
   const [preview, setPreview] = useState<PreviewState>({
     dutySessions: 0,
@@ -464,11 +463,11 @@ export default function Landing() {
             />
 
             <h1 className="mt-6 max-w-md text-4xl font-semibold tracking-tight text-slate-900 sm:text-5xl lg:text-6xl">
-              Quản lý nề nếp học sinh
+              EduDiscipline Platform
             </h1>
 
             <p className="mt-4 max-w-lg text-base leading-7 text-slate-600">
-              Hệ thống quản lý nề nếp dành cho giáo viên, ban cán sự và cờ đỏ tại Trường THPT Nguyễn Trãi - Bình Dương.
+              Hệ thống quản lý thi đua cờ đỏ tại Trường THPT Nguyễn Trãi - Bình Dương.
             </p>
 
             <div className="mt-8 flex flex-col gap-3 sm:flex-row">
