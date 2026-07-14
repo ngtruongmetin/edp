@@ -2,6 +2,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { defineConfig, loadEnv } from 'vite'
 import react from '@vitejs/plugin-react'
+import { VitePWA } from 'vite-plugin-pwa'
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..")
 
@@ -11,7 +12,20 @@ export default defineConfig(({ mode }) => {
   const frontendPort = Number(env.FRONTEND_PORT) || 5173
 
   return {
-    plugins: [react()],
+    plugins: [
+      react(),
+      VitePWA({
+        strategies: "injectManifest",
+        srcDir: "src",
+        filename: "sw.ts",
+        registerType: "autoUpdate",
+        injectManifest: {
+          globPatterns: [
+            "**/*.{html,js,css,png,svg,ico,woff,woff2,ttf,eot,webmanifest}",
+          ],
+        },
+      }),
+    ],
     build: {
       sourcemap: false,
       assetsDir: "fe-assets",

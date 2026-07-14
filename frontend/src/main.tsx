@@ -1,9 +1,12 @@
 import React from "react"
 import ReactDOM from "react-dom/client"
+import { registerSW } from "virtual:pwa-register"
 import App from "./App"
 import "./index.css"
 
 import { AuthProvider } from "./auth/AuthContext"
+
+registerSW({ immediate: true })
 
 function isZaloWebView() {
   const ua = String(navigator.userAgent || "").toLowerCase()
