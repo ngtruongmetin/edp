@@ -19,6 +19,40 @@ export default defineConfig(({ mode }) => {
         srcDir: "src",
         filename: "sw.ts",
         registerType: "autoUpdate",
+        manifest: {
+          name: "EduDiscipline Platform",
+          short_name: "EDP",
+          description:
+            "Hệ thống quản lý thi đua cờ đỏ tại Trường THPT Nguyễn Trãi - Bình Dương.",
+          id: "/",
+          start_url: "/",
+          scope: "/",
+          display: "standalone",
+          background_color: "#ffffff",
+          theme_color: "#2e77df",
+          lang: "vi",
+          categories: ["education", "productivity"],
+          icons: [
+            {
+              src: "/pwa/pwa-192x192.png",
+              sizes: "192x192",
+              type: "image/png",
+              purpose: "any",
+            },
+            {
+              src: "/pwa/pwa-512x512.png",
+              sizes: "512x512",
+              type: "image/png",
+              purpose: "any",
+            },
+            {
+              src: "/pwa/maskable-512x512.png",
+              sizes: "512x512",
+              type: "image/png",
+              purpose: "maskable",
+            },
+          ],
+        },
         injectManifest: {
           globPatterns: [
             "**/*.{html,js,css,png,svg,ico,woff,woff2,ttf,eot,webmanifest}",
