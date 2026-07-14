@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react"
-import { Link, useNavigate } from "react-router-dom"
+import { Link } from "react-router-dom"
 import { api } from "../api/api"
 import { useAuth } from "../auth/AuthContext"
 import Footer from "../components/Footer"
@@ -278,7 +278,6 @@ function HeroPreview({
 
 export default function Landing() {
   usePageTitle("EduDiscipline Platform")
-  const navigate = useNavigate()
   const { user, loading } = useAuth()
 
   const [preview, setPreview] = useState<PreviewState>({
@@ -289,11 +288,6 @@ export default function Landing() {
   const [competition, setCompetition] = useState<LandingCompetition | null>(null)
   const [competitionLoading, setCompetitionLoading] = useState(false)
   const activeDays = useMemo(() => getActiveDays(), [])
-  useEffect(() => {
-    if (!loading && user) {
-      navigate(`/${user.role}/dashboard`, { replace: true })
-    }
-  }, [loading, navigate, user])
   useEffect(() => {
     if (loading || user) return
 
@@ -459,6 +453,17 @@ export default function Landing() {
     },
   ]
 
+  const dashboardPath =
+    user?.role === "admin"
+      ? "/admin/dashboard"
+      : user?.role === "gvcn"
+        ? "/gvcn/dashboard"
+        : user?.role === "bancansu"
+          ? "/bancansu/dashboard"
+          : user?.role === "co_do"
+            ? "/co_do/dashboard"
+            : "/"
+
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900">
       <Navbar />
@@ -482,10 +487,10 @@ export default function Landing() {
 
             <div className="mt-8 flex flex-col gap-3 sm:flex-row">
               <Link
-                to="/login"
+                to={user ? dashboardPath : "/login"}
                 className="inline-flex w-full items-center justify-center rounded-2xl bg-[#2e77df] px-6 py-3 text-base font-semibold text-white shadow-sm transition hover:bg-[#245fc0] sm:w-auto"
               >
-                Đăng nhập
+                {user ? "Truy cập dashboard" : "Đăng nhập"}
               </Link>
               <Link
                 to="/schedule"
