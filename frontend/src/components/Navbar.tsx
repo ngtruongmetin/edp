@@ -1,31 +1,17 @@
-import { useState, useEffect } from "react"
+import { useState } from "react"
 import { NavLink, useNavigate } from "react-router-dom"
-import { api } from "../api/api"
+import { useAuth } from "../auth/AuthContext"
 
 export default function Navbar() {
 
   const [menuOpen, setMenuOpen] = useState(false)
-  const [user, setUser] = useState<any>(null)
+  const { user, loading, logout } = useAuth()
 
   const navigate = useNavigate()
 
-  useEffect(() => {
-    loadUser()
-  }, [])
-
-  async function loadUser() {
-    try {
-      const res = await api.get("/auth/me")
-      setUser(res.data)
-    } catch {
-      setUser(null)
-    }
-  }
-
   async function handleLogout() {
     try {
-      await api.post("/auth/logout")
-      setUser(null)
+      await logout()
       navigate("/")
     } catch (err) {
       console.error(err)
@@ -63,7 +49,7 @@ export default function Navbar() {
         </NavLink>
 
         <nav className="hidden md:flex ml-10 items-center gap-1 text-sm font-medium">
-          {user && (
+          {!loading && user && (
             <NavLink
               to={dashboardPath}
               className={({ isActive }) =>
@@ -91,7 +77,7 @@ export default function Navbar() {
         </nav>
 
         <div className="hidden md:flex ml-auto items-center gap-3">
-          {user ? (
+          {!loading && user ? (
             <button
               onClick={handleLogout}
               className="rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 shadow-sm transition hover:border-[#2e77df] hover:bg-blue-50 hover:text-[#2e77df]"
@@ -131,7 +117,7 @@ export default function Navbar() {
           }`}
       >
         <nav className="mx-auto flex max-w-6xl flex-col gap-1 px-4 py-3 text-sm font-medium">
-          {user && (
+          {!loading && user && (
             <NavLink
               to={dashboardPath}
               onClick={closeMenu}

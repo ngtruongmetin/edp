@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react"
-import { Link } from "react-router-dom"
+import { Link, useNavigate } from "react-router-dom"
 import { api } from "../api/api"
+import { useAuth } from "../auth/AuthContext"
 import Footer from "../components/Footer"
 import Navbar from "../components/Navbar"
 import usePageTitle from "../utils/usePageTitle"
@@ -277,6 +278,8 @@ function HeroPreview({
 
 export default function Landing() {
   usePageTitle("EduDiscipline Platform")
+  const navigate = useNavigate()
+  const { user, loading } = useAuth()
 
   const [preview, setPreview] = useState<PreviewState>({
     dutySessions: 0,
@@ -285,10 +288,15 @@ export default function Landing() {
   const [panel, setPanel] = useState<Panel>("dashboard")
   const [competition, setCompetition] = useState<LandingCompetition | null>(null)
   const [competitionLoading, setCompetitionLoading] = useState(false)
-
   const activeDays = useMemo(() => getActiveDays(), [])
-
   useEffect(() => {
+    if (!loading && user) {
+      navigate(`/${user.role}/dashboard`, { replace: true })
+    }
+  }, [loading, navigate, user])
+  useEffect(() => {
+    if (loading || user) return
+
     let active = true
 
     async function loadPreview() {
@@ -334,9 +342,11 @@ export default function Landing() {
     return () => {
       active = false
     }
-  }, [])
+  }, [loading, user])
 
   useEffect(() => {
+    if (loading || user) return
+
     let active = true
 
     async function loadCompetition() {
@@ -362,7 +372,7 @@ export default function Landing() {
     return () => {
       active = false
     }
-  }, [])
+  }, [loading, user])
 
   const features: Feature[] = [
     {

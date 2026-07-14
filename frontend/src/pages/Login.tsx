@@ -1,5 +1,7 @@
 import { useEffect, useState } from "react"
+import { Navigate } from "react-router-dom"
 import { api } from "../api/api"
+import { useAuth } from "../auth/AuthContext"
 import Navbar from "../components/Navbar"
 import ClassSelector from "../components/ClassSelector"
 import { usePageTitle } from "../utils/usePageTitle"
@@ -14,6 +16,7 @@ const roleOptions = [
 
 export default function Login() {
   usePageTitle("EDP | Đăng nhập")
+  const { user, loading } = useAuth()
 
   const [role, setRole] = useState("co_do")
   const [classes, setClasses] = useState<any[]>([])
@@ -24,9 +27,22 @@ export default function Login() {
   const [submitting, setSubmitting] = useState(false)
 
   useEffect(() => {
+    if (loading || user) return
     loadClasses()
-    checkLogin()
-  }, [])
+  }, [loading, user])
+
+  if (!loading && user) {
+    const dashboardPath =
+      user.role === "admin"
+        ? "/admin/dashboard"
+        : user.role === "gvcn"
+          ? "/gvcn/dashboard"
+          : user.role === "bancansu"
+            ? "/bancansu/dashboard"
+            : "/co_do/dashboard"
+
+    return <Navigate to={dashboardPath} replace />
+  }
 
   async function loadClasses() {
     try {
@@ -37,12 +53,6 @@ export default function Login() {
     }
   }
 
-  async function checkLogin() {
-    try {
-      const res = await api.get("/auth/me")
-      window.location.href = `/${res.data.role}/dashboard`
-    } catch {}
-  }
 
   const changeRole = (nextRole: string) => {
     setRole(nextRole)
