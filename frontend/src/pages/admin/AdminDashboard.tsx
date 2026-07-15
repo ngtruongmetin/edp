@@ -165,7 +165,6 @@ export default function AdminDashboard(){
           <div className="grid md:grid-cols-4 gap-4">
             {[
               { label: "Quản lý lớp", path: "/admin/classes" },
-              { label: "Tra cứu PIN", path: "/admin/pin-lookup" },
               { label: "Quản lý luật", path: "/admin/rules" },
               { label: "Thời khóa biểu", path: "/admin/timetable" },
               { label: "Lịch trực", path: "/admin/schedule" },

@@ -4,6 +4,7 @@ const db = require("../../db")
 
 const requireLogin = require("../../middleware/requireLogin")
 const time = require("../../utils/time")
+const { hashPin } = require("../../utils/pinSecurity")
 
 const router = express.Router()
 
@@ -27,17 +28,13 @@ router.post("/change-password", requireLogin, (req, res) => {
     return res.status(400).json({ error: "Mật khẩu phải dài ít nhất 6 ký tự" })
   }
 
-  const role = req.session.user?.role // "bancansu", "co_do", "admin", "gvcn"
+  const role = req.session.user?.role
   const classId = req.session.user?.class_id
 
   if (!role || !classId) {
     return res.status(401).json({ error: "Không có thông tin role" })
   }
 
-  // Role names are not the same as password column names:
-  // - bancansu -> password_bcs
-  // - co_do    -> password_codo
-  // - gvcn     -> password_gvcn
   let passwordColumn = ""
   let flagColumn = ""
   if (role === "bancansu") {
@@ -53,7 +50,6 @@ router.post("/change-password", requireLogin, (req, res) => {
     return res.status(400).json({ error: "Role không hợp lệ" })
   }
 
-  // Get current password hash
   db.get(
     `SELECT ${passwordColumn} FROM accounts WHERE class_id=?`,
     [classId],
@@ -63,30 +59,28 @@ router.post("/change-password", requireLogin, (req, res) => {
 
       const hashedPassword = row[passwordColumn]
 
-      // Verify old password
-      bcrypt.compare(old_password, hashedPassword, (err, isMatch) => {
-        if (err) return res.status(500).json({ error: err.message })
+      bcrypt.compare(old_password, hashedPassword, (compareErr, isMatch) => {
+        if (compareErr) return res.status(500).json({ error: compareErr.message })
 
         if (!isMatch) {
           return res.status(401).json({ error: "Mật khẩu cũ không đúng" })
         }
 
-        // Hash new password
-        bcrypt.hash(new_password, 10, (err, hash) => {
-          if (err) return res.status(500).json({ error: err.message })
+        bcrypt.hash(new_password, 10, (hashErr, hash) => {
+          if (hashErr) return res.status(500).json({ error: hashErr.message })
 
           const now = time.now()
           db.run(
             `UPDATE accounts SET ${passwordColumn}=?, ${flagColumn}=1, password_changed=1, created_at=? WHERE class_id=?`,
             [hash, now, classId],
-            (err) => {
-              if (err) return res.status(500).json({ error: err.message })
+            (updateErr) => {
+              if (updateErr) return res.status(500).json({ error: updateErr.message })
               res.json({ success: true, message: "Đã cập nhật mật khẩu" })
-            }
+            },
           )
         })
       })
-    }
+    },
   )
 })
 
@@ -100,7 +94,6 @@ router.post("/change-pin", requireLogin, (req, res) => {
   const role = req.session.user?.role
   const classId = req.session.user?.class_id
 
-  // Only BCS can change PIN
   if (role !== "bancansu") {
     return res.status(403).json({ error: "Chỉ lớp trưởng mới có PIN" })
   }
@@ -121,29 +114,37 @@ router.post("/change-pin", requireLogin, (req, res) => {
     return res.status(401).json({ error: "Không có thông tin lớp" })
   }
 
-  // Get current PIN
   db.get(
     `SELECT pin_bcs FROM accounts WHERE class_id=?`,
     [classId],
-    (err, row) => {
+    async (err, row) => {
       if (err) return res.status(500).json({ error: err.message })
       if (!row) return res.status(404).json({ error: "Account not found" })
 
-      // Verify old PIN (simple string comparison since it's not hashed)
-      if (String(row.pin_bcs) !== String(old_pin)) {
+      const storedPin = String(row.pin_bcs || "").trim()
+
+      let matches = false
+      try {
+        matches = storedPin ? await bcrypt.compare(String(old_pin), storedPin) : false
+      } catch (compareErr) {
+        return res.status(500).json({ error: compareErr.message })
+      }
+
+      if (!matches) {
         return res.status(401).json({ error: "Mã PIN cũ không đúng" })
       }
 
-      // Update with new PIN
+      const hashedPin = await hashPin(new_pin)
+
       db.run(
-        `UPDATE accounts SET pin_bcs=? WHERE class_id=?`,
-        [String(new_pin), classId],
-        (err) => {
-          if (err) return res.status(500).json({ error: err.message })
+        `UPDATE accounts SET pin_bcs=?, pin_failed_attempts=0, pin_locked_until=0 WHERE class_id=?`,
+        [hashedPin, classId],
+        (updateErr) => {
+          if (updateErr) return res.status(500).json({ error: updateErr.message })
           res.json({ success: true, message: "Đã cập nhật mã PIN" })
-        }
+        },
       )
-    }
+    },
   )
 })
 
@@ -191,7 +192,7 @@ router.get("/profile", requireLogin, (req, res) => {
         password_changed: rolePasswordChanged === 1,
         created_at: row.created_at,
       })
-    }
+    },
   )
 })
 

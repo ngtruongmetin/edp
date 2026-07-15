@@ -66,7 +66,7 @@ function updateExcel(className,data){
     gvcn_password:r.gvcn_password || "",
     bcs_password:r.bcs_password || "",
     codo_password:r.codo_password || "",
-    pin_bcs:r.pin_bcs || ""
+    pin_bcs:""
 
   }))
 

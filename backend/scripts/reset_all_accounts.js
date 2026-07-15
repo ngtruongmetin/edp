@@ -1,6 +1,7 @@
 const bcrypt = require("bcrypt")
 const db = require("../db")
 const updateExcel = require("../utils/updateExcel")
+const { hashPin } = require("../utils/pinSecurity")
 const { loadEnv } = require("../config/env")
 
 loadEnv()
@@ -31,6 +32,7 @@ async function resetAll() {
         const hash_gvcn = await bcrypt.hash(DEFAULT_PASSWORD, 10)
         const hash_bcs = await bcrypt.hash(DEFAULT_PASSWORD, 10)
         const hash_codo = await bcrypt.hash(DEFAULT_PASSWORD, 10)
+        const hashed_pin = await hashPin(DEFAULT_PIN)
 
         await new Promise((resolve, reject) => {
 
@@ -41,13 +43,15 @@ async function resetAll() {
               password_bcs=?,
               password_codo=?,
               pin_bcs=?,
+              pin_failed_attempts=0,
+              pin_locked_until=0,
               password_changed=1,
               password_changed_gvcn=1,
               password_changed_bcs=1,
               password_changed_codo=1
             WHERE class_id=?
           `,
-            [hash_gvcn, hash_bcs, hash_codo, DEFAULT_PIN, c.id],
+            [hash_gvcn, hash_bcs, hash_codo, hashed_pin, c.id],
             err => {
 
               if (err) reject(err)
@@ -61,7 +65,7 @@ async function resetAll() {
           gvcn_password: DEFAULT_PASSWORD,
           bcs_password: DEFAULT_PASSWORD,
           codo_password: DEFAULT_PASSWORD,
-          pin_bcs: DEFAULT_PIN
+          pin_bcs: ""
         })
 
         console.log("Reset:", c.name)

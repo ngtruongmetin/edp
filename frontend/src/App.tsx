@@ -16,7 +16,6 @@ import AdminWeeklySummary from "./pages/admin/AdminWeeklySummary"
 import AdminMonthSummary from "./pages/admin/AdminMonthSummary"
 import AdminSemesterSummary from "./pages/admin/AdminSemesterSummary"
 import AdminYearSummary from "./pages/admin/AdminYearSummary"
-import AdminPinLookup from "./pages/admin/AdminPinLookup"
 import AdminTimetable from "./pages/admin/AdminTimetable"
 
 import CodoDashboard from "./pages/co_do/CodoDashboard"
@@ -65,7 +64,6 @@ export default function App(){
           <Route path="schedule" element={<AdminSchedule/>}/>
           <Route path="duty" element={<AdminDutyManage/>}/>
           <Route path="timetable" element={<AdminTimetable/>}/>
-          <Route path="pin-lookup" element={<AdminPinLookup/>}/>
           <Route path="weekly-summary" element={<AdminWeeklySummary/>}/>
           <Route path="month-summary" element={<AdminMonthSummary/>}/>
           <Route path="semester-summary" element={<AdminSemesterSummary/>}/>

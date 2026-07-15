@@ -1759,163 +1759,213 @@ router.delete(
 SIGN DUTY
 */
 router.post(
-"/sign",
-requireLogin,
-requireRole(["co_do"]),
-(req,res)=>{
+  "/sign",
+  requireLogin,
+  requireRole(["co_do"]),
+  (req, res) => {
+    const { session_id, pin, photo_data } = req.body
 
-  const {session_id,pin,photo_data} = req.body
+    // photo_data is optional (fallback mode) - PIN is the real authorization.
+    if (!session_id || !pin) {
+      return res.status(400).json({ error: "Missing fields" })
+    }
 
-  // photo_data is optional (fallback mode) - PIN is the real authorization.
-  if(!session_id || !pin){
-    return res.status(400).json({error:"Missing fields"})
-  }
+    const redClass = req.session.user?.class_name
+    const provided = String(pin || "").trim()
 
-  const redClass = req.session.user?.class_name
-  const provided = String(pin || "").trim()
+    if (!/^\d{6}$/.test(provided)) {
+      return res.status(400).json({ error: "Invalid pin" })
+    }
 
-  if(!/^\d{6}$/.test(provided)){
-    return res.status(400).json({error:"Invalid pin"})
-  }
+    const nowMs = Date.now()
 
-  db.get(
-    `
-      SELECT *
-      FROM duty_sessions
-      WHERE id=?
-        AND red_class=?
-      LIMIT 1
-    `,
-    [session_id, redClass],
-    (err,session)=>{
-
-      if(err) return res.status(500).json({error:err.message})
-      if(!session) return res.status(404).json({error:"Session not found"})
-
-      const dutyClass = session.duty_class
-      const weekId = session.week_id
-
-      isWeekClosed(weekId, (err, closed) => {
+    db.get(
+      `
+        SELECT *
+        FROM duty_sessions
+        WHERE id=?
+          AND red_class=?
+        LIMIT 1
+      `,
+      [session_id, redClass],
+      (err, session) => {
         if (err) return res.status(500).json({ error: err.message })
-        if (closed) return res.status(403).json({ error: "Week closed" })
+        if (!session) return res.status(404).json({ error: "Session not found" })
 
-      db.get(
-        `
-          SELECT a.pin_bcs
-          FROM classes c
-          LEFT JOIN accounts a
-          ON a.class_id = c.id
-          WHERE c.name=?
-          LIMIT 1
-        `,
-        [dutyClass],
-        (err,row)=>{
+        const dutyClass = session.duty_class
+        const weekId = session.week_id
 
-          if(err) return res.status(500).json({error:err.message})
+        isWeekClosed(weekId, (closedErr, closed) => {
+          if (closedErr) return res.status(500).json({ error: closedErr.message })
+          if (closed) return res.status(403).json({ error: "Week closed" })
 
-          const expected = String(row?.pin_bcs || "").trim()
-
-          if(!expected || expected !== provided){
-            return res.status(403).json({error:"Invalid pin"})
-                      }
-
-          let photoPath = null
-
-          // Optional photo (fallback). If provided, save it; otherwise keep NULL.
-          if (typeof photo_data === "string" && photo_data.trim()) {
-            let base64Data = null
-
-            if (photo_data.startsWith("data:image/jpeg;base64,")) {
-              base64Data = photo_data.replace("data:image/jpeg;base64,", "")
-            } else if (photo_data.startsWith("data:image/png;base64,")) {
-              base64Data = photo_data.replace("data:image/png;base64,", "")
-            } else {
-              return res.status(400).json({ error: "Invalid photo" })
-            }
-
-            let buf
-            try {
-              buf = Buffer.from(base64Data, "base64")
-            } catch {
-              return res.status(400).json({ error: "Invalid photo" })
-            }
-
-            const assetsDir = path.join(__dirname, "../../assets")
-            fs.mkdirSync(assetsDir, { recursive: true })
-
-            const filename = `duty_${session_id}_${Date.now()}_${Math.random()
-              .toString(16)
-              .slice(2)}.jpg`
-
-            const absPath = path.join(assetsDir, filename)
-
-            try{
-              fs.writeFileSync(absPath, buf)
-            }catch(err){
-              return res.status(500).json({error:"Cannot save photo"})
-            }
-
-            photoPath = `/assets/${filename}`
-          }
-
-          db.run(
+          db.get(
             `
-              INSERT INTO duty_signatures
-              (session_id,photo_path,signed_at)
-              VALUES(?,?,?)
+              SELECT
+                a.pin_bcs,
+                COALESCE(a.pin_failed_attempts, 0) AS pin_failed_attempts,
+                COALESCE(a.pin_locked_until, 0) AS pin_locked_until,
+                a.class_id AS account_class_id
+              FROM classes c
+              LEFT JOIN accounts a
+                ON a.class_id = c.id
+              WHERE c.name=?
+              LIMIT 1
             `,
-            [session_id, photoPath, time.now()],
-            (err)=>{
+            [dutyClass],
+            async (pinErr, row) => {
+              if (pinErr) return res.status(500).json({ error: pinErr.message })
 
-              if(err){
-                return res.status(500).json({error:err.message})
+              const expected = String(row?.pin_bcs || "").trim()
+              const accountClassId = row?.account_class_id
+
+              if (!accountClassId || !expected) {
+                return res.status(403).json({ error: "Invalid pin" })
               }
 
-              computeViolationHash(session_id, (err, hash) => {
-                if (err) return res.status(500).json({ error: err.message })
+              if (Number(row?.pin_locked_until || 0) > nowMs) {
+                return res.status(429).json({ error: "Invalid pin" })
+              }
+
+              let ok = false
+              try {
+                ok = await bcrypt.compare(provided, expected)
+              } catch (compareErr) {
+                return res.status(500).json({ error: compareErr.message })
+              }
+
+              if (!ok) {
+                const attempts = Number(row?.pin_failed_attempts || 0) + 1
+                const lockedUntil = attempts >= 5 ? nowMs + 5 * 60 * 1000 : 0
 
                 db.run(
                   `
-                    UPDATE duty_sessions
-                    SET status='signed',
-                        signed_at=?,
-                        signed_snapshot_hash=?
-                    WHERE id=?
+                    UPDATE accounts
+                    SET pin_failed_attempts = ?,
+                        pin_locked_until = ?
+                    WHERE class_id = ?
                   `,
-                  [time.now(), hash, session_id],
-                  (err) => {
-
-                    if (err) {
-                      return res.status(500).json({ error: err.message })
+                  [attempts >= 5 ? 5 : attempts, lockedUntil, accountClassId],
+                  (lockErr) => {
+                    if (lockErr) {
+                      return res.status(500).json({ error: lockErr.message })
                     }
-
-                    db.run(
-                      `
-                        INSERT INTO duty_revision_logs
-                        (session_id,action,created_at)
-                        VALUES(?,?,?)
-                      `,
-                      [session_id, "sign", time.now()],
-                      () => {
-                        res.json({ success: true, photo_path: photoPath })
-                      },
-                    )
-
+                    return res.status(403).json({ error: "Invalid pin" })
                   },
                 )
-              })
+                return
+              }
 
-            }
+              const proceedWithSignature = () => {
+                let photoPath = null
+
+                // Optional photo (fallback). If provided, save it; otherwise keep NULL.
+                if (typeof photo_data === "string" && photo_data.trim()) {
+                  let base64Data = null
+
+                  if (photo_data.startsWith("data:image/jpeg;base64,")) {
+                    base64Data = photo_data.replace("data:image/jpeg;base64,", "")
+                  } else if (photo_data.startsWith("data:image/png;base64,")) {
+                    base64Data = photo_data.replace("data:image/png;base64,", "")
+                  } else {
+                    return res.status(400).json({ error: "Invalid photo" })
+                  }
+
+                  let buf
+                  try {
+                    buf = Buffer.from(base64Data, "base64")
+                  } catch {
+                    return res.status(400).json({ error: "Invalid photo" })
+                  }
+
+                  const assetsDir = path.join(__dirname, "../../assets")
+                  fs.mkdirSync(assetsDir, { recursive: true })
+
+                  const filename = `duty_${session_id}_${Date.now()}_${Math.random()
+                    .toString(16)
+                    .slice(2)}.jpg`
+
+                  const absPath = path.join(assetsDir, filename)
+
+                  try {
+                    fs.writeFileSync(absPath, buf)
+                  } catch (saveErr) {
+                    return res.status(500).json({ error: "Cannot save photo" })
+                  }
+
+                  photoPath = `/assets/${filename}`
+                }
+
+                db.run(
+                  `
+                    INSERT INTO duty_signatures
+                    (session_id,photo_path,signed_at)
+                    VALUES(?,?,?)
+                  `,
+                  [session_id, photoPath, time.now()],
+                  (signatureErr) => {
+                    if (signatureErr) {
+                      return res.status(500).json({ error: signatureErr.message })
+                    }
+
+                    computeViolationHash(session_id, (hashErr, hash) => {
+                      if (hashErr) return res.status(500).json({ error: hashErr.message })
+
+                      db.run(
+                        `
+                          UPDATE duty_sessions
+                          SET status='signed',
+                              signed_at=?,
+                              signed_snapshot_hash=?
+                          WHERE id=?
+                        `,
+                        [time.now(), hash, session_id],
+                        (updateErr) => {
+                          if (updateErr) {
+                            return res.status(500).json({ error: updateErr.message })
+                          }
+
+                          db.run(
+                            `
+                              INSERT INTO duty_revision_logs
+                              (session_id,action,created_at)
+                              VALUES(?,?,?)
+                            `,
+                            [session_id, "sign", time.now()],
+                            () => {
+                              res.json({ success: true, photo_path: photoPath })
+                            },
+                          )
+                        },
+                      )
+                    })
+                  },
+                )
+              }
+
+              db.run(
+                `
+                  UPDATE accounts
+                  SET pin_failed_attempts = 0,
+                      pin_locked_until = 0
+                  WHERE class_id = ?
+                `,
+                [accountClassId],
+                (resetErr) => {
+                  if (resetErr) {
+                    return res.status(500).json({ error: resetErr.message })
+                  }
+
+                  proceedWithSignature()
+                },
+              )
+            },
           )
-
-        }
-      )
-
-      })
-    }
-  )
-
-})
+        })
+      },
+    )
+  },
+)
 
 /*
 ADMIN: sign a duty session (no PIN), re-auth by admin password

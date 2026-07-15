@@ -33,6 +33,8 @@ CREATE TABLE IF NOT EXISTS accounts (
   password_bcs TEXT,
   password_codo TEXT,
   pin_bcs TEXT,
+  pin_failed_attempts INTEGER DEFAULT 0,
+  pin_locked_until BIGINT DEFAULT 0,
   password_changed INTEGER DEFAULT 0,
   created_at TEXT,
   password_changed_gvcn INTEGER DEFAULT 0,

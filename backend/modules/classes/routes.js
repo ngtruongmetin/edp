@@ -3,6 +3,7 @@ const bcrypt = require("bcrypt")
 const db = require("../../db")
 const updateExcel = require("../../utils/updateExcel")
 const { get, run, withTransaction, mapDatabaseError, isUniqueError } = require("../../utils/dbp")
+const { hashPin } = require("../../utils/pinSecurity")
 
 const requireLogin = require("../../middleware/requireLogin")
 const requireRole = require("../../middleware/requireRole")
@@ -28,8 +29,7 @@ requireRole(["admin"]),
       c.id,
       c.name,
       c.grade,
-      c.is_active,
-      a.pin_bcs
+      c.is_active
     FROM classes c
     LEFT JOIN accounts a
     ON a.class_id = c.id
@@ -105,6 +105,7 @@ async (req,res)=>{
   const hash_gvcn = await bcrypt.hash(gvcnPass,10)
   const hash_bcs = await bcrypt.hash(bcsPass,10)
   const hash_codo = await bcrypt.hash(codoPass,10)
+  const hash_pin = await hashPin(pin)
 
   try {
     const classId = await withTransaction(async () => {
@@ -124,7 +125,7 @@ async (req,res)=>{
         (class_id,password_gvcn,password_bcs,password_codo,pin_bcs,password_changed,password_changed_gvcn,password_changed_bcs,password_changed_codo)
         VALUES(?,?,?,?,?,1,1,1,1)
       `,
-      [classId, hash_gvcn, hash_bcs, hash_codo, pin],
+      [classId, hash_gvcn, hash_bcs, hash_codo, hash_pin],
       )
 
       return classId
@@ -297,18 +298,21 @@ router.post(
 "/:id/reset-pin",
 requireLogin,
 requireRole(["admin"]),
-(req,res)=>{
+async (req,res)=>{
 
   const classId = req.params.id
 
   const newPin = Math.floor(100000 + Math.random()*900000)
+  const hashedPin = await hashPin(String(newPin))
 
   db.run(`
     UPDATE accounts
-    SET pin_bcs = ?
+    SET pin_bcs = ?,
+        pin_failed_attempts = 0,
+        pin_locked_until = 0
     WHERE class_id = ?
   `,
-  [newPin,classId],
+  [hashedPin,classId],
   function(err){
 
     if(err){

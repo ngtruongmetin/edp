@@ -4,6 +4,7 @@ const path = require("path")
 const xlsx = require("xlsx")
 const db = require("../db")
 const time = require("../utils/time")
+const { hashPin } = require("../utils/pinSecurity")
 const { loadEnv } = require("../config/env")
 
 loadEnv()
@@ -69,6 +70,7 @@ async function main() {
       const hashG = await bcrypt.hash(gvcnPassword, 10)
       const hashB = await bcrypt.hash(bcsPassword, 10)
       const hashC = await bcrypt.hash(codoPassword, 10)
+      const hashPinValue = await hashPin(pin)
 
       await db.query(
         `
@@ -76,17 +78,20 @@ async function main() {
           (class_id, password_gvcn, password_bcs, password_codo, pin_bcs, password_changed, password_changed_gvcn, password_changed_bcs, password_changed_codo, created_at)
           VALUES ($1, $2, $3, $4, $5, 1, 1, 1, 1, $6)
         `,
-        [classId, hashG, hashB, hashC, pin, time.now()],
+        [classId, hashG, hashB, hashC, hashPinValue, time.now()],
       )
       console.log("Created", className)
     } else {
       const hashG = await bcrypt.hash(gvcnPassword, 10)
       const hashB = await bcrypt.hash(bcsPassword, 10)
       const hashC = await bcrypt.hash(codoPassword, 10)
+      const hashPinValue = await hashPin(pin)
       await db.query(
         `
           UPDATE accounts
           SET pin_bcs = $1
+          , pin_failed_attempts = 0
+          , pin_locked_until = 0
           , password_gvcn = $3
           , password_bcs = $4
           , password_codo = $5
@@ -96,7 +101,7 @@ async function main() {
           , password_changed_codo = 1
           WHERE class_id = $2
         `,
-        [pin, classId, hashG, hashB, hashC],
+        [hashPinValue, classId, hashG, hashB, hashC],
       )
     }
 
@@ -105,7 +110,7 @@ async function main() {
       gvcn_password: gvcnPassword,
       bcs_password: bcsPassword,
       codo_password: codoPassword,
-      pin_bcs: pin,
+      pin_bcs: "",
     })
   }
 
