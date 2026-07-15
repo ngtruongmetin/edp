@@ -42,25 +42,26 @@ export default function CameraCapture({ value, onChange }: Props) {
     streamRef.current = null
     setActive(false)
   }
-    function handleFile(e: React.ChangeEvent<HTMLInputElement>) {
-      const file = e.target.files?.[0]
-      if (!file) return
 
-      stop() // tắt camera nếu đang bật
+  function handleFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    if (!file) return
 
-      const reader = new FileReader()
-      reader.onload = () => {
-        onChange(reader.result as string)
-      }
-      reader.readAsDataURL(file)
+    stop()
+
+    const reader = new FileReader()
+    reader.onload = () => {
+      onChange(reader.result as string)
     }
-    function capture() {
+    reader.readAsDataURL(file)
+  }
+
+  function capture() {
     const v = videoRef.current
     if (!v) return
 
     const w = v.videoWidth || 1280
     const h = v.videoHeight || 720
-
     const maxW = 1280
     const scale = w > maxW ? maxW / w : 1
     const cw = Math.max(1, Math.round(w * scale))
@@ -77,7 +78,6 @@ export default function CameraCapture({ value, onChange }: Props) {
     onChange(png)
   }
 
-  // Ensure video is hooked back up when switching from "captured image" to preview.
   useEffect(() => {
     const v = videoRef.current
     const s = streamRef.current
@@ -100,13 +100,13 @@ export default function CameraCapture({ value, onChange }: Props) {
         <div className="relative">
           <video
             ref={videoRef}
-            className={`w-full ${active ? "block" : "hidden"}`}
+            className={`aspect-[4/3] w-full object-cover ${active ? "block" : "hidden"}`}
             playsInline
             muted
           />
 
           {!active && (
-            <div className="h-44 flex items-center justify-center text-sm text-gray-500">
+            <div className="flex aspect-[4/3] items-center justify-center text-sm text-gray-500">
               Camera chưa bật
             </div>
           )}
@@ -128,7 +128,7 @@ export default function CameraCapture({ value, onChange }: Props) {
           <button
             type="button"
             onClick={start}
-            className="rounded-2xl bg-[#2e77df] px-4 py-2.5 text-sm font-semibold text-white shadow-sm"
+            className="min-h-14 rounded-2xl bg-[#2e77df] px-4 py-3 text-[15px] font-semibold text-white shadow-sm transition active:scale-[0.98]"
           >
             Bật camera
           </button>
@@ -137,14 +137,14 @@ export default function CameraCapture({ value, onChange }: Props) {
             <button
               type="button"
               onClick={capture}
-              className="rounded-2xl bg-emerald-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm"
+              className="min-h-14 rounded-2xl bg-emerald-600 px-4 py-3 text-[15px] font-semibold text-white shadow-sm transition active:scale-[0.98]"
             >
               Chụp ảnh
             </button>
             <button
               type="button"
               onClick={stop}
-              className="rounded-2xl bg-white px-4 py-2.5 text-sm font-semibold text-gray-900 shadow-sm ring-1 ring-blue-50"
+              className="min-h-14 rounded-2xl bg-white px-4 py-3 text-[15px] font-semibold text-gray-900 shadow-sm ring-1 ring-blue-50 transition active:scale-[0.98]"
             >
               Tắt camera
             </button>
@@ -156,7 +156,6 @@ export default function CameraCapture({ value, onChange }: Props) {
             type="button"
             onClick={async () => {
               onChange(null)
-              // If camera is already active, just resume preview. If not, start it.
               if (streamRef.current && videoRef.current) {
                 videoRef.current.srcObject = streamRef.current
                 await videoRef.current.play().catch(() => {})
@@ -164,25 +163,26 @@ export default function CameraCapture({ value, onChange }: Props) {
               }
               if (!active) await start()
             }}
-            className="rounded-2xl bg-white px-4 py-2.5 text-sm font-semibold text-gray-900 shadow-sm ring-1 ring-blue-50"
+            className="min-h-14 rounded-2xl bg-white px-4 py-3 text-[15px] font-semibold text-gray-900 shadow-sm ring-1 ring-blue-50 transition active:scale-[0.98]"
           >
             Chụp lại
           </button>
         ) : null}
-          <label className="rounded-2xl bg-white px-4 py-2.5 text-sm font-semibold text-gray-900 shadow-sm ring-1 ring-blue-50 cursor-pointer">
-            Chọn ảnh từ Album
-            <input
-              type="file"
-              accept="image/*"
-              onChange={handleFile}
-              className="hidden"
-            /> 
-          </label>
-      </div>
-      <div className="text-xs text-gray-500 mt-1">
-        Nếu không chụp ảnh được, hãy chọn ảnh từ Album.
+
+        <label className="min-h-14 cursor-pointer rounded-2xl bg-white px-4 py-3 text-[15px] font-semibold text-gray-900 shadow-sm ring-1 ring-blue-50 transition active:scale-[0.98]">
+          Chọn ảnh từ Album
+          <input
+            type="file"
+            accept="image/*"
+            onChange={handleFile}
+            className="hidden"
+          />
+        </label>
       </div>
 
+      <div className="mt-1 text-xs text-gray-500">
+        Nếu không chụp ảnh được, hãy chọn ảnh từ Album.
+      </div>
     </div>
   )
 }

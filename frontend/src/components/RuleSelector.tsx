@@ -103,10 +103,13 @@ export default function RuleSelector({
   return (
     <div ref={rootRef} className="relative">
       <input
-        className="w-full rounded-2xl border border-blue-100 bg-white px-4 py-3 text-[15px] shadow-sm outline-none focus:border-[#2e77df] focus:ring-2 focus:ring-blue-200"
+        className="edp-input w-full rounded-2xl border border-blue-100 bg-white px-4 py-3 text-slate-900 shadow-sm outline-none focus:border-[#2e77df] focus:ring-2 focus:ring-blue-200"
         placeholder={placeholder}
         value={display || query}
-        onFocus={() => setOpen(true)}
+        onFocus={(e) => {
+          setOpen(true)
+          e.currentTarget.scrollIntoView({ block: "center", behavior: "smooth" })
+        }}
         onKeyDown={handleKey}
         onChange={(e) => {
           setQuery(e.target.value)
@@ -130,7 +133,7 @@ export default function RuleSelector({
                 <button
                   type="button"
                   key={r.id}
-                  className={`w-full px-4 py-3 text-left transition ${
+                  className={`min-h-12 w-full px-4 py-3 text-left transition ${
                     i === index ? "bg-blue-50" : "hover:bg-gray-50"
                   }`}
                   onMouseEnter={() => setIndex(i)}

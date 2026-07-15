@@ -9,9 +9,10 @@ type Props = {
   classes: ClassType[]
   value: string
   onChange: (v: string) => void
+  inputRef?: React.Ref<HTMLInputElement>
 }
 
-export default function ClassSelector({ classes, value, onChange }: Props) {
+export default function ClassSelector({ classes, value, onChange, inputRef }: Props) {
   const [query, setQuery] = useState("")
   const [open, setOpen] = useState(false)
   const [index, setIndex] = useState(0)
@@ -68,10 +69,14 @@ export default function ClassSelector({ classes, value, onChange }: Props) {
   return (
     <div className="relative">
       <input
-        className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-[15px] shadow-sm outline-none transition placeholder:text-slate-400 focus:border-[#2e77df] focus:ring-2 focus:ring-blue-100"
+        ref={inputRef}
+        className="edp-input w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-slate-900 shadow-sm outline-none transition placeholder:text-slate-400 focus:border-[#2e77df] focus:ring-2 focus:ring-blue-100"
         placeholder="Tìm hoặc chọn lớp"
         value={value || query}
-        onFocus={() => setOpen(true)}
+        onFocus={(e) => {
+          setOpen(true)
+          e.currentTarget.scrollIntoView({ block: "center", behavior: "smooth" })
+        }}
         onKeyDown={handleKey}
         onChange={(e) => {
           setQuery(e.target.value)
@@ -95,7 +100,7 @@ export default function ClassSelector({ classes, value, onChange }: Props) {
                 <button
                   type="button"
                   key={c.id}
-                  className={`w-full px-4 py-3 text-left transition ${
+                  className={`min-h-12 w-full px-4 py-3 text-left transition ${
                     i === index ? "bg-blue-50" : "hover:bg-slate-50"
                   }`}
                   onMouseEnter={() => setIndex(i)}

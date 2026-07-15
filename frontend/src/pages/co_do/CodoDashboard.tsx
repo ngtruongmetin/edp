@@ -50,6 +50,7 @@ export default function CoDoDashboard(){
   const [detail,setDetail] = useState<any>(null)
 
   const navigate = useNavigate()
+  const dashboardReady = !!className && (week !== null || weeks.length > 0)
 
   useEffect(()=>{
 
@@ -140,20 +141,12 @@ export default function CoDoDashboard(){
       const list:Week[] = res.data.weeks || []
       setWeeks(list)
 
-      const today = new Date()
-      const todayIso = [
-        today.getFullYear(),
-        String(today.getMonth()+1).padStart(2,"0"),
-        String(today.getDate()).padStart(2,"0")
-      ].join("-")
+      const latest = list[0] || null
+      const previous = list[1] || null
 
-      const currentIndex = list.findIndex(w => w.start_date <= todayIso && todayIso <= w.end_date)
-      const current = currentIndex >= 0 ? list[currentIndex] : null
-      const prev = currentIndex >= 0 ? list[currentIndex + 1] : (list[1] || null)
-
-      setCurrentWeekId(current?.id ?? null)
-      setPrevWeekId(prev?.id ?? null)
-      setWeekId(current?.id ?? list[0]?.id ?? null)
+      setCurrentWeekId(latest?.id ?? null)
+      setPrevWeekId(previous?.id ?? null)
+      setWeekId((prevWeekId) => prevWeekId ?? latest?.id ?? null)
     }catch(err){
       console.error(err)
     }
@@ -225,45 +218,60 @@ export default function CoDoDashboard(){
 
   return(
 
-    <div className="min-h-screen flex flex-col bg-slate-50">
+    <div className="edp-mobile-shell flex flex-col bg-slate-50">
 
       <Navbar/>
 
-      <div className="flex-1 max-w-md mx-auto w-full px-4 pt-5 pb-10 space-y-5">
+      <div className="flex-1 max-w-md mx-auto w-full px-4 pt-4 pb-28 space-y-4">
 
         {/* HERO */}
 
-        <div className="rounded-3xl bg-gradient-to-br from-[#2e77df] via-[#2b6fd0] to-[#1f5fc0] text-white shadow-lg">
+        <div className="overflow-hidden rounded-[28px] bg-gradient-to-br from-[#2e77df] via-[#2b6fd0] to-[#1f5fc0] text-white shadow-[0_18px_42px_rgba(30,64,175,0.28)]">
 
-          <div className="px-6 pt-6 pb-5">
+          <div className="p-5">
 
-            <div className="flex items-center justify-between gap-3">
-              <div className="text-sm opacity-90">
-                Xin chào
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <div className="text-xs font-semibold uppercase tracking-[0.14em] opacity-80">
+                  Xin chào
+                </div>
+                <div className="mt-1 text-2xl font-semibold tracking-tight">
+                  Cờ đỏ lớp {className || "--"}
+                </div>
               </div>
               <button
                 onClick={() => setShowChangePassword?.(true)}
-                className="rounded-xl bg-white/20 px-4 py-2 text-sm font-semibold hover:bg-white/30 transition"
+                className="min-h-12 rounded-2xl bg-white/15 px-4 py-3 text-sm font-semibold transition hover:bg-white/25 active:scale-[0.98]"
               >
                 Cài đặt
               </button>
             </div>
 
-            <div className="mt-1 text-2xl font-semibold tracking-tight">
-              Cờ đỏ lớp {className || "--"}
-            </div>
-
-            <div className="mt-4 flex items-baseline justify-between">
-
-              <div className="text-3xl font-semibold tracking-tight">
-                {time}
+            {dashboardReady ? (
+              <div className="mt-5 flex items-end justify-between gap-3">
+                <div>
+                  <div className="text-4xl font-semibold tracking-tight tabular-nums">
+                    {time}
+                  </div>
+                  <div className="mt-1 text-sm opacity-85">
+                    {date}
+                  </div>
+                </div>
+                <div className="rounded-2xl bg-white/12 px-4 py-3 text-right">
+                  <div className="text-[11px] uppercase tracking-[0.12em] opacity-75">
+                    Phiếu tuần
+                  </div>
+                  <div className="mt-1 text-sm font-semibold">
+                    {week ? `Tuần ${week.week_number}` : "Đang tải"}
+                  </div>
+                </div>
               </div>
-
-              <div className="text-sm opacity-90">
-                {date}
+            ) : (
+              <div className="mt-5 grid gap-3">
+                <div className="h-12 w-36 rounded-2xl bg-white/15 animate-pulse" />
+                <div className="h-4 w-28 rounded-full bg-white/15 animate-pulse" />
               </div>
-
-            </div>
+            )}
 
           </div>
 
@@ -272,12 +280,12 @@ export default function CoDoDashboard(){
 
         {/* Week info */}
 
-        <div className="rounded-3xl bg-white p-5 shadow-sm ring-1 ring-blue-50">
+        <div className="rounded-[28px] bg-white p-5 shadow-sm ring-1 ring-blue-50">
           <div className="text-sm text-gray-600">Chọn tuần</div>
-          <div className="mt-2 flex gap-2">
+          <div className="mt-3 flex gap-2 overflow-x-auto pb-1 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
             <button
               onClick={() => currentWeekId && setWeekId(currentWeekId)}
-              className={`rounded-2xl px-4 py-2 text-sm font-semibold shadow-sm ${
+              className={`min-h-12 shrink-0 rounded-2xl px-4 py-3 text-sm font-semibold shadow-sm transition active:scale-[0.98] ${
                 weekId === currentWeekId
                   ? "bg-[#2e77df] text-white"
                   : "bg-white text-gray-900 ring-1 ring-blue-50 hover:bg-gray-50"
@@ -288,7 +296,7 @@ export default function CoDoDashboard(){
             {prevWeekId && (
               <button
                 onClick={() => setWeekId(prevWeekId)}
-                className={`rounded-2xl px-4 py-2 text-sm font-semibold shadow-sm ${
+                className={`min-h-12 shrink-0 rounded-2xl px-4 py-3 text-sm font-semibold shadow-sm transition active:scale-[0.98] ${
                   weekId === prevWeekId
                     ? "bg-[#2e77df] text-white"
                     : "bg-white text-gray-900 ring-1 ring-blue-50 hover:bg-gray-50"
@@ -300,13 +308,18 @@ export default function CoDoDashboard(){
           </div>
           {week ? (
             <>
-              <div className="mt-3 text-xl font-semibold text-[#2e77df]">
+              <div className="mt-4 text-xl font-semibold text-[#2e77df]">
                 Tuần {week.week_number}
               </div>
               <div className="mt-1 text-sm text-gray-500">
                 {formatDate(week.start_date)} - {formatDate(week.end_date)}
               </div>
             </>
+          ) : !dashboardReady ? (
+            <div className="mt-4 space-y-2">
+              <div className="h-5 w-32 rounded-full bg-slate-100 animate-pulse" />
+              <div className="h-4 w-48 rounded-full bg-slate-100 animate-pulse" />
+            </div>
           ) : (
             <div className="mt-2 text-sm text-gray-600">Chưa có dữ liệu tuần.</div>
           )}
@@ -314,7 +327,7 @@ export default function CoDoDashboard(){
 
         {/* Duty */}
 
-        <div className="rounded-3xl bg-white p-5 shadow-sm ring-1 ring-blue-50">
+        <div className="rounded-[28px] bg-white p-5 shadow-sm ring-1 ring-blue-50">
 
           <div className="text-sm text-gray-600">
             Lớp trực
@@ -334,12 +347,12 @@ export default function CoDoDashboard(){
 
         {/* Actions */}
 
-        <div className="space-y-3">
+        <div className="sticky bottom-[calc(env(safe-area-inset-bottom)+0.75rem)] z-30">
 
           <button
             onClick={startDutyNow}
             disabled={!dutyClassCurrent}
-            className="block w-full rounded-2xl bg-[#2e77df] py-4 text-center text-[15px] font-semibold text-white shadow-sm transition hover:bg-[#1f5fc0] disabled:opacity-50"
+            className="block w-full min-h-14 rounded-[20px] bg-[#2e77df] px-4 py-4 text-center text-[15px] font-semibold text-white shadow-[0_12px_28px_rgba(46,119,223,0.24)] transition hover:bg-[#1f5fc0] active:scale-[0.98] disabled:opacity-50"
           >
             Bắt đầu trực
           </button>
@@ -347,7 +360,7 @@ export default function CoDoDashboard(){
         </div>
 
         {/* My week sessions */}
-        <div className="rounded-3xl bg-white p-5 shadow-sm ring-1 ring-blue-50">
+        <div className="rounded-[28px] bg-white p-5 shadow-sm ring-1 ring-blue-50">
           <div className="flex items-center gap-3">
             <div className="text-sm font-semibold text-gray-900">
               Phiếu trực trong tuần
@@ -367,7 +380,7 @@ export default function CoDoDashboard(){
                 <button
                   key={s.id}
                   onClick={()=>openDetail(s.id)}
-                  className="w-full rounded-2xl border border-blue-100 bg-white px-4 py-3 text-left shadow-sm hover:bg-slate-50 transition"
+                  className="w-full rounded-2xl border border-blue-100 bg-white px-4 py-3 text-left shadow-sm transition hover:bg-slate-50 active:scale-[0.99]"
                 >
                   <div className="flex items-start gap-3">
                     <div className="min-w-0 flex-1">

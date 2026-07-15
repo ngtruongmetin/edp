@@ -10,6 +10,7 @@ import CameraCapture from "../../components/CameraCapture"
 import toast from "react-hot-toast"
 import { localISODate } from "../../utils/dateLocal"
 import { usePageTitle } from "../../utils/usePageTitle"
+import useKeyboardInsets from "../../utils/useKeyboardInsets"
 
 type Violation = {
   id: number
@@ -34,6 +35,7 @@ type Assignment = {
 
 export default function CodoDuty() {
   usePageTitle("EDP | Phiếu trực")
+  useKeyboardInsets()
   const params = useParams()
   const routeSessionId = params.id ? Number(params.id) : null
   const navigate = useNavigate()
@@ -253,52 +255,58 @@ export default function CodoDuty() {
   const totalWithBonus = totalScore + bonusPoints
 
   return (
-    <div className="min-h-screen flex flex-col bg-slate-50">
+    <div className="edp-mobile-shell flex flex-col bg-slate-50">
       <Navbar />
 
-      <div className="flex-1 max-w-md mx-auto w-full px-4 pt-5 pb-10 space-y-5">
-        <div className="rounded-3xl bg-gradient-to-br from-[#2e77df] via-[#2b6fd0] to-[#1f5fc0] text-white shadow-lg">
-          <div className="px-6 pt-6 pb-5">
+      <div className="flex-1 max-w-md mx-auto w-full px-4 pt-4 pb-28 space-y-4">
+        <div className="overflow-hidden rounded-[28px] bg-gradient-to-br from-[#2e77df] via-[#2b6fd0] to-[#1f5fc0] text-white shadow-[0_18px_42px_rgba(30,64,175,0.28)]">
+          <div className="p-5">
             <div className="text-sm opacity-90">
               {routeSessionId
                 ? `Phiếu trực ngày ${formatDateISO(viewingDateISO)}`
                 : "Ca trực hôm nay"}
             </div>
 
-            <div className="mt-2 flex items-baseline justify-between">
-              <div className="text-3xl font-semibold tracking-tight">
-                {formatTime(time)}
+            <div className="mt-2 flex items-end justify-between gap-3">
+              <div>
+                <div className="text-4xl font-semibold tracking-tight tabular-nums">
+                  {formatTime(time)}
+                </div>
+                <div className="mt-1 text-sm opacity-85">{formatDate(time)}</div>
               </div>
-              <div className="text-sm opacity-90">{formatDate(time)}</div>
+              <div className="rounded-2xl bg-white/12 px-4 py-3 text-right">
+                <div className="text-[11px] uppercase tracking-[0.12em] opacity-75">
+                  Lớp trực
+                </div>
+                <div className="mt-1 text-sm font-semibold">{dutyClass || "--"}</div>
+              </div>
             </div>
 
             <div className="mt-4 grid grid-cols-2 gap-3">
               <div className="rounded-2xl bg-white/10 px-4 py-3">
                 <div className="text-[11px] opacity-80">Lớp cờ đỏ</div>
-                <div className="mt-0.5 text-lg font-semibold">
-                  {className || "--"}
-                </div>
+                <div className="mt-0.5 text-lg font-semibold">{className || "--"}</div>
               </div>
 
-              <div className="rounded-2xl bg-white/10 px-4 py-3">
-                <div className="text-[11px] opacity-80">Lớp trực</div>
-                <div className="mt-0.5 text-lg font-semibold">
-                  {dutyClass || "--"}
+              {week ? (
+                <div className="rounded-2xl bg-white/10 px-4 py-3 text-sm">
+                  Tuần {week.week_number}
+                  <div className="mt-1 text-[11px] opacity-80">
+                    {formatDateISO(week.start_date)} - {formatDateISO(week.end_date)}
+                  </div>
                 </div>
-              </div>
+              ) : (
+                <div className="rounded-2xl bg-white/10 px-4 py-3 text-sm opacity-85">
+                  Đang tải tuần
+                </div>
+              )}
             </div>
 
-            {week && (
-              <div className="mt-4 rounded-2xl bg-white/10 px-4 py-3 text-sm">
-                Tuần {week.week_number} ({formatDateISO(week.start_date)} -{" "}
-                {formatDateISO(week.end_date)})
-              </div>
-            )}
           </div>
         </div>
 
         {routeSessionId && !viewingToday && (
-          <div className="rounded-3xl bg-white p-4 shadow-sm ring-1 ring-blue-50">
+          <div className="rounded-[28px] bg-white p-4 shadow-sm ring-1 ring-blue-50">
             <div className="flex items-center gap-2">
               <div className="text-sm font-semibold text-gray-900">
                 Bạn đang xem phiếu ngày {formatDateISO(viewingDateISO)}
@@ -311,13 +319,13 @@ export default function CodoDuty() {
             <div className="mt-3 flex gap-2">
               <button
                 onClick={() => navigate("/co_do/duty", { replace: true })}
-                className="rounded-2xl bg-[#2e77df] px-4 py-2.5 text-sm font-semibold text-white shadow-sm"
+                className="min-h-12 rounded-2xl bg-[#2e77df] px-4 py-3 text-sm font-semibold text-white shadow-sm active:scale-[0.98]"
               >
                 Về phiếu hôm nay
               </button>
               <button
                 onClick={() => navigate("/co_do/dashboard")}
-                className="rounded-2xl bg-white px-4 py-2.5 text-sm font-semibold text-gray-900 shadow-sm ring-1 ring-blue-50"
+                className="min-h-12 rounded-2xl bg-white px-4 py-3 text-sm font-semibold text-gray-900 shadow-sm ring-1 ring-blue-50 active:scale-[0.98]"
               >
                 Về Dashboard
               </button>
@@ -326,13 +334,17 @@ export default function CodoDuty() {
         )}
 
         {loading && (
-          <div className="rounded-3xl bg-white p-5 shadow-sm ring-1 ring-blue-50">
-            <div className="text-sm text-gray-600">Đang tải dữ liệu...</div>
+          <div className="rounded-[28px] bg-white p-5 shadow-sm ring-1 ring-blue-50">
+            <div className="space-y-3 animate-pulse">
+              <div className="h-4 w-32 rounded-full bg-slate-100" />
+              <div className="h-5 w-48 rounded-full bg-slate-100" />
+              <div className="h-28 rounded-2xl bg-slate-100" />
+            </div>
           </div>
         )}
 
         {!loading && !session && (
-          <div className="rounded-3xl bg-white p-5 shadow-sm ring-1 ring-blue-50">
+          <div className="rounded-[28px] bg-white p-5 shadow-sm ring-1 ring-blue-50">
             <div className="text-sm font-semibold text-gray-900">Trạng thái</div>
             <div className="mt-1 text-sm text-gray-600">
               {routeSessionId
@@ -344,7 +356,7 @@ export default function CodoDuty() {
         )}
 
         {session && (
-          <div className="rounded-3xl bg-white p-5 shadow-sm ring-1 ring-blue-50">
+          <div className="rounded-[28px] bg-white p-5 shadow-sm ring-1 ring-blue-50">
             <div className="flex items-center gap-2">
               <div className="text-sm font-semibold text-gray-900">Vi phạm</div>
               {signed ? (
@@ -388,7 +400,7 @@ export default function CodoDuty() {
                           setQuantityInput(String(val))
                         }
                       }}
-                      className="mt-1 w-full bg-transparent text-[15px] font-semibold text-gray-900 outline-none"
+                      className="mt-1 w-full bg-transparent text-[16px] font-semibold text-gray-900 outline-none"
                     />
                 </div>
 
@@ -405,35 +417,43 @@ export default function CodoDuty() {
                 <input
                   value={note}
                   onChange={(e) => setNote(e.target.value)}
-                  className="mt-1 w-full bg-transparent text-[15px] text-gray-900 outline-none"
+                  className="mt-1 w-full bg-transparent text-[16px] text-gray-900 outline-none"
                   placeholder="Có thể ghi hoặc không"
+                  onFocus={(e) => {
+                    e.currentTarget.scrollIntoView({
+                      block: "center",
+                      behavior: "smooth",
+                    })
+                  }}
                 />
               </div>
 
-              <button
-                onClick={async () => {
-                  try {
-                    if (!ruleId) {
-                      toast.error("Chọn lỗi vi phạm")
-                      return
+              <div className="sticky bottom-[calc(env(safe-area-inset-bottom)+0.75rem+var(--edp-keyboard-offset,0px))] z-20 rounded-[24px] bg-white/95 pt-3 backdrop-blur">
+                <button
+                  onClick={async () => {
+                    try {
+                      if (!ruleId) {
+                        toast.error("Chọn lỗi vi phạm")
+                        return
+                      }
+                      await addViolation()
+                      toast.success("Đã thêm vi phạm")
+                    } catch (err) {
+                      console.error(err)
+                      toast.error("Không thể thêm vi phạm")
                     }
-                    await addViolation()
-                    toast.success("Đã thêm vi phạm")
-                  } catch (err) {
-                    console.error(err)
-                    toast.error("Không thể thêm vi phạm")
-                  }
-                }}
-                className="w-full rounded-2xl bg-[#2e77df] px-4 py-3 text-[15px] font-semibold text-white shadow-sm transition"
-              >
-                Thêm vi phạm
-              </button>
+                  }}
+                  className="w-full min-h-14 rounded-2xl bg-[#2e77df] px-4 py-3 text-[15px] font-semibold text-white shadow-sm transition active:scale-[0.98]"
+                >
+                  Thêm vi phạm
+                </button>
+              </div>
             </div>
           </div>
         )}
 
         {session && (
-          <div className="rounded-3xl bg-white p-5 shadow-sm ring-1 ring-blue-50">
+          <div className="rounded-[28px] bg-white p-5 shadow-sm ring-1 ring-blue-50">
             <div className="flex items-center gap-2">
               <div className="text-sm font-semibold text-gray-900">
                 Danh sách vi phạm
@@ -451,10 +471,7 @@ export default function CodoDuty() {
 
             <div className="mt-3 space-y-2">
               {violations.map((v) => (
-                <div
-                  key={v.id}
-                  className="rounded-2xl border border-blue-100 bg-white px-4 py-3 shadow-sm"
-                >
+                <div key={v.id} className="rounded-2xl border border-blue-100 bg-white px-4 py-3 shadow-sm">
                   <div className="flex items-start gap-3">
                     <div className="min-w-0 flex-1">
                       <div className="truncate text-[15px] font-semibold text-gray-900">
@@ -498,7 +515,7 @@ export default function CodoDuty() {
         )}
 
         {session && (
-          <div className="rounded-3xl bg-white p-5 text-center shadow-sm ring-1 ring-blue-50">
+          <div className="rounded-[28px] bg-white p-5 text-center shadow-sm ring-1 ring-blue-50">
             <div className="text-sm text-gray-600">Tổng điểm</div>
             <div
               className={`mt-1 text-4xl font-semibold ${
@@ -559,7 +576,12 @@ export default function CodoDuty() {
                 if (!signing) setShowSign(false)
               }}
             />
-            <div className="absolute inset-x-0 bottom-0 mx-auto w-full max-w-md rounded-t-3xl bg-white p-5 shadow-2xl">
+            <div className="absolute inset-x-0 bottom-0 mx-auto w-full max-w-md rounded-t-[28px] bg-white p-5 shadow-2xl"
+                 style={{
+                   maxHeight: "calc(92dvh - var(--edp-keyboard-offset, 0px))",
+                   paddingBottom:
+                     "calc(1.25rem + env(safe-area-inset-bottom) + var(--edp-keyboard-offset, 0px))",
+                 }}>
               <div className="flex items-center gap-2">
                 <div className="text-base font-semibold text-gray-900">
                   Ký phiếu trực
@@ -574,11 +596,11 @@ export default function CodoDuty() {
                 </button>
               </div>
 
-              <div className="mt-2 text-sm text-gray-600">
+              <div className="mt-2 text-sm leading-6 text-gray-600">
                 Nhập PIN Ban cán sự của lớp và chụp ảnh rõ mặt để xác nhận.
               </div>
 
-              <div className="mt-4 space-y-3">
+              <div className="mt-4 max-h-[calc(92dvh-9rem)] space-y-3 overflow-y-auto pr-1">
                 <div className="rounded-2xl border border-blue-100 bg-white px-4 py-3 shadow-sm">
                   <div className="text-[11px] text-gray-500">
                     PIN Ban cán sự lớp {session?.duty_class}
@@ -595,6 +617,12 @@ export default function CodoDuty() {
                     }}
                     className="mt-1 w-full bg-transparent text-[16px] font-semibold tracking-widest text-gray-900 outline-none"
                     placeholder="Nhập PIN"
+                    onFocus={(e) => {
+                      e.currentTarget.scrollIntoView({
+                        block: "center",
+                        behavior: "smooth",
+                      })
+                    }}
                   />
                 </div>
 
@@ -605,39 +633,41 @@ export default function CodoDuty() {
                   </div>
                 </div>
 
-                <button
-                  disabled={signing}
-                  onClick={async () => {
-                    if (!pin.trim()) {
-                      toast.error("Nhập PIN")
-                      return
-                    }
-                    if (pin.trim().length !== 6) {
-                      toast.error("PIN gồm 6 chữ số")
-                      return
-                    }
+                <div className="sticky bottom-[calc(env(safe-area-inset-bottom)+var(--edp-keyboard-offset,0px))] rounded-[24px] bg-gradient-to-t from-white via-white to-white/90 pt-3">
+                  <button
+                    disabled={signing}
+                    onClick={async () => {
+                      if (!pin.trim()) {
+                        toast.error("Nhập PIN")
+                        return
+                      }
+                      if (pin.trim().length !== 6) {
+                        toast.error("PIN gồm 6 chữ số")
+                        return
+                      }
 
-                    setSigning(true)
-                    try {
-                      await signDuty()
-                      setShowSign(false)
-                      setPin("")
-                      setPhotoData(null)
-                    } catch (err: any) {
-                      console.error(err)
-                      const msg =
-                        err?.response?.data?.error === "Invalid pin"
-                          ? "PIN không đúng"
-                          : "Không thể ký xác nhận"
-                      toast.error(msg)
-                    } finally {
-                      setSigning(false)
-                    }
-                  }}
-                  className="w-full rounded-2xl bg-emerald-600 px-4 py-3 text-[15px] font-semibold text-white shadow-sm transition disabled:opacity-50"
-                >
-                  {signing ? "Đang ký..." : "Xác nhận ký"}
-                </button>
+                      setSigning(true)
+                      try {
+                        await signDuty()
+                        setShowSign(false)
+                        setPin("")
+                        setPhotoData(null)
+                      } catch (err: any) {
+                        console.error(err)
+                        const msg =
+                          err?.response?.data?.error === "Invalid pin"
+                            ? "PIN không đúng"
+                            : "Không thể ký xác nhận"
+                        toast.error(msg)
+                      } finally {
+                        setSigning(false)
+                      }
+                    }}
+                    className="w-full min-h-14 rounded-2xl bg-emerald-600 px-4 py-3 text-[15px] font-semibold text-white shadow-sm transition active:scale-[0.98] disabled:opacity-50"
+                  >
+                    {signing ? "Đang ký..." : "Xác nhận ký"}
+                  </button>
+                </div>
               </div>
             </div>
           </div>
