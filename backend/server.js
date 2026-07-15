@@ -12,12 +12,20 @@ const { startDutyAutoCreateScheduler } = require("./utils/dutyAutoCreate")
 
 const app = express()
 const isProduction = process.env.NODE_ENV === "production"
+const trustProxyEnabled = process.env.TRUST_PROXY === "true" || isProduction
 const usesHttps = (process.env.BACKEND_ORIGIN || "").startsWith("https://")
-const isSecureCookie = process.env.SESSION_COOKIE_SECURE === "true" || (isProduction && usesHttps)
+const isSecureCookie = process.env.SESSION_COOKIE_SECURE === "true" || (trustProxyEnabled && usesHttps)
 
-if (isProduction) {
+if (trustProxyEnabled) {
   app.set("trust proxy", 1)
 }
+
+console.log("[session] config", {
+  nodeEnv: process.env.NODE_ENV,
+  trustProxyEnabled,
+  usesHttps,
+  sessionCookieSecure: isSecureCookie,
+})
 
 app.use(express.json({ limit: "25mb" }))
 app.use("/assets", express.static(path.join(__dirname, "assets")))
@@ -37,9 +45,10 @@ app.use(
     }),
     cookie: {
       httpOnly: true,
-      sameSite: "lax",
+      sameSite: process.env.SESSION_COOKIE_SAMESITE || "lax",
       secure: isSecureCookie,
       maxAge: 30 * 24 * 60 * 60 * 1000,
+      path: "/",
     },
   }),
 )
