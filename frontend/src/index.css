@@ -22,6 +22,7 @@ body {
   -webkit-text-size-adjust: 100%;
   overflow-x: hidden;
   overscroll-behavior-y: none;
+  margin: 0;
 }
 
 ::selection {
@@ -29,12 +30,19 @@ body {
   color: #0f172a;
 }
 
-body {
-  margin: 0;
-}
-
 :root {
   --edp-keyboard-offset: 0px;
+  --edp-mobile-nav-space: 0px;
+}
+
+@media (max-width: 768px) {
+  :root {
+    --edp-mobile-nav-space: calc(5rem + env(safe-area-inset-bottom));
+  }
+
+  body {
+    padding-bottom: var(--edp-mobile-nav-space);
+  }
 }
 
 .edp-mobile-shell {
