@@ -42,7 +42,6 @@ export default function CoDoDashboard(){
 
   const [weeks,setWeeks] = useState<Week[]>([])
   const [weekId,setWeekId] = useState<number | null>(null)
-  const [currentWeekId,setCurrentWeekId] = useState<number | null>(null)
   const [prevWeekId,setPrevWeekId] = useState<number | null>(null)
   const [week,setWeek] = useState<Week | null>(null)
   const [myWeekSessions,setMyWeekSessions] = useState<any[]>([])
@@ -144,9 +143,8 @@ export default function CoDoDashboard(){
       const latest = list[0] || null
       const previous = list[1] || null
 
-      setCurrentWeekId(latest?.id ?? null)
       setPrevWeekId(previous?.id ?? null)
-      setWeekId((prevWeekId) => prevWeekId ?? latest?.id ?? null)
+      setWeekId(latest?.id ?? null)
     }catch(err){
       console.error(err)
     }
@@ -186,9 +184,11 @@ export default function CoDoDashboard(){
 
   function weekLabelById(id:number | null){
     if(!id) return "Tuần ?"
-    const found = weeks.find(w=>w.id===id)
+    const found = weeks.find(w=>Number(w.id)===Number(id))
     return found?.week_number ? `Tuần ${found.week_number}` : "Tuần ?"
   }
+
+  const latestWeek = weeks[0] || null
 
   async function openDetail(id:number){
     setDetailId(id)
@@ -262,7 +262,7 @@ export default function CoDoDashboard(){
                     Phiếu tuần
                   </div>
                   <div className="mt-1 text-sm font-semibold">
-                    {week ? `Tuần ${week.week_number}` : "Đang tải"}
+                    {latestWeek ? `Tuần ${latestWeek.week_number}` : "Đang tải"}
                   </div>
                 </div>
               </div>
@@ -284,14 +284,14 @@ export default function CoDoDashboard(){
           <div className="text-sm text-gray-600">Chọn tuần</div>
           <div className="mt-3 flex gap-2 overflow-x-auto pb-1 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
             <button
-              onClick={() => currentWeekId && setWeekId(currentWeekId)}
+              onClick={() => latestWeek?.id && setWeekId(latestWeek.id)}
               className={`min-h-12 shrink-0 rounded-2xl px-4 py-3 text-sm font-semibold shadow-sm transition active:scale-[0.98] ${
-                weekId === currentWeekId
+                weekId === latestWeek?.id
                   ? "bg-[#2e77df] text-white"
                   : "bg-white text-gray-900 ring-1 ring-blue-50 hover:bg-gray-50"
               }`}
             >
-              {weekLabelById(currentWeekId)}
+              {latestWeek ? `Tuần ${latestWeek.week_number}` : "Tuần ?"}
             </button>
             {prevWeekId && (
               <button

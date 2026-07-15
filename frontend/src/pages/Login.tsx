@@ -161,11 +161,8 @@ export default function Login() {
             <p className="text-sm font-semibold uppercase tracking-[0.14em] text-[#2e77df]">
               Đăng nhập
             </p>
-            <h1 className="text-[2rem] font-semibold leading-tight tracking-tight text-slate-900">
-              Vào đúng vai trò, thao tác nhanh hơn
-            </h1>
             <p className="max-w-[34ch] text-[15px] leading-6 text-slate-500">
-              Chọn vai trò rồi đăng nhập để vào đúng màn hình làm việc.
+              Chọn vai trò rồi nhập thông tin đăng nhập.
             </p>
           </div>
 
@@ -177,11 +174,10 @@ export default function Login() {
                   key={option.value}
                   type="button"
                   onClick={() => changeRole(option.value)}
-                  className={`min-h-14 rounded-2xl border px-4 py-3 text-[15px] font-semibold transition active:scale-[0.98] ${
-                    active
-                      ? "border-[#2e77df] bg-[#eff6ff] text-[#2e77df]"
-                      : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
-                  }`}
+                  className={`min-h-14 rounded-2xl border px-4 py-3 text-[15px] font-semibold transition active:scale-[0.98] ${active
+                    ? "border-[#2e77df] bg-[#eff6ff] text-[#2e77df]"
+                    : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
+                    }`}
                   aria-pressed={active}
                 >
                   {option.label}
