@@ -10,6 +10,7 @@ CLASS LOGIN
 router.post("/login", (req, res) => {
 
     const { role, class_name, password } = req.body;
+    console.log("[auth/login] request", { role, class_name })
 
     if (!role || !class_name || !password) {
         return res.status(400).json({ error: "Missing fields" });
@@ -22,7 +23,10 @@ router.post("/login", (req, res) => {
         WHERE c.name = ?
     `, [class_name], async (err, acc) => {
 
-        if (err) return res.status(500).json({ error: err.message });
+        if (err) {
+            console.error("[auth/login] database error", err)
+            return res.status(500).json({ error: err.message });
+        }
         if (!acc) return res.status(401).json({ error: "Account not found" });
 
         let hash = null;
@@ -63,6 +67,7 @@ router.post("/login", (req, res) => {
                     return res.status(500).json({ error: saveErr.message });
                 }
 
+                console.log("[auth/login] success", { role, sessionId: req.sessionID })
                 res.json({
                     success: true,
                     role,
@@ -90,7 +95,10 @@ router.post("/admin/login", (req, res) => {
         WHERE username = ?
     `, [username], async (err, admin) => {
 
-        if (err) return res.status(500).json({ error: err.message });
+        if (err) {
+            console.error("[auth/admin/login] database error", err)
+            return res.status(500).json({ error: err.message });
+        }
         if (!admin) return res.status(401).json({ error: "Admin not found" });
 
         const ok = await bcrypt.compare(password, admin.password);
@@ -111,6 +119,7 @@ router.post("/admin/login", (req, res) => {
                     return res.status(500).json({ error: saveErr.message });
                 }
 
+                console.log("[auth/admin/login] success", { sessionId: req.sessionID })
                 res.json({
                     success: true,
                     role: "admin",
@@ -147,6 +156,8 @@ router.post("/logout", (req, res) => {
 CURRENT USER
 */
 router.get("/me", (req, res) => {
+
+    console.log("[auth/me] check", { sessionId: req.sessionID, hasUser: !!req.session.user })
 
     if (!req.session.user) {
         return res.status(401).json({ error: "Not logged" });
