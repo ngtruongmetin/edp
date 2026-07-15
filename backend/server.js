@@ -13,22 +13,39 @@ const { startDutyAutoCreateScheduler } = require("./utils/dutyAutoCreate")
 const app = express()
 const isProduction = process.env.NODE_ENV === "production"
 const trustProxyEnabled = process.env.TRUST_PROXY === "true" || isProduction
+const trustProxyDepth = Number(process.env.TRUST_PROXY_DEPTH || (trustProxyEnabled ? 1 : 0))
 const usesHttps = (process.env.BACKEND_ORIGIN || "").startsWith("https://")
 const isSecureCookie = process.env.SESSION_COOKIE_SECURE === "true" || (trustProxyEnabled && usesHttps)
 
 if (trustProxyEnabled) {
-  app.set("trust proxy", 1)
+  app.set("trust proxy", trustProxyDepth)
 }
 
 console.log("[session] config", {
   nodeEnv: process.env.NODE_ENV,
   trustProxyEnabled,
+  trustProxyDepth,
   usesHttps,
   sessionCookieSecure: isSecureCookie,
 })
 
 app.use(express.json({ limit: "25mb" }))
 app.use("/assets", express.static(path.join(__dirname, "assets")))
+
+app.use((req, res, next) => {
+  if (req.path.startsWith("/api/auth")) {
+    console.log("[session/debug] request", {
+      path: req.path,
+      secure: req.secure,
+      protocol: req.protocol,
+      forwardedProto: req.headers["x-forwarded-proto"],
+      host: req.headers.host,
+      cookie: req.headers.cookie,
+      sessionId: req.sessionID,
+    })
+  }
+  next()
+})
 
 app.use(
   session({
@@ -50,6 +67,7 @@ app.use(
       maxAge: 30 * 24 * 60 * 60 * 1000,
       path: "/",
     },
+    name: process.env.SESSION_COOKIE_NAME || "connect.sid",
   }),
 )
 
