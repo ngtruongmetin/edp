@@ -21,6 +21,7 @@ import AdminTimetable from "./pages/admin/AdminTimetable"
 import CodoDashboard from "./pages/co_do/CodoDashboard"
 import CodoLayout from "./pages/co_do/CodoLayout"
 import CodoDuty from "./pages/co_do/CodoDuty"
+import CodoDutyAssistant from "./pages/co_do/CodoDutyAssistant"
 
 import BanCanSuLayout from "./pages/ban_can_su/BanCanSuLayout"
 import BanCanSuDashboard from "./pages/ban_can_su/BanCanSuDashboard"
@@ -83,6 +84,7 @@ export default function App(){
           <Route path="dashboard" element={<CodoDashboard/>}/>
           <Route path="duty" element={<CodoDuty/>}/>
           <Route path="duty/:id" element={<CodoDuty/>}/>
+          <Route path="duty-assistant" element={<CodoDutyAssistant/>}/>
           {/* mọi route co_do sai */}
           <Route path="*" element={<NotFound/>}/>
         </Route>
