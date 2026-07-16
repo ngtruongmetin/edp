@@ -1,66 +1,110 @@
 import { useEffect, useMemo, useState } from "react"
 import { useNavigate } from "react-router-dom"
 import { api } from "../../api/api"
+import { useAuth } from "../../auth/AuthContext"
 
 import Navbar from "../../components/Navbar"
 import Footer from "../../components/Footer"
+import { buildDashboardCacheKey, getCachedDashboard, setCachedDashboard } from "../../utils/offlineCache"
 import { usePageTitle } from "../../utils/usePageTitle"
 
 type ClassType = {
-  id:number
-  name:string
-  grade:number
-  is_active:number
+  id: number
+  name: string
+  grade: number
+  is_active: number
 }
 
-export default function AdminDashboard(){
-  usePageTitle("EDP | Dashboard quản trị")
+type AdminDashboardSnapshot = {
+  classes: ClassType[]
+  grade: number
+  trendWeeks: any[]
+  trendClasses: any[]
+}
 
-  const [classes,setClasses] = useState<ClassType[]>([])
+export default function AdminDashboard() {
+  usePageTitle("EDP | Dashboard quản trị")
+  const { user: authUser, isOffline } = useAuth()
+
+  const [classes, setClasses] = useState<ClassType[]>([])
 
   const navigate = useNavigate()
 
-  useEffect(()=>{
-    loadClasses()
-  },[])
-
-  async function loadClasses(){
-
-    try{
-
-      const res = await api.get("/classes/admin")
-      setClasses(res.data)
-
-    }catch(err){
-
-      console.error(err)
-
-    }
-
-  }
-
   const total = classes.length
-  const active = classes.filter(c=>c.is_active).length
-  const disabled = classes.filter(c=>!c.is_active).length
+  const active = classes.filter((c) => c.is_active).length
+  const disabled = classes.filter((c) => !c.is_active).length
 
   const [grade, setGrade] = useState(10)
   const [trendWeeks, setTrendWeeks] = useState<any[]>([])
   const [trendClasses, setTrendClasses] = useState<any[]>([])
   const [trendLoading, setTrendLoading] = useState(false)
+  const [hover, setHover] = useState<{ index: number; x: number; y: number } | null>(null)
 
   useEffect(() => {
-    loadTrends(grade)
-  }, [grade])
+    async function loadCachedSnapshot() {
+      try {
+        const cacheKey = buildDashboardCacheKey(authUser)
+        const cached = await getCachedDashboard<AdminDashboardSnapshot>(cacheKey)
 
-  async function loadTrends(g:number){
-    try{
+        if (!cached) return
+
+        setClasses(cached.classes || [])
+        setGrade(cached.grade || 10)
+        setTrendWeeks(cached.trendWeeks || [])
+        setTrendClasses(cached.trendClasses || [])
+      } catch (err) {
+        console.error(err)
+      }
+    }
+
+    void loadCachedSnapshot()
+  }, [authUser])
+
+  useEffect(() => {
+    if (isOffline) {
+      setTrendLoading(false)
+      return
+    }
+
+    loadClasses()
+  }, [isOffline])
+
+  useEffect(() => {
+    if (isOffline) return
+    loadTrends(grade)
+  }, [grade, isOffline])
+
+  useEffect(() => {
+    if (!classes.length && !trendWeeks.length && !trendClasses.length) return
+
+    const cacheKey = buildDashboardCacheKey(authUser)
+
+    void setCachedDashboard(cacheKey, {
+      classes,
+      grade,
+      trendWeeks,
+      trendClasses,
+    })
+  }, [authUser, classes, grade, trendWeeks, trendClasses])
+
+  async function loadClasses() {
+    try {
+      const res = await api.get("/classes/admin")
+      setClasses(res.data)
+    } catch (err) {
+      console.error(err)
+    }
+  }
+
+  async function loadTrends(g: number) {
+    try {
       setTrendLoading(true)
       const res = await api.get("/duty/admin/weekly-trends", { params: { grade: g } })
       setTrendWeeks(res.data.weeks || [])
       setTrendClasses(res.data.classes || [])
-    }catch(err){
+    } catch (err) {
       console.error(err)
-    }finally{
+    } finally {
       setTrendLoading(false)
     }
   }
@@ -70,7 +114,7 @@ export default function AdminDashboard(){
     const lastIndex = trendWeeks.length - 1
     const ranked = [...trendClasses].map((c) => {
       const last = c.scores?.[lastIndex]
-      const total = (c.scores || []).reduce((s:number, v:number|null) => s + (Number(v) || 0), 0)
+      const total = (c.scores || []).reduce((s: number, v: number | null) => s + (Number(v) || 0), 0)
       return { ...c, lastScore: Number(last ?? 0), totalScore: total }
     })
     ranked.sort((a, b) => b.lastScore - a.lastScore)
@@ -78,7 +122,7 @@ export default function AdminDashboard(){
   }, [trendClasses, trendWeeks])
 
   const yRange = useMemo(() => {
-    const all = chartSeries.flatMap((s:any) => (s.scores || []).filter((v:any) => v != null))
+    const all = chartSeries.flatMap((s: any) => (s.scores || []).filter((v: any) => v != null))
     if (!all.length) return { min: 0, max: 1 }
     const min = Math.min(...all)
     const max = Math.max(...all)
@@ -97,41 +141,35 @@ export default function AdminDashboard(){
     "#f97316",
   ]
 
-  function formatScore(value:number){
+  function formatScore(value: number) {
     if (value > 0) return String(value)
     return String(value)
   }
 
-  function formatDateVN(date:string){
-    if(!date) return ""
-    const [y,m,d] = String(date).split("-")
+  function formatDateVN(date: string) {
+    if (!date) return ""
+    const [y, m, d] = String(date).split("-")
     return `${d}/${m}/${y}`
   }
 
   const avgSeries = useMemo(() => {
     if (!trendWeeks.length || !trendClasses.length) return []
-    return trendWeeks.map((_:any, idx:number) => {
+    return trendWeeks.map((_: any, idx: number) => {
       const vals = trendClasses
-        .map((c:any) => c.scores?.[idx])
-        .filter((v:any) => v != null)
-        .map((v:any) => Number(v))
+        .map((c: any) => c.scores?.[idx])
+        .filter((v: any) => v != null)
+        .map((v: any) => Number(v))
       if (!vals.length) return null
-      const sum = vals.reduce((s:number, v:number) => s + v, 0)
+      const sum = vals.reduce((s: number, v: number) => s + v, 0)
       return sum / vals.length
     })
   }, [trendWeeks, trendClasses])
 
-  const [hover, setHover] = useState<{ index: number; x: number; y: number } | null>(null)
-
-  return(
-
+  return (
     <div className="min-h-screen flex flex-col bg-slate-50">
-
-      <Navbar/>
+      <Navbar />
 
       <div className="flex-1 px-6 py-10 max-w-7xl mx-auto w-full space-y-8">
-
-        {/* Header */}
         <div className="rounded-3xl bg-gradient-to-br from-[#2e77df] via-[#2b6fd0] to-[#1f5fc0] text-white shadow-lg">
           <div className="px-8 py-7 flex flex-col lg:flex-row lg:items-center lg:gap-8">
             <div className="min-w-0">
@@ -159,7 +197,7 @@ export default function AdminDashboard(){
             </div>
           </div>
         </div>
-        {/* Quick Actions */}
+
         <div className="rounded-3xl bg-white p-6 shadow-sm ring-1 ring-blue-50">
           <h2 className="text-lg font-semibold text-gray-900 mb-5">Lối tắt quản trị</h2>
           <div className="grid md:grid-cols-4 gap-4">
@@ -185,7 +223,6 @@ export default function AdminDashboard(){
             ))}
           </div>
         </div>
-        {/* Weekly Ranking Trend */}
 
         <div className="rounded-3xl bg-white p-6 shadow-sm ring-1 ring-blue-50">
           <div className="flex flex-wrap items-center gap-3">
@@ -238,15 +275,17 @@ export default function AdminDashboard(){
                       <line x1="40" y1="20" x2="40" y2="220" />
                       <line x1="580" y1="20" x2="580" y2="220" />
                     </g>
-                    {chartSeries.map((s:any, idx:number) => {
+                    {chartSeries.map((s: any, idx: number) => {
                       const color = palette[idx % palette.length]
-                      const points = (s.scores || []).map((v:number|null, i:number) => {
-                        const x = 40 + (i * (540 / Math.max(1, trendWeeks.length - 1)))
-                        const val = v == null ? yRange.min : Number(v)
-                        const t = (val - yRange.min) / (yRange.max - yRange.min || 1)
-                        const y = 220 - t * 200
-                        return `${x},${y}`
-                      }).join(" ")
+                      const points = (s.scores || [])
+                        .map((v: number | null, i: number) => {
+                          const x = 40 + i * (540 / Math.max(1, trendWeeks.length - 1))
+                          const val = v == null ? yRange.min : Number(v)
+                          const t = (val - yRange.min) / (yRange.max - yRange.min || 1)
+                          const y = 220 - t * 200
+                          return `${x},${y}`
+                        })
+                        .join(" ")
                       return <polyline key={s.class_name} fill="none" stroke={color} strokeWidth="2" points={points} />
                     })}
                     {avgSeries.length > 0 && (
@@ -257,7 +296,7 @@ export default function AdminDashboard(){
                         strokeDasharray="6 6"
                         points={avgSeries
                           .map((v, i) => {
-                            const x = 40 + (i * (540 / Math.max(1, trendWeeks.length - 1)))
+                            const x = 40 + i * (540 / Math.max(1, trendWeeks.length - 1))
                             const val = v == null ? yRange.min : Number(v)
                             const t = (val - yRange.min) / (yRange.max - yRange.min || 1)
                             const y = 220 - t * 200
@@ -268,9 +307,9 @@ export default function AdminDashboard(){
                     )}
                     {hover && (
                       <line
-                        x1={40 + (hover.index * (540 / Math.max(1, trendWeeks.length - 1)))}
+                        x1={40 + hover.index * (540 / Math.max(1, trendWeeks.length - 1))}
                         y1="20"
-                        x2={40 + (hover.index * (540 / Math.max(1, trendWeeks.length - 1)))}
+                        x2={40 + hover.index * (540 / Math.max(1, trendWeeks.length - 1))}
                         y2="220"
                         stroke="#93c5fd"
                         strokeWidth="1"
@@ -298,14 +337,14 @@ export default function AdminDashboard(){
                       <div className="mt-2 text-gray-600">Top 5 tuần này</div>
                       <div className="mt-1 space-y-1">
                         {[...chartSeries]
-                          .map((c:any) => ({
+                          .map((c: any) => ({
                             class_name: c.class_name,
                             score: c.scores?.[hover.index],
                           }))
-                          .filter((c:any) => c.score != null)
-                          .sort((a:any, b:any) => Number(b.score) - Number(a.score))
+                          .filter((c: any) => c.score != null)
+                          .sort((a: any, b: any) => Number(b.score) - Number(a.score))
                           .slice(0, 5)
-                          .map((c:any) => (
+                          .map((c: any) => (
                             <div key={c.class_name} className="flex items-center gap-2">
                               <div className="min-w-[48px] font-semibold text-gray-900">{c.class_name}</div>
                               <div className="text-gray-700">{formatScore(Number(c.score))}</div>
@@ -320,7 +359,7 @@ export default function AdminDashboard(){
               <div className="rounded-2xl border border-blue-100 p-4">
                 <div className="text-xs text-gray-500">Bảng xếp hạng (tuần gần nhất)</div>
                 <div className="mt-3 space-y-2">
-                  {chartSeries.map((s:any, idx:number) => (
+                  {chartSeries.map((s: any, idx: number) => (
                     <div key={s.class_name} className="flex items-center gap-3">
                       <div className="w-6 text-xs text-gray-500">#{idx + 1}</div>
                       <div className="min-w-0 flex-1 text-sm font-semibold text-gray-900">
@@ -336,15 +375,9 @@ export default function AdminDashboard(){
             </div>
           )}
         </div>
-
-
-
       </div>
 
-      <Footer/>
-
+      <Footer />
     </div>
-
   )
-
-} 
+}

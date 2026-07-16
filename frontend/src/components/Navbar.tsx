@@ -1,5 +1,6 @@
 import { NavLink, useNavigate } from "react-router-dom"
 import { useAuth } from "../auth/AuthContext"
+import { getDashboardPath } from "../utils/authRoutes"
 
 function DashboardIcon() {
   return (
@@ -42,7 +43,7 @@ function LogoutIcon() {
 }
 
 export default function Navbar() {
-  const { user, loading, logout } = useAuth()
+  const { user, loading, logout, isOffline } = useAuth()
   const navigate = useNavigate()
 
   async function handleLogout() {
@@ -52,14 +53,6 @@ export default function Navbar() {
     } catch (err) {
       console.error(err)
     }
-  }
-
-  function getDashboardPath(role: string) {
-    if (role === "admin") return "/admin/dashboard"
-    if (role === "gvcn") return "/gvcn/dashboard"
-    if (role === "ban_can_su") return "/bancansu/dashboard"
-    if (role === "co_do") return "/co_do/dashboard"
-    return "/"
   }
 
   const dashboardPath = user ? getDashboardPath(user.role) : "/"
@@ -112,6 +105,11 @@ export default function Navbar() {
           </nav>
 
           <div className="ml-auto flex items-center gap-3">
+            {isOffline && (
+              <span className="rounded-full border border-amber-200 bg-amber-50 px-3 py-1.5 text-xs font-semibold text-amber-700">
+                Đang làm việc ngoại tuyến
+              </span>
+            )}
             {!loading && user ? (
               <button
                 onClick={handleLogout}
@@ -200,6 +198,11 @@ export default function Navbar() {
             </NavLink>
           )}
         </div>
+        {isOffline && (
+          <div className="px-3 pb-1 text-center text-[11px] font-semibold text-amber-700">
+            Đang làm việc ngoại tuyến
+          </div>
+        )}
       </nav>
     </>
   )

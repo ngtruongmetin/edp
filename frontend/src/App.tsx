@@ -28,9 +28,16 @@ import BanCanSuDashboard from "./pages/ban_can_su/BanCanSuDashboard"
 import GvcnLayout from "./pages/gvcn/GvcnLayout"
 import GvcnDashboard from "./pages/gvcn/GvcnDashboard"
 
+import { useAuth } from "./auth/AuthContext"
 import { Toaster } from "react-hot-toast"
 
 export default function App(){
+  const { user, loading } = useAuth()
+
+  console.log({
+    loading,
+    user,
+  })
 
   return(
 

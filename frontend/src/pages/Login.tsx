@@ -6,6 +6,7 @@ import { api } from "../api/api"
 import { useAuth } from "../auth/AuthContext"
 import Navbar from "../components/Navbar"
 import ClassSelector from "../components/ClassSelector"
+import { getDashboardPath } from "../utils/authRoutes"
 import { usePageTitle } from "../utils/usePageTitle"
 import useKeyboardInsets from "../utils/useKeyboardInsets"
 
@@ -20,7 +21,7 @@ export default function Login() {
   usePageTitle("EDP | Đăng nhập")
   useKeyboardInsets()
 
-  const { user, loading } = useAuth()
+  const { user, loading, refresh, isOffline } = useAuth()
 
   const [role, setRole] = useState("co_do")
   const [classes, setClasses] = useState<any[]>([])
@@ -63,16 +64,7 @@ export default function Login() {
   }, [role, className])
 
   if (!loading && user) {
-    const dashboardPath =
-      user.role === "admin"
-        ? "/admin/dashboard"
-        : user.role === "gvcn"
-          ? "/gvcn/dashboard"
-          : user.role === "bancansu"
-            ? "/bancansu/dashboard"
-            : "/co_do/dashboard"
-
-    return <Navigate to={dashboardPath} replace />
+    return <Navigate to={getDashboardPath(user.role)} replace />
   }
 
   async function loadClasses() {
@@ -106,6 +98,11 @@ export default function Login() {
 
     if (submitting) return
 
+    if (isOffline) {
+      toast.error("Thiết bị đang ngoại tuyến")
+      return
+    }
+
     if (role === "admin") {
       if (!username || !password) {
         toast.error("Vui lòng nhập đủ thông tin")
@@ -135,7 +132,8 @@ export default function Login() {
         })
       }
 
-      window.location.href = `/${role}/dashboard`
+      await refresh()
+      window.location.href = getDashboardPath(role)
     } catch {
       toast.error("Sai thông tin đăng nhập")
     } finally {

@@ -1,143 +1,180 @@
 import { useEffect, useState } from "react"
 import { useNavigate, useOutletContext } from "react-router-dom"
 import { api } from "../../api/api"
+import { useAuth } from "../../auth/AuthContext"
 
 import Navbar from "../../components/Navbar"
 import Footer from "../../components/Footer"
 import toast from "react-hot-toast"
 import { formatDutyStatus } from "../../utils/dutyFormat"
+import { buildDashboardCacheKey, getCachedDashboard, setCachedDashboard } from "../../utils/offlineCache"
 import { usePageTitle } from "../../utils/usePageTitle"
 
 type Assignment = {
-  red_class:string
-  duty_class:string
+  red_class: string
+  duty_class: string
 }
 
 type Week = {
-  id?:number
-  week_number:number
-  start_date:string
-  end_date:string
+  id?: number
+  week_number: number
+  start_date: string
+  end_date: string
 }
 
 type ScheduleRes = {
-  week:Week
-  assignments:Assignment[]
+  week: Week
+  assignments: Assignment[]
 }
 
-export default function CoDoDashboard(){
+type DashboardSnapshot = {
+  className: string
+  dutyClassCurrent: string | null
+  dutyClassView: string | null
+  weeks: Week[]
+  weekId: number | null
+  prevWeekId: number | null
+  week: Week | null
+  myWeekSessions: any[]
+}
+
+export default function CoDoDashboard() {
   usePageTitle("EDP | Cờ đỏ")
+  const { user: authUser, isOffline } = useAuth()
 
   const context = useOutletContext<any>()
   const setShowChangePassword = context?.setShowChangePassword as
     | ((open: boolean) => void)
     | undefined
 
-  const [time,setTime] = useState("")
-  const [date,setDate] = useState("")
+  const [time, setTime] = useState("")
+  const [date, setDate] = useState("")
 
-  const [className,setClassName] = useState("")
-  const [dutyClassCurrent,setDutyClassCurrent] = useState<string | null>(null)
-  const [dutyClassView,setDutyClassView] = useState<string | null>(null)
+  const [className, setClassName] = useState("")
+  const [dutyClassCurrent, setDutyClassCurrent] = useState<string | null>(null)
+  const [dutyClassView, setDutyClassView] = useState<string | null>(null)
 
-  const [weeks,setWeeks] = useState<Week[]>([])
-  const [weekId,setWeekId] = useState<number | null>(null)
-  const [prevWeekId,setPrevWeekId] = useState<number | null>(null)
-  const [week,setWeek] = useState<Week | null>(null)
-  const [myWeekSessions,setMyWeekSessions] = useState<any[]>([])
-  const [detailId,setDetailId] = useState<number | null>(null)
-  const [detail,setDetail] = useState<any>(null)
+  const [weeks, setWeeks] = useState<Week[]>([])
+  const [weekId, setWeekId] = useState<number | null>(null)
+  const [prevWeekId, setPrevWeekId] = useState<number | null>(null)
+  const [week, setWeek] = useState<Week | null>(null)
+  const [myWeekSessions, setMyWeekSessions] = useState<any[]>([])
+  const [detailId, setDetailId] = useState<number | null>(null)
+  const [detail, setDetail] = useState<any>(null)
 
   const navigate = useNavigate()
   const dashboardReady = !!className && (week !== null || weeks.length > 0)
 
-  useEffect(()=>{
+  useEffect(() => {
+    async function loadCachedSnapshot() {
+      try {
+        const cacheKey = buildDashboardCacheKey(authUser)
+        const cached = await getCachedDashboard<DashboardSnapshot>(cacheKey)
 
-    loadUser()
+        if (!cached) return
 
-    const timer = setInterval(()=>{
+        setClassName(cached.className || "")
+        setDutyClassCurrent(cached.dutyClassCurrent || null)
+        setDutyClassView(cached.dutyClassView || null)
+        setWeeks(cached.weeks || [])
+        setWeekId(cached.weekId ?? null)
+        setPrevWeekId(cached.prevWeekId ?? null)
+        setWeek(cached.week || null)
+        setMyWeekSessions(cached.myWeekSessions || [])
+      } catch (err) {
+        console.error(err)
+      }
+    }
 
+    void loadCachedSnapshot()
+  }, [authUser])
+
+  useEffect(() => {
+    setClassName(authUser?.class_name || "")
+  }, [authUser?.class_name])
+
+  useEffect(() => {
+    const timer = setInterval(() => {
       const now = new Date()
 
-      const h = String(now.getHours()).padStart(2,"0")
-      const m = String(now.getMinutes()).padStart(2,"0")
-      const s = String(now.getSeconds()).padStart(2,"0")
+      const h = String(now.getHours()).padStart(2, "0")
+      const m = String(now.getMinutes()).padStart(2, "0")
+      const s = String(now.getSeconds()).padStart(2, "0")
 
-      const d = String(now.getDate()).padStart(2,"0")
-      const mo = String(now.getMonth()+1).padStart(2,"0")
+      const d = String(now.getDate()).padStart(2, "0")
+      const mo = String(now.getMonth() + 1).padStart(2, "0")
       const y = now.getFullYear()
 
       setTime(`${h}:${m}:${s}`)
       setDate(`${d}/${mo}/${y}`)
+    }, 1000)
 
-    },1000)
+    return () => clearInterval(timer)
+  }, [])
 
-    return ()=>clearInterval(timer)
+  useEffect(() => {
+    if (!className || isOffline) return
+    loadSchedule()
+    loadWeeks()
+  }, [className, isOffline])
 
-  },[])
+  useEffect(() => {
+    if (!weekId || isOffline) return
+    loadMyWeek(weekId)
+  }, [weekId, isOffline])
 
-  useEffect(()=>{
-    if(className){
-      loadSchedule()
-      loadWeeks()
-    }
-  },[className])
-
-  useEffect(()=>{
-    if(weekId){
-      loadMyWeek(weekId)
-    }
-  },[weekId])
-
-  async function loadUser(){
-
-    try{
-
-      const res = await api.get("/auth/me")
-
-      setClassName(res.data.class_name)
-
-    }catch(err){
-
-      console.error(err)
-
+  useEffect(() => {
+    if (
+      !className &&
+      !dutyClassCurrent &&
+      !dutyClassView &&
+      !weeks.length &&
+      !week &&
+      !myWeekSessions.length
+    ) {
+      return
     }
 
-  }
+    const cacheKey = buildDashboardCacheKey(authUser)
 
+    void setCachedDashboard(cacheKey, {
+      className,
+      dutyClassCurrent,
+      dutyClassView,
+      weeks,
+      weekId,
+      prevWeekId,
+      week,
+      myWeekSessions,
+    })
+  }, [authUser, className, dutyClassCurrent, dutyClassView, weeks, weekId, prevWeekId, week, myWeekSessions])
 
-  async function loadSchedule(){
-
-    try{
-
+  async function loadSchedule() {
+    try {
       const res = await api.get("/schedule")
 
-      const data:ScheduleRes = res.data
+      const data: ScheduleRes = res.data
 
       setWeek(data.week)
 
       const row = data.assignments.find(
-        a => a.red_class === className
+        (a) => a.red_class === className,
       )
 
-      if(row){
+      if (row) {
         setDutyClassCurrent(row.duty_class)
-      }else{
+      } else {
         setDutyClassCurrent(null)
       }
-
-    }catch(err){
-
+    } catch (err) {
       console.error(err)
-
     }
-
   }
 
-  async function loadWeeks(){
-    try{
+  async function loadWeeks() {
+    try {
       const res = await api.get("/duty/co_do/weeks")
-      const list:Week[] = res.data.weeks || []
+      const list: Week[] = res.data.weeks || []
       setWeeks(list)
 
       const latest = list[0] || null
@@ -145,91 +182,95 @@ export default function CoDoDashboard(){
 
       setPrevWeekId(previous?.id ?? null)
       setWeekId(latest?.id ?? null)
-    }catch(err){
+    } catch (err) {
       console.error(err)
     }
   }
 
-  async function loadMyWeek(id:number){
-    try{
+  async function loadMyWeek(id: number) {
+    try {
       const res = await api.get(`/duty/co_do/week/${id}`)
       setWeek(res.data.week || null)
       setMyWeekSessions(res.data.sessions || [])
 
       setDutyClassView(res.data.duty_class || null)
-    }catch(err){
+    } catch (err) {
       console.error(err)
     }
   }
 
-  async function startDutyNow(){
+  async function startDutyNow() {
+    if (isOffline) {
+      toast("Chức năng này cần kết nối mạng")
+      return
+    }
 
-    try{
-      await api.post("/duty/create",{})
+    try {
+      await api.post("/duty/create", {})
       navigate("/co_do/duty")
-    }catch(err:any){
+    } catch (err: any) {
       console.error(err)
       const msg = err?.response?.data?.error || "Không thể bắt đầu ca trực"
       toast.error(msg)
     }
-
   }
 
-  function weekday(dateStr:string){
-    if(!dateStr) return ""
-    const [y,m,d] = dateStr.split("-").map(Number)
-    const dt = new Date(y, (m||1)-1, d||1)
-    return dt.toLocaleDateString("vi-VN",{ weekday:"short" })
+  function weekday(dateStr: string) {
+    if (!dateStr) return ""
+    const [y, m, d] = dateStr.split("-").map(Number)
+    const dt = new Date(y, (m || 1) - 1, d || 1)
+    return dt.toLocaleDateString("vi-VN", { weekday: "short" })
   }
 
-  function weekLabelById(id:number | null){
-    if(!id) return "Tuần ?"
-    const found = weeks.find(w=>Number(w.id)===Number(id))
+  function weekLabelById(id: number | null) {
+    if (!id) return "Tuần ?"
+    const found = weeks.find((w) => Number(w.id) === Number(id))
     return found?.week_number ? `Tuần ${found.week_number}` : "Tuần ?"
   }
 
   const latestWeek = weeks[0] || null
 
-  async function openDetail(id:number){
+  async function openDetail(id: number) {
+    if (isOffline) {
+      toast("Chi tiết phiếu cần kết nối mạng")
+      return
+    }
+
     setDetailId(id)
     setDetail(null)
-    try{
+    try {
       const res = await api.get(`/duty/my/session/${id}`)
       setDetail(res.data)
-    }catch(err){
+    } catch (err) {
       console.error(err)
       toast.error("Không tải được phiếu")
     }
   }
 
-  function editSession(id:number){
+  function editSession(id: number) {
+    if (isOffline) {
+      toast("Chức năng chỉnh sửa cần kết nối mạng")
+      return
+    }
+
     navigate(`/co_do/duty/${id}`)
   }
 
-  function formatDate(date:string){
+  function formatDate(date: string) {
+    if (!date) return ""
 
-    if(!date) return ""
-
-    const [y,m,d] = date.split("-")
+    const [y, m, d] = date.split("-")
 
     return `${d}/${m}/${y}`
-
   }
 
-  return(
-
+  return (
     <div className="edp-mobile-shell flex flex-col bg-slate-50">
-
-      <Navbar/>
+      <Navbar />
 
       <div className="flex-1 max-w-md mx-auto w-full px-4 pt-4 pb-28 space-y-4">
-
-        {/* HERO */}
-
         <div className="overflow-hidden rounded-[28px] bg-gradient-to-br from-[#2e77df] via-[#2b6fd0] to-[#1f5fc0] text-white shadow-[0_18px_42px_rgba(30,64,175,0.28)]">
-
           <div className="p-5">
-
             <div className="flex items-start justify-between gap-3">
               <div>
                 <div className="text-xs font-semibold uppercase tracking-[0.14em] opacity-80">
@@ -272,13 +313,8 @@ export default function CoDoDashboard(){
                 <div className="h-4 w-28 rounded-full bg-white/15 animate-pulse" />
               </div>
             )}
-
           </div>
-
         </div>
-
-
-        {/* Week info */}
 
         <div className="rounded-[28px] bg-white p-5 shadow-sm ring-1 ring-blue-50">
           <div className="text-sm text-gray-600">Chọn tuần</div>
@@ -325,10 +361,7 @@ export default function CoDoDashboard(){
           )}
         </div>
 
-        {/* Duty */}
-
         <div className="rounded-[28px] bg-white p-5 shadow-sm ring-1 ring-blue-50">
-
           <div className="text-sm text-gray-600">
             Lớp trực
           </div>
@@ -342,24 +375,18 @@ export default function CoDoDashboard(){
               Chưa có lịch trực cho lớp bạn trong tuần đang xem.
             </div>
           )}
-
         </div>
 
-        {/* Actions */}
-
         <div className="sticky bottom-[calc(env(safe-area-inset-bottom)+0.75rem)] z-30">
-
           <button
             onClick={startDutyNow}
-            disabled={!dutyClassCurrent}
+            disabled={!dutyClassCurrent || isOffline}
             className="block w-full min-h-14 rounded-[20px] bg-[#2e77df] px-4 py-4 text-center text-[15px] font-semibold text-white shadow-[0_12px_28px_rgba(46,119,223,0.24)] transition hover:bg-[#1f5fc0] active:scale-[0.98] disabled:opacity-50"
           >
             Bắt đầu trực
           </button>
-
         </div>
 
-        {/* My week sessions */}
         <div className="rounded-[28px] bg-white p-5 shadow-sm ring-1 ring-blue-50">
           <div className="flex items-center gap-3">
             <div className="text-sm font-semibold text-gray-900">
@@ -370,16 +397,16 @@ export default function CoDoDashboard(){
             </div>
           </div>
 
-          {myWeekSessions.length===0 ? (
+          {myWeekSessions.length === 0 ? (
             <div className="mt-3 text-sm text-gray-600">
               Chưa có phiếu trực trong tuần đang xem.
             </div>
           ) : (
             <div className="mt-3 space-y-2">
-              {myWeekSessions.map((s:any)=>(
+              {myWeekSessions.map((s: any) => (
                 <button
                   key={s.id}
-                  onClick={()=>openDetail(s.id)}
+                  onClick={() => openDetail(s.id)}
                   className="w-full rounded-2xl border border-blue-100 bg-white px-4 py-3 text-left shadow-sm transition hover:bg-slate-50 active:scale-[0.99]"
                 >
                   <div className="flex items-start gap-3">
@@ -411,11 +438,11 @@ export default function CoDoDashboard(){
                       </div>
                     </div>
                     <div className="shrink-0">
-                      {s.status==="signed" ? (
+                      {s.status === "signed" ? (
                         <span className="rounded-full bg-emerald-50 px-2.5 py-1 text-[11px] font-semibold text-emerald-700">
                           Đã ký
                         </span>
-                      ):(
+                      ) : (
                         <span className="rounded-full bg-blue-50 px-2.5 py-1 text-[11px] font-semibold text-blue-700">
                           Nháp
                         </span>
@@ -428,11 +455,11 @@ export default function CoDoDashboard(){
           )}
         </div>
 
-        {detailId!=null && (
+        {detailId != null && (
           <div className="fixed inset-0 z-50">
             <div
               className="absolute inset-0 bg-black/50"
-              onClick={()=>{
+              onClick={() => {
                 setDetailId(null)
                 setDetail(null)
               }}
@@ -444,7 +471,7 @@ export default function CoDoDashboard(){
                 </div>
                 <button
                   className="ml-auto rounded-full bg-gray-100 px-3 py-1 text-xs font-semibold text-gray-700"
-                  onClick={()=>{
+                  onClick={() => {
                     setDetailId(null)
                     setDetail(null)
                   }}
@@ -501,7 +528,7 @@ export default function CoDoDashboard(){
                     </div>
                     <div className="mt-3 flex gap-2">
                       <button
-                        onClick={()=>editSession(detail.session.id)}
+                        onClick={() => editSession(detail.session.id)}
                         className="rounded-2xl bg-[#2e77df] px-4 py-2.5 text-sm font-semibold text-white shadow-sm"
                       >
                         Chỉnh sửa / Ký lại
@@ -521,10 +548,10 @@ export default function CoDoDashboard(){
 
                   <div className="space-y-2">
                     <div className="text-sm font-semibold text-gray-900">Vi phạm</div>
-                    {detail.violations.length===0 ? (
+                    {detail.violations.length === 0 ? (
                       <div className="text-sm text-gray-600">Không có vi phạm.</div>
                     ) : (
-                      detail.violations.map((v:any)=>(
+                      detail.violations.map((v: any) => (
                         <div key={v.id} className="rounded-2xl border border-blue-100 bg-white px-4 py-3">
                           <div className="text-[15px] font-semibold text-gray-900">{v.name}</div>
                           <div className="mt-0.5 text-xs text-gray-500">{v.category} | x{v.quantity} ({v.score_delta})</div>
@@ -535,17 +562,12 @@ export default function CoDoDashboard(){
                   </div>
                 </div>
               )}
-
             </div>
           </div>
         )}
-
       </div>
 
-      <Footer/>
-
+      <Footer />
     </div>
-
   )
-
 }

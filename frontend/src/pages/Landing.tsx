@@ -289,7 +289,7 @@ export default function Landing() {
   const [competitionLoading, setCompetitionLoading] = useState(false)
   const activeDays = useMemo(() => getActiveDays(), [])
   useEffect(() => {
-    if (loading || user) return
+    if (loading) return
 
     let active = true
 
@@ -339,7 +339,7 @@ export default function Landing() {
   }, [loading, user])
 
   useEffect(() => {
-    if (loading || user) return
+    if (loading) return
 
     let active = true
 

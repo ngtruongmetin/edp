@@ -3,9 +3,11 @@ import { useOutletContext } from "react-router-dom"
 import toast from "react-hot-toast"
 
 import { api } from "../../api/api"
+import { useAuth } from "../../auth/AuthContext"
 import Navbar from "../../components/Navbar"
 import Footer from "../../components/Footer"
 import { formatDutyStatus } from "../../utils/dutyFormat"
+import { buildDashboardCacheKey, getCachedDashboard, setCachedDashboard } from "../../utils/offlineCache"
 import { usePageTitle } from "../../utils/usePageTitle"
 
 type Week = {
@@ -35,8 +37,17 @@ type ScoreRow = {
   updated_at?: string | null
 }
 
+type DashboardSnapshot = {
+  weeks: Week[]
+  weekId: number | null
+  week: Week | null
+  sessions: Session[]
+  summary: { closed_at: string | null; scores: ScoreRow[] } | null
+}
+
 export default function GvcnDashboard() {
   usePageTitle("EDP | Giáo viên chủ nhiệm")
+  const { user: authUser, isOffline } = useAuth()
   const context = useOutletContext<any>()
   const user = context?.user
   const setShowChangePassword = context?.setShowChangePassword as
@@ -75,17 +86,61 @@ export default function GvcnDashboard() {
   }, [])
 
   useEffect(() => {
-    if (user?.class_name) {
-      loadWeeks()
+    async function loadCachedSnapshot() {
+      try {
+        const cacheKey = buildDashboardCacheKey(authUser)
+        const cached = await getCachedDashboard<DashboardSnapshot>(cacheKey)
+
+        if (!cached) {
+          setLoading(false)
+          setSummaryLoading(false)
+          return
+        }
+
+        setWeeks(cached.weeks || [])
+        setWeekId(cached.weekId ?? null)
+        setWeek(cached.week || null)
+        setSessions(cached.sessions || [])
+        setSummary(cached.summary || null)
+      } catch (err) {
+        console.error(err)
+      } finally {
+        if (isOffline) {
+          setLoading(false)
+          setSummaryLoading(false)
+        }
+      }
     }
-  }, [user?.class_name])
+
+    void loadCachedSnapshot()
+  }, [authUser, isOffline])
 
   useEffect(() => {
-    if (weekId) {
+    if (user?.class_name && !isOffline) {
+      loadWeeks()
+    }
+  }, [user?.class_name, isOffline])
+
+  useEffect(() => {
+    if (weekId && !isOffline) {
       loadWeekSessions(weekId)
       loadWeekSummary(weekId)
     }
-  }, [weekId])
+  }, [weekId, isOffline])
+
+  useEffect(() => {
+    if (!weeks.length && !week && !sessions.length && !summary) return
+
+    const cacheKey = buildDashboardCacheKey(authUser)
+
+    void setCachedDashboard(cacheKey, {
+      weeks,
+      weekId,
+      week,
+      sessions,
+      summary,
+    })
+  }, [authUser, weeks, weekId, week, sessions, summary])
 
   async function loadWeeks() {
     try {
@@ -143,6 +198,11 @@ export default function GvcnDashboard() {
   }
 
   async function openDetail(id: number) {
+    if (isOffline) {
+      toast("Chi tiết phiếu cần kết nối mạng")
+      return
+    }
+
     setDetailId(id)
     setDetail(null)
     try {

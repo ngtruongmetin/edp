@@ -3,9 +3,11 @@ import { useOutletContext } from "react-router-dom"
 import toast from "react-hot-toast"
 
 import { api } from "../../api/api"
+import { useAuth } from "../../auth/AuthContext"
 import Navbar from "../../components/Navbar"
 import Footer from "../../components/Footer"
 import { formatDutyStatus } from "../../utils/dutyFormat"
+import { buildDashboardCacheKey, getCachedDashboard, setCachedDashboard } from "../../utils/offlineCache"
 import { usePageTitle } from "../../utils/usePageTitle"
 
 type Week = {
@@ -28,8 +30,16 @@ type Session = {
   signature_photo_path?: string | null
 }
 
+type DashboardSnapshot = {
+  weeks: Week[]
+  weekId: number | null
+  week: Week | null
+  sessions: Session[]
+}
+
 export default function BanCanSuDashboard() {
   usePageTitle("EDP | Ban cán sự")
+  const { user: authUser, isOffline } = useAuth()
   const context = useOutletContext<any>()
   const user = context?.user
   const setShowChangePassword = context?.setShowChangePassword as
@@ -65,16 +75,54 @@ export default function BanCanSuDashboard() {
   }, [])
 
   useEffect(() => {
-    if (user?.class_name) {
-      loadWeeks()
+    async function loadCachedSnapshot() {
+      try {
+        const cacheKey = buildDashboardCacheKey(authUser)
+        const cached = await getCachedDashboard<DashboardSnapshot>(cacheKey)
+
+        if (!cached) {
+          setLoading(false)
+          return
+        }
+
+        setWeeks(cached.weeks || [])
+        setWeekId(cached.weekId ?? null)
+        setWeek(cached.week || null)
+        setSessions(cached.sessions || [])
+      } catch (err) {
+        console.error(err)
+      } finally {
+        if (isOffline) {
+          setLoading(false)
+        }
+      }
     }
-  }, [user?.class_name])
+
+    void loadCachedSnapshot()
+  }, [authUser, isOffline])
 
   useEffect(() => {
-    if (weekId) {
-      loadWeekSessions(weekId)
-    }
-  }, [weekId])
+    if (!user?.class_name || isOffline) return
+    loadWeeks()
+  }, [user?.class_name, isOffline])
+
+  useEffect(() => {
+    if (!weekId || isOffline) return
+    loadWeekSessions(weekId)
+  }, [weekId, isOffline])
+
+  useEffect(() => {
+    if (!weeks.length && !week && !sessions.length) return
+
+    const cacheKey = buildDashboardCacheKey(authUser)
+
+    void setCachedDashboard(cacheKey, {
+      weeks,
+      weekId,
+      week,
+      sessions,
+    })
+  }, [authUser, weeks, weekId, week, sessions])
 
   async function loadWeeks() {
     try {
@@ -115,6 +163,11 @@ export default function BanCanSuDashboard() {
   }
 
   async function openDetail(id: number) {
+    if (isOffline) {
+      toast("Chi tiết phiếu cần kết nối mạng")
+      return
+    }
+
     setDetailId(id)
     setDetail(null)
     try {
@@ -226,11 +279,9 @@ export default function BanCanSuDashboard() {
                 </option>
               ))}
             </select>
-            {week && (
-              <div className="mt-2 text-xs text-gray-500">
-                {formatDateVN(week.start_date)} - {formatDateVN(week.end_date)}
-              </div>
-            )}
+            <div className="mt-2 text-xs text-gray-500">
+              {formatDateVN(week.start_date)} - {formatDateVN(week.end_date)}
+            </div>
           </div>
         )}
 
@@ -262,8 +313,7 @@ export default function BanCanSuDashboard() {
                       <div className="mt-0.5 text-xs text-gray-500">
                         Tổng điểm:{" "}
                         <span
-                          className={`font-semibold ${Number(s.total_score) >= 0 ? "text-emerald-700" : "text-red-600"
-                            }`}
+                          className={`font-semibold ${Number(s.total_score) >= 0 ? "text-emerald-700" : "text-red-600"}`}
                         >
                           {Number(s.total_score) > 0 ? `+${s.total_score}` : String(s.total_score)}
                         </span>{" "}
@@ -349,8 +399,7 @@ export default function BanCanSuDashboard() {
                       <div className="rounded-2xl bg-slate-50 p-3">
                         <div className="text-[11px] text-gray-500">Tổng điểm</div>
                         <div
-                          className={`mt-0.5 text-sm font-semibold ${total >= 0 ? "text-emerald-700" : "text-red-600"
-                            }`}
+                          className={`mt-0.5 text-sm font-semibold ${total >= 0 ? "text-emerald-700" : "text-red-600"}`}
                         >
                           {total > 0 ? `+${total}` : String(total)}
                         </div>

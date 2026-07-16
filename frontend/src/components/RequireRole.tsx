@@ -1,6 +1,6 @@
-import { useEffect, useState, type ReactNode } from "react"
+import type { ReactNode } from "react"
 import { Navigate } from "react-router-dom"
-import { api } from "../api/api"
+import { useAuth } from "../auth/AuthContext"
 
 type Props = {
   role: string
@@ -8,43 +8,21 @@ type Props = {
 }
 
 export default function RequireRole({ role, children }: Props) {
+  const { user, loading } = useAuth()
 
-  const [status, setStatus] = useState<"loading" | "ok" | "deny">("loading")
+  console.log({
+    loading,
+    user,
+    offline: !window.navigator.onLine,
+  })
 
-  useEffect(() => {
-
-    async function checkAuth(){
-
-      try{
-
-        const res = await api.get("/auth/me")
-
-        if(res.data.role === role){
-          setStatus("ok")
-        }else{
-          setStatus("deny")
-        }
-
-      }catch{
-
-        setStatus("deny")
-
-      }
-
-    }
-
-    checkAuth()
-
-  }, [role])
-
-  if(status === "loading"){
+  if (loading) {
     return null
   }
 
-  if(status === "deny"){
+  if (!user || user.role !== role) {
     return <Navigate to="/login" replace />
   }
 
   return <>{children}</>
-
 }

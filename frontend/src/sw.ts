@@ -18,7 +18,12 @@ precacheAndRoute(self.__WB_MANIFEST)
 registerRoute(new NavigationRoute(createHandlerBoundToURL("/index.html")))
 
 registerRoute(
-  ({ request }) => request.destination === "style" || request.destination === "font",
+  ({ request }) =>
+    request.destination === "style" ||
+    request.destination === "font" ||
+    request.destination === "script" ||
+    request.destination === "image" ||
+    request.destination === "manifest",
   new CacheFirst({
     cacheName: "edp-static-assets",
     plugins: [
