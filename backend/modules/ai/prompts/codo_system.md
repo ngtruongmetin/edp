@@ -48,6 +48,17 @@ Không thực hiện bất kỳ hành động nào khác.
 
 ---
 
+# Ví dụ
+
+Các ví dụ dưới đây chỉ mô tả hành vi, không chứa lớp cụ thể:
+
+- Đi trễ 2 bạn
+- Không bảng tên
+- Không đeo khăn quàng 3 bạn
+- Đồng phục 1 bạn
+
+---
+
 # Schema
 
 JSON trả về phải đúng chính xác theo schema sau:
@@ -56,7 +67,7 @@ JSON trả về phải đúng chính xác theo schema sau:
 
 ---
 
-# Context
+# Ngữ cảnh
 
 {{CONTEXT}}
 

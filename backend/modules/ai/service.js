@@ -274,6 +274,18 @@ async function parseCodoMessage({ dutyId, message, redClass }) {
 
   const parsed = parseModelResponse(rawResponse)
   logDevBlock("===== AI PARSED =====", JSON.stringify(parsed, null, 2))
+  logDevBlock(
+    "===== AI RULE IDS =====",
+    JSON.stringify(
+      Array.isArray(parsed?.violations)
+        ? parsed.violations.map((item) => ({
+            ruleId: item?.ruleId ?? null,
+          }))
+        : [],
+      null,
+      2,
+    ),
+  )
 
   const valid = validateAiResponse(parsed)
   logDevBlock("===== AI VALID =====", JSON.stringify(valid, null, 2))

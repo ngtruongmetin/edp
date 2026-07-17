@@ -1,4 +1,4 @@
-import { BrowserRouter, Routes, Route } from "react-router-dom"
+import { BrowserRouter, Navigate, Routes, Route } from "react-router-dom"
 
 import Landing from "./pages/Landing"
 import Login from "./pages/Login"
@@ -21,8 +21,7 @@ import AdminSystemSettings from "./pages/admin/AdminSystemSettings"
 
 import CodoDashboard from "./pages/co_do/CodoDashboard"
 import CodoLayout from "./pages/co_do/CodoLayout"
-import CodoDuty from "./pages/co_do/CodoDuty"
-import CodoDutyAssistant from "./pages/co_do/CodoDutyAssistant"
+import CodoDutyRoute from "./pages/co_do/CodoDutyRoute"
 
 import BanCanSuLayout from "./pages/ban_can_su/BanCanSuLayout"
 import BanCanSuDashboard from "./pages/ban_can_su/BanCanSuDashboard"
@@ -84,9 +83,8 @@ export default function App(){
 
         <Route path="/co_do" element={<CodoLayout/>}>
           <Route path="dashboard" element={<CodoDashboard/>}/>
-          <Route path="duty" element={<CodoDuty/>}/>
-          <Route path="duty/:id" element={<CodoDuty/>}/>
-          <Route path="duty-assistant" element={<CodoDutyAssistant/>}/>
+          <Route path="duty" element={<Navigate to="/co_do/dashboard" replace />}/>
+          <Route path="duty/:id" element={<CodoDutyRoute/>}/>
           {/* mọi route co_do sai */}
           <Route path="*" element={<NotFound/>}/>
         </Route>

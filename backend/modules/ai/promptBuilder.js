@@ -53,6 +53,7 @@ function buildRulesSection(rules) {
     ...normalizedRules.map((rule, index) =>
       [
         `${index + 1}.`,
+        `Mã luật: ${formatValue(rule?.id)}`,
         `Tên: ${formatValue(rule?.name)}`,
         `Điểm: -${Math.abs(Number(rule?.minus_points || 0))}`,
         `Cho phép nhập số lượng: ${formatBoolean(rule?.allow_quantity)}`,

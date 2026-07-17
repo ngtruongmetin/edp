@@ -57,6 +57,7 @@ function CoDoFloatingAssistantFab() {
   const navigate = useNavigate()
   const [position, setPosition] = useState<FabPosition | null>(null)
   const [isDragging, setIsDragging] = useState(false)
+  const [currentDutyId, setCurrentDutyId] = useState<string | null>(null)
   const dragStateRef = useRef({
     pointerId: -1,
     startX: 0,
@@ -117,7 +118,38 @@ function CoDoFloatingAssistantFab() {
     }
   }, [])
 
-  if (location.pathname === "/co_do/duty-assistant" || !position) {
+  useEffect(() => {
+    const match = location.pathname.match(/^\/co_do\/duty\/(\d+)$/)
+
+    if (match?.[1]) {
+      setCurrentDutyId(match[1])
+      return
+    }
+
+    let alive = true
+
+    ;(async () => {
+      try {
+        const res = await api.get("/duty/current")
+        if (!alive) return
+        const nextDutyId = res.data?.session?.id
+        setCurrentDutyId(nextDutyId ? String(nextDutyId) : null)
+      } catch (err) {
+        console.error(err)
+        if (alive) {
+          setCurrentDutyId(null)
+        }
+      }
+    })()
+
+    return () => {
+      alive = false
+    }
+  }, [location.pathname])
+
+  const assistantMode = new URLSearchParams(location.search).get("assistant") === "1"
+
+  if (assistantMode || !position) {
     return null
   }
 
@@ -197,7 +229,12 @@ function CoDoFloatingAssistantFab() {
     setIsDragging(false)
 
     if (!wasDragged) {
-      navigate("/co_do/duty-assistant")
+      if (!currentDutyId) {
+        navigate("/co_do/dashboard")
+        return
+      }
+
+      navigate(`/co_do/duty/${currentDutyId}?assistant=1`)
     }
   }
 

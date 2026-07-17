@@ -206,8 +206,15 @@ export default function CoDoDashboard() {
     }
 
     try {
-      await api.post("/duty/create", {})
-      navigate("/co_do/duty")
+      const res = await api.post("/duty/create", {})
+      const sessionId = Number(res.data?.session_id || 0)
+
+      if (!sessionId) {
+        toast.error("Không thể mở phiếu trực")
+        return
+      }
+
+      navigate(`/co_do/duty/${sessionId}`)
     } catch (err: any) {
       console.error(err)
       const msg = err?.response?.data?.error || "Không thể bắt đầu ca trực"
