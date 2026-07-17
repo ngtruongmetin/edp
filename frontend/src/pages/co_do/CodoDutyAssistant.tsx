@@ -25,6 +25,27 @@ type DutySession = {
   duty_class: string
 }
 
+type DutyViolation = {
+  id: number
+  rule_id: number
+  quantity: number
+  note: string
+  name: string
+  category?: string
+  score_delta: number
+}
+
+type ConfirmCardMessage = {
+  id: string
+  role: "assistant"
+  timestamp: string
+  kind: "confirm"
+  dutyClass: string
+  violations: DutyViolation[]
+}
+
+type AssistantMessage = ChatMessage | ConfirmCardMessage
+
 type ClassOption = {
   id: number
   name: string
@@ -137,15 +158,14 @@ function buildSystemMessageV2(meta: AssistantMeta): TextMessage {
     timestamp: createTimestamp(),
     content: `Xin chào.
 Bạn đang chỉnh sửa phiếu trực ${weekday}, ngày ${meta.dateDisplay}, tuần số ${meta.weekNumber ?? "--"} của lớp ${meta.dutyClass || "--"}.
-
 Tôi sẽ hỗ trợ bạn ghi nhận vi phạm bằng ngôn ngữ tự nhiên. Ví dụ:
 • Đi trễ 2 bạn
 • Không bảng tên
 • Không đồng phục 3 
-
 Lưu ý:
 • Nếu không nhập số lượng, tôi sẽ mặc định là 1.
-• Bạn luôn có thể chỉnh sửa kết quả trước khi lưu.`,
+• Bạn luôn có thể chỉnh sửa kết quả trước khi lưu.
+• Nếu bạn muốn ký xác nhận phiếu trực, hãy nhập lệnh /ky hoặc /ki hoặc /sign.`,
   }
 }
 function BackIcon() {
@@ -186,8 +206,103 @@ function getViolationScore(ruleId: number | null, quantity: number, rules: RuleT
   return String(rule.score_delta * quantity)
 }
 
-function isResultMessage(message: ChatMessage): message is ResultMessage {
-  return "kind" in message
+function isResultMessage(message: AssistantMessage): message is ResultMessage {
+  return "kind" in message && message.kind === "result"
+}
+
+function isConfirmCardMessage(message: AssistantMessage): message is ConfirmCardMessage {
+  return "kind" in message && message.kind === "confirm"
+}
+
+function ConfirmCardMessageView({
+  message,
+  onConfirm,
+}: {
+  message: ConfirmCardMessage
+  onConfirm: () => void
+}) {
+  return (
+    <div className="edp-spring-in rounded-[30px] border border-white/65 bg-white/80 p-4 shadow-[0_18px_36px_rgba(15,23,42,0.08)] backdrop-blur-xl">
+      <div className="flex items-start gap-3">
+        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-[#eff6ff] text-[#2e77df] shadow-[inset_0_1px_0_rgba(255,255,255,0.7)]">
+          <SparkleIcon />
+        </div>
+
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center justify-between gap-3">
+            <div className="text-sm font-semibold text-slate-900">AI Assistant</div>
+            <div className="text-[11px] text-slate-400">{message.timestamp}</div>
+          </div>
+
+          <div className="mt-3 text-sm font-medium text-slate-700">
+            Xác nhận phiếu trực
+          </div>
+
+          <div className="my-4 h-px bg-gradient-to-r from-transparent via-slate-200 to-transparent" />
+
+          <div className="space-y-3 rounded-[24px] border border-slate-200/70 bg-white/82 p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.85)]">
+            <div className="grid grid-cols-[1fr_auto] items-center gap-3">
+              <div className="text-xs uppercase tracking-[0.14em] text-slate-400">Lớp</div>
+              <div className="text-lg font-semibold text-slate-900">{message.dutyClass || "--"}</div>
+            </div>
+
+            <div className="my-2 h-px bg-gradient-to-r from-transparent via-slate-200 to-transparent" />
+
+            <div className="text-xs uppercase tracking-[0.14em] text-slate-400">Danh sách lỗi</div>
+
+            <div className="space-y-3">
+              {message.violations.length === 0 ? (
+                <div className="rounded-[18px] bg-slate-50 px-4 py-3 text-sm text-slate-500">
+                  Phiếu trực hiện tại chưa có lỗi.
+                </div>
+              ) : (
+                message.violations.map((item) => (
+                  <div
+                    key={item.id}
+                    className="rounded-[20px] border border-slate-200/70 bg-white px-4 py-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.85)]"
+                  >
+                    <div className="text-[15px] font-semibold text-slate-900">• {item.name}</div>
+                    <div className="mt-2 grid grid-cols-2 gap-2 text-sm text-slate-600">
+                      <div>Số lượng: {item.quantity}</div>
+                      <div>Điểm trừ: {item.score_delta * item.quantity}</div>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+
+            <div className="my-2 h-px bg-gradient-to-r from-transparent via-slate-200 to-transparent" />
+
+            <div className="grid grid-cols-2 gap-3">
+              <div className="rounded-[20px] border border-slate-200/70 bg-white px-4 py-3">
+                <div className="text-xs uppercase tracking-[0.14em] text-slate-400">Tổng lỗi</div>
+                <div className="mt-1 text-lg font-semibold text-slate-900">
+                  {message.violations.length}
+                </div>
+              </div>
+              <div className="rounded-[20px] border border-slate-200/70 bg-white px-4 py-3">
+                <div className="text-xs uppercase tracking-[0.14em] text-slate-400">Tổng điểm</div>
+                <div className="mt-1 text-lg font-semibold text-red-600">
+                  {message.violations.reduce(
+                    (sum, item) => sum + Number(item.score_delta || 0) * Number(item.quantity || 0),
+                    0,
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <button
+            type="button"
+            onClick={onConfirm}
+            className="mt-4 min-h-11 rounded-[20px] bg-[#2e77df] px-4 text-sm font-semibold text-white shadow-[0_10px_22px_rgba(46,119,223,0.22)] transition duration-200 active:scale-[0.98]"
+          >
+            Ký xác nhận
+          </button>
+        </div>
+      </div>
+    </div>
+  )
 }
 
 type ResultSheetProps = {
@@ -478,7 +593,7 @@ export default function CodoDutyAssistant() {
   const textareaRef = useRef<HTMLTextAreaElement | null>(null)
   const isComposingRef = useRef(false)
 
-  const messages = history.messages
+  const messages = history.messages as AssistantMessage[]
   const draft = history.draft
   const activeSheetMessageId = history.activeSheetMessageId
 
@@ -613,6 +728,32 @@ export default function CodoDutyAssistant() {
     }))
   }
 
+  async function loadCurrentDutySnapshot() {
+    if (!numericDutyId) return null
+
+    const res = await api.get(`/duty/my/session/${numericDutyId}`)
+    const dutySession = res.data?.session as DutySession | null
+
+    if (!dutySession?.id) {
+      return null
+    }
+
+    const freshViolations = Array.isArray(res.data?.violations) ? (res.data.violations as DutyViolation[]) : []
+
+    setSession(dutySession)
+    setMeta((current) => ({
+      ...current,
+      dutyClass: String(dutySession.duty_class || current.dutyClass || ""),
+      dateDisplay: formatDateDisplay(dutySession.date || new Date()),
+    }))
+
+    return {
+      session: dutySession,
+      violations: freshViolations,
+      week: res.data?.week || null,
+    }
+  }
+
   function mapApiViolationsToDrafts(violations: AiViolation[]): ParsedViolationDraft[] {
     return violations.map((item) => ({
       id: createId("violation"),
@@ -650,7 +791,6 @@ export default function CodoDutyAssistant() {
       return true
     }
 
-    setShowSignSheet(true)
     return true
   }
 
@@ -659,6 +799,36 @@ export default function CodoDutyAssistant() {
     if (!content || isSending || isBooting || !historyReady || !numericDutyId) return
 
     if (handleSlashCommand(content)) {
+      try {
+        const snapshot = await loadCurrentDutySnapshot()
+        if (!snapshot) {
+          toast.error("Không thể tải dữ liệu phiếu trực để xác nhận.")
+          return
+        }
+
+        const confirmMessage: ConfirmCardMessage = {
+          id: createId("confirm"),
+          role: "assistant",
+          timestamp: createTimestamp(),
+          kind: "confirm",
+          dutyClass: String(snapshot.session.duty_class || meta.dutyClass || ""),
+          violations: snapshot.violations,
+        }
+
+        updateHistory((current) => ({
+          ...current,
+          draft: "",
+          messages: [
+            ...(current.messages as AssistantMessage[]).filter((message) => !isConfirmCardMessage(message)),
+            confirmMessage,
+          ] as any,
+        }))
+        focusDraftInput()
+      } catch (err) {
+        console.error(err)
+        toast.error("Không thể tải dữ liệu phiếu trực để xác nhận.")
+      }
+
       return
     }
 
@@ -939,6 +1109,16 @@ export default function CodoDutyAssistant() {
               messages.map((message, index) => {
                 const isUser = message.role === "user"
 
+                if (isConfirmCardMessage(message)) {
+                  return (
+                    <ConfirmCardMessageView
+                      key={message.id}
+                      message={message}
+                      onConfirm={() => setShowSignSheet(true)}
+                    />
+                  )
+                }
+
                 if (isResultMessage(message)) {
                   return (
                     <ResultSheet
@@ -1062,9 +1242,9 @@ export default function CodoDutyAssistant() {
                 <SendIcon />
               </button>
             </div>
-          </div>
         </div>
       </div>
+    </div>
 
       <CodoDutySignSheet
         open={showSignSheet && !!session}

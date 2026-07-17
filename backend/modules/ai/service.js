@@ -72,7 +72,7 @@ async function loadCodoDutyContext({ dutyId, redClass }) {
 
   const rules = await all(
     `
-      SELECT id, name, score_delta
+      SELECT id, name
       FROM rules
       ORDER BY category, id
     `,
@@ -92,9 +92,33 @@ async function loadCodoDutyContext({ dutyId, redClass }) {
     rules: (rules || []).map((rule) => ({
       id: Number(rule.id),
       name: String(rule.name || ""),
-      minus_points: Math.abs(Number(rule.score_delta || 0)),
-      allow_quantity: true,
-      aliases: [],
+    })),
+  }
+}
+
+async function loadCodoPromptPreviewContext() {
+  const rules = await all(
+    `
+      SELECT id, name
+      FROM rules
+      ORDER BY category, id
+    `,
+    [],
+  )
+
+  return {
+    duty: {
+      id: 0,
+      date: new Date().toISOString().slice(0, 10),
+      status: "preview",
+    },
+    targetClass: {
+      id: null,
+      name: "10A8",
+    },
+    rules: (rules || []).map((rule) => ({
+      id: Number(rule.id),
+      name: String(rule.name || ""),
     })),
   }
 }
@@ -293,8 +317,29 @@ async function parseCodoMessage({ dutyId, message, redClass }) {
   return valid
 }
 
+async function buildCodoPromptPreview({ message }) {
+  const trimmedMessage = String(message || "").trim()
+  if (!trimmedMessage) {
+    const error = new Error("Missing message")
+    error.status = 400
+    throw error
+  }
+
+  const context = await loadCodoPromptPreviewContext()
+  const prompt = await buildCodoParsePrompt({
+    context,
+    message: trimmedMessage,
+  })
+
+  return {
+    context,
+    prompt,
+  }
+}
+
 module.exports = {
   loadCodoDutyContext,
+  buildCodoPromptPreview,
   parseModelResponse,
   validateAiResponse,
   parseCodoMessage,

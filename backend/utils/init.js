@@ -6,29 +6,9 @@ const { hashPin, isHashedPin } = require("./pinSecurity")
 
 const DEFAULT_SYSTEM_SETTINGS = [
   {
-    key: "gemini_api_key",
-    value: "",
-    description: "API Key dùng để gọi Google Gemini",
-  },
-  {
-    key: "ai_provider",
-    value: "gemini",
-    description: "Nhà cung cấp AI mặc định của hệ thống",
-  },
-  {
-    key: "ai_model",
-    value: "",
-    description: "Model AI mặc định cho AI Assistant",
-  },
-  {
     key: "temperature",
     value: "0",
     description: "Temperature mặc định cho AI Assistant",
-  },
-  {
-    key: "max_output_tokens",
-    value: "2048",
-    description: "Giới hạn số token đầu ra của AI Assistant",
   },
   {
     key: "base_score",
@@ -36,6 +16,96 @@ const DEFAULT_SYSTEM_SETTINGS = [
     description: "Điểm gốc mặc định của mỗi lớp khi bắt đầu tuần thi đua",
   },
 ]
+
+function detectProviderFromApiKey(apiKey) {
+  const key = String(apiKey || "").trim()
+  if (!key) return "custom"
+  if (key.startsWith("gsk_")) return "groq"
+  if (key.startsWith("sk-or-v1-")) return "openrouter"
+  if (key.startsWith("sk-proj-") || key.startsWith("sk-")) return "openai"
+  if (key.startsWith("AIza")) return "gemini"
+  return "custom"
+}
+
+function getDefaultBaseUrl(provider) {
+  const defaults = {
+    gemini: "https://generativelanguage.googleapis.com/v1beta",
+    groq: "https://api.groq.com/openai/v1",
+    openai: "https://api.openai.com/v1",
+    openrouter: "https://openrouter.ai/api/v1",
+    custom: "",
+  }
+
+  return defaults[String(provider || "").trim().toLowerCase()] || ""
+}
+
+async function seedSystemSettings(now) {
+  for (const setting of DEFAULT_SYSTEM_SETTINGS) {
+    await pool.query(
+      `
+        INSERT INTO system_settings (setting_key, setting_value, description, updated_at, updated_by)
+        VALUES ($1, $2, $3, $4, $5)
+        ON CONFLICT (setting_key) DO UPDATE
+        SET description = EXCLUDED.description
+      `,
+      [setting.key, setting.value, setting.description, now, "system"],
+    )
+  }
+}
+
+async function seedAiSettings(now) {
+  const existingAiSettings = await pool.query(
+    `
+      SELECT id
+      FROM ai_settings
+      WHERE id = 1
+      LIMIT 1
+    `,
+  )
+
+  if ((existingAiSettings.rows || []).length > 0) {
+    return
+  }
+
+  const legacyRows = await pool.query(
+    `
+      SELECT setting_key, setting_value
+      FROM system_settings
+      WHERE setting_key IN ('gemini_api_key', 'ai_provider', 'ai_model', 'temperature')
+    `,
+  )
+
+  const legacyMap = new Map()
+  for (const row of legacyRows.rows || []) {
+    legacyMap.set(String(row.setting_key || ""), String(row.setting_value || ""))
+  }
+
+  const legacyApiKey = String(legacyMap.get("gemini_api_key") || "")
+  const detectedProvider = detectProviderFromApiKey(legacyApiKey)
+  const legacyProvider = String(legacyMap.get("ai_provider") || "").trim().toLowerCase()
+  const provider = legacyProvider || detectedProvider || "custom"
+  const baseUrl = getDefaultBaseUrl(provider)
+  const model = String(legacyMap.get("ai_model") || "").trim()
+  const temperature = Number(legacyMap.get("temperature") || 0)
+
+  await pool.query(
+    `
+      INSERT INTO ai_settings (id, provider, api_key, base_url, model, temperature, updated_at, updated_by)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+      ON CONFLICT (id) DO NOTHING
+    `,
+    [
+      1,
+      provider,
+      legacyApiKey,
+      baseUrl,
+      model,
+      Number.isFinite(temperature) ? temperature : 0,
+      now,
+      "system",
+    ],
+  )
+}
 
 async function initDb() {
   const schemaPath = path.join(__dirname, "..", "sql", "schema.postgresql.sql")
@@ -70,10 +140,7 @@ async function initDb() {
     const current = String(row.pin_bcs || "").trim()
     if (!current || isHashedPin(current)) continue
     const hashed = await hashPin(current)
-    await pool.query(
-      `UPDATE accounts SET pin_bcs = $1 WHERE class_id = $2`,
-      [hashed, row.class_id],
-    )
+    await pool.query(`UPDATE accounts SET pin_bcs = $1 WHERE class_id = $2`, [hashed, row.class_id])
   }
 
   await run(
@@ -97,17 +164,8 @@ async function initDb() {
   }
 
   const now = new Date().toISOString()
-  for (const setting of DEFAULT_SYSTEM_SETTINGS) {
-    await pool.query(
-      `
-        INSERT INTO system_settings (setting_key, setting_value, description, updated_at, updated_by)
-        VALUES ($1, $2, $3, $4, $5)
-        ON CONFLICT (setting_key) DO UPDATE
-        SET description = EXCLUDED.description
-      `,
-      [setting.key, setting.value, setting.description, now, "system"],
-    )
-  }
+  await seedSystemSettings(now)
+  await seedAiSettings(now)
 }
 
 module.exports = initDb

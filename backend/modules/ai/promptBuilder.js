@@ -13,60 +13,41 @@ function formatValue(value, emptyLabel = "(không có)") {
   return String(value)
 }
 
-function formatBoolean(value) {
-  return value ? "Có" : "Không"
-}
-
-function formatAliases(aliases) {
-  if (!Array.isArray(aliases) || aliases.length === 0) {
-    return "(chưa có)"
-  }
-
-  return aliases.join(", ")
-}
-
 function buildSchemaContent() {
   return ["```json", JSON.stringify(codoParseSchema, null, 2), "```"].join("\n")
 }
 
-function buildDutyContextSection(context) {
-  return [
-    "## Thông tin phiếu trực",
-    `- Mã phiếu: ${formatValue(context?.duty?.id)}`,
-    `- Ngày: ${formatValue(context?.duty?.date)}`,
-    `- Trạng thái: ${formatValue(context?.duty?.status)}`,
-    "",
-    "## Lớp đang được kiểm tra",
-    `- ${formatValue(context?.targetClass?.name)}`,
-  ].join("\n")
+function buildDutyContextLine(context) {
+  const dutyId = formatValue(context?.duty?.id, "0")
+  const date = formatValue(context?.duty?.date)
+  const status = formatValue(context?.duty?.status)
+  return `Sheet:${dutyId}|${date}|${status}`
+}
+
+function buildClassContextLine(context) {
+  return `Class:${formatValue(context?.targetClass?.name)}`
 }
 
 function buildRulesSection(rules) {
   const normalizedRules = Array.isArray(rules) ? rules : []
 
   if (normalizedRules.length === 0) {
-    return ["## Danh sách luật", "- (không có dữ liệu)"].join("\n")
+    return ""
   }
 
-  return [
-    "## Danh sách luật",
-    ...normalizedRules.map((rule, index) =>
-      [
-        `${index + 1}.`,
-        `Mã luật: ${formatValue(rule?.id)}`,
-        `Tên: ${formatValue(rule?.name)}`,
-        `Điểm: -${Math.abs(Number(rule?.minus_points || 0))}`,
-        `Cho phép nhập số lượng: ${formatBoolean(rule?.allow_quantity)}`,
-        `Alias: ${formatAliases(rule?.aliases)}`,
-      ].join("\n"),
-    ),
-  ].join("\n\n")
+  return normalizedRules
+    .map((rule) => `${formatValue(rule?.id)}|${formatValue(rule?.name)}`)
+    .join("\n")
 }
 
 function buildContextContent(context) {
-  return [buildDutyContextSection(context), "", buildRulesSection(context?.rules)].join(
-    "\n",
-  )
+  return [
+    buildDutyContextLine(context),
+    buildClassContextLine(context),
+    buildRulesSection(context?.rules),
+  ]
+    .filter(Boolean)
+    .join("\n")
 }
 
 function buildMessageContent(message) {

@@ -1,33 +1,7 @@
-const SystemSettingService = require("../system-settings/service")
-
-let GoogleGenAIClass = null
-let cachedClient = null
-let cachedApiKey = null
+const { createProvider, getProviderLabel } = require("./providerFactory")
+const { getRuntimeConfig } = require("./configService")
 
 const isDevelopment = process.env.NODE_ENV !== "production"
-const FALLBACK_GEMINI_MODEL = "gemini-flash-lite-latest"
-const GEMINI_PROVIDER = "Gemini"
-
-async function getGoogleGenAIClass() {
-  if (GoogleGenAIClass) {
-    return GoogleGenAIClass
-  }
-
-  const mod = await import("@google/genai")
-  GoogleGenAIClass = mod.GoogleGenAI
-  return GoogleGenAIClass
-}
-
-async function getClient(apiKey) {
-  if (cachedClient && cachedApiKey === apiKey) {
-    return cachedClient
-  }
-
-  const GoogleGenAI = await getGoogleGenAIClass()
-  cachedClient = new GoogleGenAI({ apiKey })
-  cachedApiKey = apiKey
-  return cachedClient
-}
 
 function createAiUnavailableError(message = "AI unavailable", cause = undefined, meta = {}) {
   const error = new Error(message)
@@ -36,7 +10,7 @@ function createAiUnavailableError(message = "AI unavailable", cause = undefined,
   error.aiUnavailable = true
   error.publicMessage = message
   error.adminMessage = meta.adminMessage || message
-  error.provider = meta.provider || GEMINI_PROVIDER
+  error.provider = meta.provider || "AI"
   error.suggestion = meta.suggestion
 
   if (cause !== undefined) {
@@ -46,10 +20,10 @@ function createAiUnavailableError(message = "AI unavailable", cause = undefined,
   return error
 }
 
-function logGeminiError(err) {
+function logProviderError(err) {
   if (!isDevelopment) return
 
-  console.error("===== GEMINI ERROR =====")
+  console.error("===== AI PROVIDER ERROR =====")
   console.error("message:", err?.message ?? null)
   console.error("status:", err?.status ?? err?.response?.status ?? null)
   console.error("code:", err?.code ?? null)
@@ -57,22 +31,7 @@ function logGeminiError(err) {
   console.error("response:", err?.response ?? null)
   console.error("cause:", err?.cause ?? null)
   console.error("stack:", err?.stack ?? null)
-  console.error("=======================")
-}
-
-function normalizeModelName(name) {
-  const raw = String(name || "").trim()
-  if (!raw) return ""
-  if (raw.startsWith("models/")) {
-    return raw.slice("models/".length)
-  }
-  const marker = "/models/"
-  const markerIndex = raw.lastIndexOf(marker)
-  if (markerIndex >= 0) {
-    return raw.slice(markerIndex + marker.length)
-  }
-  const parts = raw.split("/")
-  return parts[parts.length - 1] || raw
+  console.error("=============================")
 }
 
 function toLower(value) {
@@ -80,12 +39,7 @@ function toLower(value) {
 }
 
 function getErrorStatus(err) {
-  const candidates = [
-    err?.status,
-    err?.response?.status,
-    err?.cause?.status,
-    err?.response?.data?.error?.code,
-  ]
+  const candidates = [err?.status, err?.response?.status, err?.cause?.status]
 
   for (const candidate of candidates) {
     const parsed = Number(candidate)
@@ -126,6 +80,7 @@ function isInvalidApiKeyError(err) {
     status === 403 ||
     message.includes("api key not valid") ||
     message.includes("invalid api key") ||
+    message.includes("incorrect api key") ||
     message.includes("permission denied")
   )
 }
@@ -145,7 +100,7 @@ function isQuotaError(err) {
 function isModelUnavailableError(err, model) {
   const status = getErrorStatus(err)
   const message = toLower(err?.message)
-  const normalizedModel = toLower(normalizeModelName(model))
+  const normalizedModel = toLower(model)
 
   return (
     status === 404 ||
@@ -158,21 +113,23 @@ function isModelUnavailableError(err, model) {
   )
 }
 
-function mapGeminiError(err, model) {
-  const normalizedModel = normalizeModelName(model)
+function mapProviderError(err, config) {
   const status = getErrorStatus(err) || 500
+  const providerLabel = config.providerLabel || getProviderLabel(config.provider)
+  const model = String(config.model || "").trim()
 
-  if (isModelUnavailableError(err, normalizedModel)) {
+  if (isModelUnavailableError(err, model)) {
     return createAiUnavailableError(
       "Mô hình AI hiện tại không còn được hỗ trợ. Vui lòng chọn model khác.",
       err,
       {
         httpStatus: 500,
         aiStatus: 404,
-        adminMessage: normalizedModel
-          ? `Model '${normalizedModel}' không còn khả dụng.`
+        adminMessage: model
+          ? `Model '${model}' không còn khả dụng.`
           : "Mô hình AI hiện tại không còn khả dụng.",
         suggestion: "Hãy chọn model khác trong Cấu hình hệ thống.",
+        provider: providerLabel,
       },
     )
   }
@@ -182,7 +139,8 @@ function mapGeminiError(err, model) {
       httpStatus: 500,
       aiStatus: 401,
       adminMessage: "API Key không hợp lệ.",
-      suggestion: "Hãy kiểm tra lại Gemini API Key trong Cấu hình hệ thống.",
+      suggestion: "Hãy kiểm tra lại API Key trong Cấu hình hệ thống.",
+      provider: providerLabel,
     })
   }
 
@@ -190,8 +148,9 @@ function mapGeminiError(err, model) {
     return createAiUnavailableError("AI unavailable", err, {
       httpStatus: 500,
       aiStatus: 429,
-      adminMessage: "Đã vượt quá giới hạn sử dụng Gemini.",
+      adminMessage: `Đã vượt quá giới hạn sử dụng ${providerLabel}.`,
       suggestion: "Hãy thử lại sau hoặc sử dụng API Key khác.",
+      provider: providerLabel,
     })
   }
 
@@ -199,206 +158,49 @@ function mapGeminiError(err, model) {
     return createAiUnavailableError("AI unavailable", err, {
       httpStatus: 500,
       aiStatus: 504,
-      adminMessage: "Không thể kết nối tới Gemini.",
+      adminMessage: `Không thể kết nối tới ${providerLabel}.`,
       suggestion: "Hãy thử lại sau ít phút.",
+      provider: providerLabel,
     })
   }
 
   return createAiUnavailableError("AI unavailable", err, {
     httpStatus: 500,
     aiStatus: status,
-    adminMessage: String(err?.message || "AI unavailable"),
+    adminMessage: String(err?.adminMessage || err?.message || "AI unavailable"),
+    provider: providerLabel,
   })
 }
 
-function normalizeRuntimeOverrides(overrides = {}) {
-  return {
-    provider: String(overrides.provider || "").trim().toLowerCase(),
-    model: normalizeModelName(overrides.model) || "",
-    apiKey: String(overrides.apiKey || "").trim(),
-    temperature: Number(overrides.temperature),
-    maxOutputTokens: Number(overrides.maxOutputTokens),
-  }
-}
-
-function ensureGeminiProvider(provider) {
-  if (provider && provider !== "gemini") {
-    throw createAiUnavailableError("AI unavailable", undefined, {
-      httpStatus: 400,
-      aiStatus: 400,
-      adminMessage: "Nhà cung cấp AI hiện tại chưa được hỗ trợ.",
-      suggestion: "Hiện tại hệ thống chỉ hỗ trợ Gemini.",
-    })
-  }
-}
-
-function ensureApiKeyPresent(apiKey) {
-  if (!apiKey) {
-    throw createAiUnavailableError("AI unavailable", undefined, {
-      httpStatus: 400,
-      aiStatus: 400,
-      adminMessage: "Chưa nhập Gemini API Key.",
-      suggestion: "Hãy nhập Gemini API Key để kiểm tra kết nối.",
-    })
-  }
-}
-
-async function getGeminiRuntimeConfig() {
-  const config = await SystemSettingService.getAiRuntimeConfig()
-
-  if (!config.apiKey) {
-    throw createAiUnavailableError("AI unavailable", undefined, {
-      httpStatus: 500,
-      aiStatus: 400,
-      adminMessage: "Chưa cấu hình Gemini API Key.",
-      suggestion: "Hãy nhập Gemini API Key trong Cấu hình hệ thống.",
-    })
-  }
-
-  if (config.provider !== "gemini") {
-    throw createAiUnavailableError("AI unavailable", undefined, {
-      httpStatus: 500,
-      aiStatus: 400,
-      adminMessage: "Nhà cung cấp AI hiện tại không phải Gemini.",
-    })
-  }
-
-  return {
-    ...config,
-    model: normalizeModelName(config.model) || FALLBACK_GEMINI_MODEL,
-  }
-}
-
-async function getGeminiConfigFromOverrides(overrides = {}) {
-  const config = normalizeRuntimeOverrides(overrides)
-
-  ensureGeminiProvider(config.provider || "gemini")
-  ensureApiKeyPresent(config.apiKey)
-
-  return {
-    provider: config.provider || "gemini",
-    model: config.model || FALLBACK_GEMINI_MODEL,
-    apiKey: config.apiKey,
-    temperature: Number.isFinite(config.temperature) ? config.temperature : 0,
-    maxOutputTokens: Number.isInteger(config.maxOutputTokens)
-      ? config.maxOutputTokens
-      : 2048,
-  }
-}
-
-async function resolveGeminiConfig(overrides) {
-  return overrides
-    ? getGeminiConfigFromOverrides(overrides)
-    : getGeminiRuntimeConfig()
-}
-
-async function generateContentText(prompt, overrides) {
-  const config = await resolveGeminiConfig(overrides)
-
-  try {
-    const client = await getClient(config.apiKey)
-    const response = await client.models.generateContent({
-      model: config.model,
-      contents: prompt,
-      config: {
-        temperature: Number.isFinite(config.temperature) ? config.temperature : 0,
-        maxOutputTokens: Number.isInteger(config.maxOutputTokens)
-          ? config.maxOutputTokens
-          : 2048,
-        responseMimeType: "application/json",
-      },
-    })
-
-    const text = String(response?.text || "").trim()
-    if (!text) {
-      throw new Error("Empty Gemini response")
-    }
-
-    return {
-      text,
-      model: config.model,
-      provider: GEMINI_PROVIDER,
-    }
-  } catch (err) {
-    if (err?.aiUnavailable) {
-      throw err
-    }
-
-    logGeminiError(err)
-    throw mapGeminiError(err, config.model)
-  }
-}
-
-function supportsGenerateContent(model) {
-  const actions = Array.isArray(model?.supportedActions)
-    ? model.supportedActions.map((item) => toLower(item))
-    : []
-
-  if (actions.length === 0) {
-    return true
-  }
-
-  return actions.some((action) => action.includes("generatecontent"))
-}
-
-async function listAvailableGeminiModels(overrides) {
-  const config = await resolveGeminiConfig(overrides)
-
-  try {
-    const client = await getClient(config.apiKey)
-    const pager = await client.models.list({
-      config: {
-        pageSize: 100,
-        queryBase: true,
-      },
-    })
-
-    const uniqueNames = new Set()
-    const models = []
-
-    for await (const model of pager) {
-      if (!supportsGenerateContent(model)) continue
-
-      const normalizedName = normalizeModelName(model?.name)
-      if (!normalizedName || uniqueNames.has(normalizedName)) continue
-
-      uniqueNames.add(normalizedName)
-      models.push(normalizedName)
-    }
-
-    models.sort((a, b) => a.localeCompare(b))
-    return models
-  } catch (err) {
-    if (err?.aiUnavailable) {
-      throw err
-    }
-
-    logGeminiError(err)
-    throw mapGeminiError(err, config.model)
-  }
-}
-
-async function testGeminiConnection(overrides) {
-  const config = await resolveGeminiConfig(overrides)
-  const models = await listAvailableGeminiModels(config)
-
-  return {
-    success: true,
-    provider: GEMINI_PROVIDER,
-    model: config.model || null,
-    models,
-    message: "Kết nối AI thành công.",
-  }
-}
-
 async function generateViolationJson(prompt) {
-  const result = await generateContentText(prompt)
-  return result.text
+  const config = await getRuntimeConfig()
+
+  try {
+    const provider = createProvider(config.provider, {
+      baseUrl: config.baseUrl,
+    })
+
+    const result = await provider.generateText({
+      apiKey: config.apiKey,
+      baseUrl: config.baseUrl,
+      model: config.model,
+      prompt,
+      temperature: config.temperature,
+      maxOutputTokens: config.maxOutputTokens,
+    })
+
+    return String(result.text || "").trim()
+  } catch (err) {
+    if (err?.aiUnavailable) {
+      throw err
+    }
+
+    logProviderError(err)
+    throw mapProviderError(err, config)
+  }
 }
 
 module.exports = {
   createAiUnavailableError,
   generateViolationJson,
-  listAvailableGeminiModels,
-  testGeminiConnection,
 }

@@ -2,7 +2,7 @@ const express = require("express")
 
 const requireLogin = require("../../middleware/requireLogin")
 const requireRole = require("../../middleware/requireRole")
-const { loadCodoDutyContext, parseCodoMessage } = require("./service")
+const { buildCodoPromptPreview, loadCodoDutyContext, parseCodoMessage } = require("./service")
 
 const router = express.Router()
 const isProduction = process.env.NODE_ENV === "production"
@@ -56,6 +56,28 @@ router.post(
         })
       }
 
+      res.status(err.status || 500).json({ error: err.message || "Internal error" })
+    }
+  },
+)
+
+router.post(
+  "/codo/prompt-preview",
+  requireLogin,
+  requireRole(["admin"]),
+  async (req, res) => {
+    try {
+      const result = await buildCodoPromptPreview({
+        message: req.body?.message,
+      })
+
+      res.json({
+        success: true,
+        prompt: result.prompt,
+        context: result.context,
+      })
+    } catch (err) {
+      console.error(err)
       res.status(err.status || 500).json({ error: err.message || "Internal error" })
     }
   },

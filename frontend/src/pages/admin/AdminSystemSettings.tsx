@@ -11,8 +11,6 @@ type SettingItem = {
   key: string
   description: string
   value?: string
-  has_value?: boolean
-  masked_value?: string
   updated_at?: string | null
   updated_by?: string | null
 }
@@ -22,23 +20,69 @@ type SettingsResponse = {
   settings: Record<string, SettingItem>
 }
 
+type AiConfig = {
+  id?: number
+  provider: string
+  providerLabel?: string
+  apiKey: string
+  baseUrl: string
+  model: string
+  temperature: number
+  updatedAt?: string | null
+  updatedBy?: string | null
+}
+
+type AiConfigResponse = {
+  success: boolean
+  config: AiConfig
+  message?: string
+}
+
 type TestAiResponse = {
   success: boolean
-  provider?: string
-  status?: number
+  provider: string
+  providerLabel?: string
+  detectedProvider?: string | null
+  baseUrl: string
+  model?: string
+  models?: string[]
   message?: string
   suggestion?: string
-  model?: string | null
-  models?: string[]
+}
+
+type ModelsResponse = {
+  success: boolean
+  provider: string
+  providerLabel?: string
+  baseUrl: string
+  models: string[]
 }
 
 const providerOptions = [
-  { value: "gemini", label: "Gemini", enabled: true },
-  { value: "openai", label: "OpenAI", enabled: false },
-  { value: "openrouter", label: "OpenRouter", enabled: false },
-  { value: "claude", label: "Claude", enabled: false },
-  { value: "deepseek", label: "DeepSeek", enabled: false },
+  { value: "gemini", label: "Gemini" },
+  { value: "groq", label: "Groq" },
+  { value: "openai", label: "OpenAI" },
+  { value: "openrouter", label: "OpenRouter" },
+  { value: "custom", label: "Tùy chỉnh" },
 ]
+
+const providerBaseUrls: Record<string, string> = {
+  gemini: "https://generativelanguage.googleapis.com/v1beta",
+  groq: "https://api.groq.com/openai/v1",
+  openai: "https://api.openai.com/v1",
+  openrouter: "https://openrouter.ai/api/v1",
+  custom: "",
+}
+
+function detectProviderFromApiKey(apiKey: string) {
+  const key = apiKey.trim()
+  if (!key) return null
+  if (key.startsWith("gsk_")) return "groq"
+  if (key.startsWith("sk-or-v1-")) return "openrouter"
+  if (key.startsWith("sk-proj-") || key.startsWith("sk-")) return "openai"
+  if (key.startsWith("AIza")) return "gemini"
+  return null
+}
 
 function mergeModelOptions(models: string[], preferredModel?: string) {
   const merged = new Set<string>()
@@ -57,6 +101,22 @@ function mergeModelOptions(models: string[], preferredModel?: string) {
   return Array.from(merged)
 }
 
+function buildAiFingerprint(input: {
+  provider: string
+  apiKey: string
+  baseUrl: string
+  model: string
+  temperature: string
+}) {
+  return JSON.stringify({
+    provider: input.provider.trim().toLowerCase(),
+    apiKey: input.apiKey.trim(),
+    baseUrl: input.baseUrl.trim(),
+    model: input.model.trim(),
+    temperature: input.temperature.trim(),
+  })
+}
+
 export default function AdminSystemSettings() {
   usePageTitle("EDP | Cấu hình hệ thống")
   const { user, loading } = useAuth()
@@ -69,18 +129,18 @@ export default function AdminSystemSettings() {
   const [notice, setNotice] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
 
-  const [aiProvider, setAiProvider] = useState("gemini")
+  const [aiProvider, setAiProvider] = useState("custom")
+  const [apiKey, setApiKey] = useState("")
+  const [baseUrl, setBaseUrl] = useState("")
   const [aiModel, setAiModel] = useState("")
   const [modelOptions, setModelOptions] = useState<string[]>([])
   const [temperature, setTemperature] = useState("0")
-  const [maxOutputTokens, setMaxOutputTokens] = useState("2048")
-  const [geminiApiKey, setGeminiApiKey] = useState("")
-  const [maskedGeminiApiKey, setMaskedGeminiApiKey] = useState("")
-  const [hasGeminiApiKey, setHasGeminiApiKey] = useState(false)
-  const [showApiKey, setShowApiKey] = useState(false)
   const [baseScore, setBaseScore] = useState("100")
+  const [lastTestFingerprint, setLastTestFingerprint] = useState("")
+  const [testPassed, setTestPassed] = useState(false)
 
   const canAccess = user?.role === "admin"
+  const detectedProvider = useMemo(() => detectProviderFromApiKey(apiKey), [apiKey])
 
   useEffect(() => {
     if (!canAccess) return
@@ -88,24 +148,33 @@ export default function AdminSystemSettings() {
   }, [canAccess])
 
   useEffect(() => {
-    if (aiProvider !== "gemini") {
-      setModelOptions(mergeModelOptions([], aiModel))
+    const nextFingerprint = buildAiFingerprint({
+      provider: aiProvider,
+      apiKey,
+      baseUrl,
+      model: aiModel,
+      temperature,
+    })
+
+    if (lastTestFingerprint && nextFingerprint !== lastTestFingerprint) {
+      setTestPassed(false)
     }
-  }, [aiModel, aiProvider])
+  }, [aiProvider, aiModel, apiKey, baseUrl, lastTestFingerprint, temperature])
 
-  function applySettings(settings: Record<string, SettingItem>) {
-    const savedProvider = settings.ai_provider?.value || "gemini"
-    const savedModel = settings.ai_model?.value || ""
+  function applyAiConfig(config: AiConfig) {
+    const nextProvider = config.provider || detectProviderFromApiKey(config.apiKey) || "custom"
+    const nextBaseUrl = config.baseUrl || providerBaseUrls[nextProvider] || ""
+    const nextModel = config.model || ""
+    const nextTemperature = String(config.temperature ?? 0)
 
-    setAiProvider(savedProvider)
-    setAiModel(savedModel)
-    setModelOptions(mergeModelOptions([], savedModel))
-    setTemperature(settings.temperature?.value || "0")
-    setMaxOutputTokens(settings.max_output_tokens?.value || "2048")
-    setBaseScore(settings.base_score?.value || "100")
-    setGeminiApiKey("")
-    setMaskedGeminiApiKey(settings.gemini_api_key?.masked_value || "")
-    setHasGeminiApiKey(Boolean(settings.gemini_api_key?.has_value))
+    setAiProvider(nextProvider)
+    setApiKey(config.apiKey || "")
+    setBaseUrl(nextBaseUrl)
+    setAiModel(nextModel)
+    setTemperature(nextTemperature)
+    setModelOptions(mergeModelOptions([], nextModel))
+    setTestPassed(false)
+    setLastTestFingerprint("")
   }
 
   async function loadSettings() {
@@ -114,116 +183,147 @@ export default function AdminSystemSettings() {
       setError(null)
       setNotice(null)
 
-      const res = await api.get<SettingsResponse>("/system-settings")
-      applySettings(res.data.settings)
+      const [settingsRes, aiRes] = await Promise.all([
+        api.get<SettingsResponse>("/system-settings"),
+        api.get<AiConfigResponse>("/system-settings/ai"),
+      ])
+
+      setBaseScore(settingsRes.data.settings.base_score?.value || "100")
+      applyAiConfig(aiRes.data.config)
     } catch (err: any) {
       console.error(err)
-      setError(err?.response?.data?.error || "Không tải được cấu hình hệ thống")
+      setError(err?.response?.data?.message || err?.response?.data?.error || "Không tải được cấu hình hệ thống")
     } finally {
       setPageLoading(false)
     }
   }
 
-  function buildAiConnectionPayload() {
-    return {
-      provider: aiProvider,
-      apiKey: geminiApiKey.trim(),
-    }
-  }
+  function handleApiKeyChange(value: string) {
+    setApiKey(value)
 
-  function buildAiSavePayload() {
-    return {
-      provider: aiProvider,
-      apiKey: geminiApiKey.trim(),
-      model: aiModel.trim(),
-      temperature: Number(temperature),
-      max_output_tokens: Number(maxOutputTokens),
-    }
-  }
-
-  async function runAiConnectionCheck(options?: {
-    successMessage?: string
-    silentErrors?: boolean
-  }) {
-    const payload = buildAiConnectionPayload()
-
-    if (!payload.provider) {
-      setError("Vui lòng chọn nhà cung cấp AI.")
-      return null
-    }
-
-    if (!payload.apiKey) {
-      setError("Vui lòng nhập API Key trước khi kiểm tra.")
-      return null
-    }
-
-    try {
-      setError(null)
-      setNotice(null)
-
-      const res = await api.post<TestAiResponse>("/system-settings/ai/test-connection", payload)
-      const nextModels = mergeModelOptions(res.data.models || [], aiModel)
-
-      setModelOptions(nextModels)
-
-      if (!String(aiModel || "").trim() && nextModels[0]) {
-        setAiModel(nextModels[0])
-      }
-
-      if (options?.successMessage) {
-        setNotice(options.successMessage)
-      } else if (res.data?.message) {
-        setNotice(res.data.message)
-      }
-
-      return res.data
-    } catch (err: any) {
-      console.error(err)
-      if (!options?.silentErrors) {
-        setError(
-          err?.response?.data?.message ||
-            err?.response?.data?.error ||
-            "Không thể kiểm tra API Key.",
-        )
-      }
-      return null
-    }
-  }
-
-  async function refreshModelOptions() {
-    if (aiProvider !== "gemini") {
-      setModelOptions(mergeModelOptions([], aiModel))
+    const nextProvider = detectProviderFromApiKey(value)
+    if (!nextProvider) {
       return
     }
 
-    try {
-      setModelsLoading(true)
-      await runAiConnectionCheck({
-        successMessage: "Đã làm mới danh sách model.",
-      })
-    } finally {
-      setModelsLoading(false)
+    setAiProvider(nextProvider)
+    setBaseUrl(providerBaseUrls[nextProvider] || "")
+  }
+
+  function handleProviderChange(value: string) {
+    setAiProvider(value)
+    if (value !== "custom") {
+      setBaseUrl(providerBaseUrls[value] || "")
+    }
+  }
+
+  function buildAiPayload() {
+    return {
+      provider: aiProvider,
+      apiKey: apiKey.trim(),
+      baseUrl: baseUrl.trim(),
+      model: aiModel.trim(),
+      temperature: Number(temperature),
     }
   }
 
   async function testApi() {
+    const payload = buildAiPayload()
+
+    if (!payload.apiKey) {
+      setError("Vui lòng nhập API Key trước khi kiểm tra.")
+      return
+    }
+
     try {
       setTesting(true)
-      await runAiConnectionCheck({
-        successMessage: "Kết nối AI thành công.",
+      setError(null)
+      setNotice(null)
+
+      const res = await api.post<TestAiResponse>("/system-settings/ai/test-connection", payload)
+      const nextProvider = res.data.provider || payload.provider || detectedProvider || "custom"
+      const nextBaseUrl = res.data.baseUrl || payload.baseUrl || providerBaseUrls[nextProvider] || ""
+      const nextModels = mergeModelOptions(res.data.models || [], res.data.model || payload.model)
+      const nextModel = res.data.model || payload.model || nextModels[0] || ""
+      const nextTemperature = String(payload.temperature)
+      const nextFingerprint = buildAiFingerprint({
+        provider: nextProvider,
+        apiKey: payload.apiKey,
+        baseUrl: nextBaseUrl,
+        model: nextModel,
+        temperature: nextTemperature,
       })
+
+      setAiProvider(nextProvider)
+      setBaseUrl(nextBaseUrl)
+      setAiModel(nextModel)
+      setModelOptions(nextModels)
+      setTestPassed(true)
+      setLastTestFingerprint(nextFingerprint)
+      setNotice(res.data.message || "Kết nối AI thành công.")
+    } catch (err: any) {
+      console.error(err)
+      setTestPassed(false)
+      setLastTestFingerprint("")
+      setError(
+        err?.response?.data?.message ||
+        err?.response?.data?.error ||
+        "Không thể kiểm tra kết nối AI.",
+      )
     } finally {
       setTesting(false)
     }
   }
 
-  async function saveAiSettings() {
-    const payload = buildAiSavePayload()
+  async function refreshModelOptions() {
+    const payload = buildAiPayload()
 
-    if (!payload.provider) {
-      setError("Vui lòng chọn nhà cung cấp AI.")
-      return false
+    if (!payload.apiKey) {
+      setError("Vui lòng nhập API Key trước khi tải danh sách model.")
+      return
     }
+
+    try {
+      setModelsLoading(true)
+      setError(null)
+
+      const res = await api.get<ModelsResponse>("/system-settings/ai/models", {
+        params: {
+          provider: payload.provider,
+          apiKey: payload.apiKey,
+          baseUrl: payload.baseUrl,
+        },
+      })
+
+      const nextModels = mergeModelOptions(res.data.models || [], aiModel)
+      setAiProvider(res.data.provider || payload.provider)
+      setBaseUrl(res.data.baseUrl || payload.baseUrl)
+      setModelOptions(nextModels)
+      if (!aiModel && nextModels[0]) {
+        setAiModel(nextModels[0])
+      }
+      setNotice("Đã làm mới danh sách model.")
+    } catch (err: any) {
+      console.error(err)
+      setError(
+        err?.response?.data?.message ||
+        err?.response?.data?.error ||
+        "Không tải được danh sách model.",
+      )
+    } finally {
+      setModelsLoading(false)
+    }
+  }
+
+  async function saveAiSettings() {
+    const payload = buildAiPayload()
+    const fingerprint = buildAiFingerprint({
+      provider: payload.provider,
+      apiKey: payload.apiKey,
+      baseUrl: payload.baseUrl,
+      model: payload.model,
+      temperature: String(payload.temperature),
+    })
 
     if (!payload.apiKey) {
       setError("Vui lòng nhập API Key trước khi lưu.")
@@ -235,18 +335,24 @@ export default function AdminSystemSettings() {
       return false
     }
 
+    if (!testPassed || fingerprint !== lastTestFingerprint) {
+      setError("Vui lòng kiểm tra API thành công với cấu hình hiện tại trước khi lưu.")
+      return false
+    }
+
     try {
       setSaving(true)
       setError(null)
       setNotice(null)
 
-      const res = await api.put<SettingsResponse>("/system-settings/ai", payload)
-      applySettings(res.data.settings)
-      setNotice("Đã lưu cấu hình AI.")
+      const res = await api.put<AiConfigResponse>("/system-settings/ai", payload)
+      applyAiConfig(res.data.config)
+      setModelOptions(mergeModelOptions(modelOptions, res.data.config.model))
+      setNotice(res.data.message || "Đã lưu cấu hình AI.")
       return true
     } catch (err: any) {
       console.error(err)
-      setError(err?.response?.data?.error || "Không lưu được cấu hình AI.")
+      setError(err?.response?.data?.message || err?.response?.data?.error || "Không lưu được cấu hình AI.")
       return false
     } finally {
       setSaving(false)
@@ -265,7 +371,7 @@ export default function AdminSystemSettings() {
         },
       })
 
-      applySettings(res.data.settings)
+      setBaseScore(res.data.settings.base_score?.value || baseScore)
       setNotice("Đã lưu cấu hình hệ thống.")
       return true
     } catch (err: any) {
@@ -287,9 +393,16 @@ export default function AdminSystemSettings() {
   }
 
   const aiProviderHelp = useMemo(() => {
-    if (aiProvider === "gemini") return "Gemini đang được hỗ trợ trong Phase 3."
-    return "Nhà cung cấp này chưa được kích hoạt trong phiên bản hiện tại."
-  }, [aiProvider])
+    if (detectedProvider) {
+      return `Phát hiện từ API Key: ${providerOptions.find((item) => item.value === detectedProvider)?.label || detectedProvider}.`
+    }
+
+    if (aiProvider === "custom") {
+      return "Không nhận diện được provider từ API Key. Bạn có thể chọn thủ công và nhập Base URL."
+    }
+
+    return "Provider hiện tại sẽ được dùng để lấy danh sách model và kiểm tra kết nối."
+  }, [aiProvider, detectedProvider])
 
   if (loading) {
     return null
@@ -320,24 +433,26 @@ export default function AdminSystemSettings() {
               </div>
               <h1 className="mt-2 text-3xl font-semibold">Cấu hình hệ thống</h1>
               <p className="mt-2 text-sm text-white/80">
-                Quản lý cấu hình AI và tham số hệ thống mà không cần sửa `.env` trên server.
+                Quản lý cấu hình AI đang hoạt động và các tham số hệ thống mà không cần sửa mã nguồn.
               </p>
             </div>
 
             <div className="lg:ml-auto flex flex-wrap gap-3">
+              {activeTab === "ai" && (
+                <button
+                  onClick={() => void testApi()}
+                  disabled={testing || saving || pageLoading}
+                  className="rounded-2xl border border-white/30 bg-white/10 px-5 py-3 text-sm font-semibold text-white transition active:scale-[0.98] disabled:opacity-60"
+                >
+                  {testing ? "Đang kiểm tra..." : "Kiểm tra API"}
+                </button>
+              )}
               <button
                 onClick={() => void handleSave()}
-                disabled={saving || pageLoading}
+                disabled={saving || pageLoading || (activeTab === "ai" && !testPassed)}
                 className="rounded-2xl bg-white px-5 py-3 text-sm font-semibold text-[#2e77df] shadow-sm transition active:scale-[0.98] disabled:opacity-60"
               >
-                {saving ? "Đang lưu..." : "Lưu cấu hình"}
-              </button>
-              <button
-                onClick={() => void testApi()}
-                disabled={testing || saving || pageLoading}
-                className="rounded-2xl border border-white/30 bg-white/10 px-5 py-3 text-sm font-semibold text-white transition active:scale-[0.98] disabled:opacity-60"
-              >
-                {testing ? "Đang kiểm tra..." : "Kiểm tra API"}
+                {saving ? "Đang lưu..." : "Lưu"}
               </button>
             </div>
           </div>
@@ -360,22 +475,20 @@ export default function AdminSystemSettings() {
             <button
               type="button"
               onClick={() => setActiveTab("ai")}
-              className={`rounded-2xl px-4 py-2 text-sm font-semibold transition ${
-                activeTab === "ai"
-                  ? "bg-[#2e77df] text-white shadow-sm"
-                  : "text-slate-600 hover:bg-slate-50"
-              }`}
+              className={`rounded-2xl px-4 py-2 text-sm font-semibold transition ${activeTab === "ai"
+                ? "bg-[#2e77df] text-white shadow-sm"
+                : "text-slate-600 hover:bg-slate-50"
+                }`}
             >
               Cấu hình AI
             </button>
             <button
               type="button"
               onClick={() => setActiveTab("competition")}
-              className={`rounded-2xl px-4 py-2 text-sm font-semibold transition ${
-                activeTab === "competition"
-                  ? "bg-[#2e77df] text-white shadow-sm"
-                  : "text-slate-600 hover:bg-slate-50"
-              }`}
+              className={`rounded-2xl px-4 py-2 text-sm font-semibold transition ${activeTab === "competition"
+                ? "bg-[#2e77df] text-white shadow-sm"
+                : "text-slate-600 hover:bg-slate-50"
+                }`}
             >
               Quy chế thi đua
             </button>
@@ -389,64 +502,39 @@ export default function AdminSystemSettings() {
         ) : activeTab === "ai" ? (
           <div className="rounded-3xl bg-white p-6 shadow-sm ring-1 ring-blue-50 space-y-6">
             <div>
-              <h2 className="text-lg font-semibold text-slate-900">Cấu hình AI</h2>
+              <h2 className="text-lg font-semibold text-slate-900">Cấu hình AI đang hoạt động</h2>
               <p className="mt-1 text-sm text-slate-500">
-                Quản lý nhà cung cấp AI, model, tham số sinh nội dung và API Key.
+                Hệ thống chỉ lưu một cấu hình AI. Bạn cần Test API thành công trước khi Save.
               </p>
             </div>
 
             <div className="grid gap-5 lg:grid-cols-2">
-              <label className="space-y-2">
-                <span className="text-sm font-semibold text-slate-900">Nhà cung cấp AI</span>
-                <select
-                  value={aiProvider}
-                  onChange={(e) => setAiProvider(e.target.value)}
+              <label className="space-y-2 lg:col-span-2">
+                <span className="text-sm font-semibold text-slate-900">API Key</span>
+                <input
+                  type="text"
+                  value={apiKey}
+                  onChange={(e) => handleApiKeyChange(e.target.value)}
                   className="w-full rounded-2xl border border-blue-100 bg-white px-4 py-3 text-sm outline-none focus:border-[#2e77df]"
-                >
-                  {providerOptions.map((option) => (
-                    <option key={option.value} value={option.value} disabled={!option.enabled}>
-                      {option.label}
-                      {option.enabled ? "" : " (sắp hỗ trợ)"}
-                    </option>
-                  ))}
-                </select>
+                  placeholder="Dán API Key tại đây"
+                />
                 <div className="text-xs text-slate-500">{aiProviderHelp}</div>
               </label>
 
-              <div className="space-y-2">
-                <div className="flex items-center justify-between gap-3">
-                  <span className="text-sm font-semibold text-slate-900">Model</span>
-                  <button
-                    type="button"
-                    onClick={() => void refreshModelOptions()}
-                    disabled={modelsLoading || pageLoading || aiProvider !== "gemini"}
-                    className="rounded-xl border border-blue-100 bg-white px-3 py-2 text-xs font-semibold text-[#2e77df] transition active:scale-[0.98] disabled:opacity-60"
-                  >
-                    {modelsLoading ? "Đang tải..." : "Làm mới danh sách"}
-                  </button>
-                </div>
+              <label className="space-y-2">
+                <span className="text-sm font-semibold text-slate-900">Provider</span>
                 <select
-                  value={aiModel}
-                  onChange={(e) => setAiModel(e.target.value)}
+                  value={aiProvider}
+                  onChange={(e) => handleProviderChange(e.target.value)}
                   className="w-full rounded-2xl border border-blue-100 bg-white px-4 py-3 text-sm outline-none focus:border-[#2e77df]"
-                  disabled={aiProvider !== "gemini"}
                 >
-                  {!modelOptions.length ? (
-                    <option value="">
-                      {modelsLoading ? "Đang tải model..." : "Chưa có model khả dụng"}
+                  {providerOptions.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
                     </option>
-                  ) : (
-                    modelOptions.map((model) => (
-                      <option key={model} value={model}>
-                        {model}
-                      </option>
-                    ))
-                  )}
+                  ))}
                 </select>
-                <div className="text-xs text-slate-500">
-                  Danh sách model sẽ được tải sau khi API Key hiện tại được kiểm tra thành công.
-                </div>
-              </div>
+              </label>
 
               <label className="space-y-2">
                 <span className="text-sm font-semibold text-slate-900">Temperature</span>
@@ -461,57 +549,69 @@ export default function AdminSystemSettings() {
                 />
               </label>
 
-              <label className="space-y-2">
-                <span className="text-sm font-semibold text-slate-900">Max Output Tokens</span>
+              <label className="space-y-2 lg:col-span-2">
+                <span className="text-sm font-semibold text-slate-900">Base URL</span>
                 <input
-                  type="number"
-                  min={1}
-                  step="1"
-                  value={maxOutputTokens}
-                  onChange={(e) => setMaxOutputTokens(e.target.value)}
+                  type="text"
+                  value={baseUrl}
+                  onChange={(e) => setBaseUrl(e.target.value)}
                   className="w-full rounded-2xl border border-blue-100 bg-white px-4 py-3 text-sm outline-none focus:border-[#2e77df]"
+                  placeholder="https://api.example.com/v1"
                 />
               </label>
+
+              <div className="space-y-2 lg:col-span-2">
+                <div className="flex items-center justify-between gap-3">
+                  <span className="text-sm font-semibold text-slate-900">Model</span>
+                  <button
+                    type="button"
+                    onClick={() => void refreshModelOptions()}
+                    disabled={modelsLoading || pageLoading || !apiKey.trim()}
+                    className="rounded-xl border border-blue-100 bg-white px-3 py-2 text-xs font-semibold text-[#2e77df] transition active:scale-[0.98] disabled:opacity-60"
+                  >
+                    {modelsLoading ? "Đang tải..." : "Làm mới danh sách"}
+                  </button>
+                </div>
+
+                <select
+                  value={aiModel}
+                  onChange={(e) => setAiModel(e.target.value)}
+                  className="w-full rounded-2xl border border-blue-100 bg-white px-4 py-3 text-sm outline-none focus:border-[#2e77df]"
+                >
+                  {!modelOptions.length ? (
+                    <option value="">
+                      {modelsLoading ? "Đang tải model..." : "Chưa có model khả dụng"}
+                    </option>
+                  ) : (
+                    modelOptions.map((model) => (
+                      <option key={model} value={model}>
+                        {model}
+                      </option>
+                    ))
+                  )}
+                </select>
+
+                <div className="text-xs text-slate-500">
+                  Danh sách model sẽ được tải từ provider hiện tại sau khi Test API hoặc làm mới danh sách.
+                </div>
+              </div>
             </div>
 
             <div className="rounded-3xl border border-blue-100 bg-slate-50/80 p-5">
               <div className="flex flex-wrap items-center gap-3">
                 <div>
-                  <div className="text-sm font-semibold text-slate-900">Gemini API Key</div>
+                  <div className="text-sm font-semibold text-slate-900">Luồng cấu hình</div>
                   <div className="mt-1 text-xs text-slate-500">
-                    Khóa hiện tại: {hasGeminiApiKey ? maskedGeminiApiKey : "Chưa cấu hình"}
+                    1. Nhập API Key. 2. Test API để xác thực và tải model. 3. Chọn model. 4. Save cấu hình đang hoạt động.
                   </div>
                 </div>
 
-                <button
-                  type="button"
-                  onClick={() => setShowApiKey((current) => !current)}
-                  className="ml-auto rounded-2xl border border-blue-100 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition active:scale-[0.98]"
-                >
-                  {showApiKey ? "Ẩn" : "Hiện"}
-                </button>
-              </div>
-
-              <div className="mt-4 flex flex-col gap-3 lg:flex-row">
-                <input
-                  type={showApiKey ? "text" : "password"}
-                  value={geminiApiKey}
-                  onChange={(e) => setGeminiApiKey(e.target.value)}
-                  className="flex-1 rounded-2xl border border-blue-100 bg-white px-4 py-3 text-sm outline-none focus:border-[#2e77df]"
-                  placeholder="Nhập API Key để kiểm tra và lưu"
-                />
-                <button
-                  type="button"
-                  onClick={() => void testApi()}
-                  disabled={testing || saving || pageLoading}
-                  className="rounded-2xl bg-[#2e77df] px-5 py-3 text-sm font-semibold text-white shadow-sm transition active:scale-[0.98] disabled:opacity-60"
-                >
-                  {testing ? "Đang kiểm tra..." : "Kiểm tra API"}
-                </button>
-              </div>
-
-              <div className="mt-3 text-xs text-slate-500">
-                Nút kiểm tra sẽ dùng trực tiếp Provider và API Key đang nhập trên form, không lưu xuống database.
+                <div className={`ml-auto rounded-full px-3 py-1 text-xs font-semibold ${testPassed
+                  ? "bg-emerald-100 text-emerald-700"
+                  : "bg-amber-100 text-amber-700"
+                  }`}>
+                  {testPassed ? "Đã test thành công" : "Chưa test cấu hình hiện tại"}
+                </div>
               </div>
             </div>
           </div>

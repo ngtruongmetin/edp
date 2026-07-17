@@ -6,6 +6,7 @@
   "scripts": {
     "start": "node server.js",
     "import:rules": "node scripts/import_rules.js",
+    "prompt:test": "node scripts/codo_prompt_preview.js",
     "reset:accounts": "node scripts/reset_all_accounts.js",
     "reset:defaults": "node scripts/reset_gvcn_bcs_defaults.js",
     "seed:accounts": "node scripts/seed_account.js",

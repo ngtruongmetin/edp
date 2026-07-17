@@ -1,35 +1,9 @@
 const repository = require("./repository")
 
 const SETTING_DEFINITIONS = {
-  gemini_api_key: {
-    key: "gemini_api_key",
-    description: "API Key dùng để gọi Google Gemini",
-    secret: true,
-  },
-  ai_provider: {
-    key: "ai_provider",
-    description: "Nhà cung cấp AI mặc định của hệ thống",
-    secret: false,
-  },
-  ai_model: {
-    key: "ai_model",
-    description: "Model AI mặc định cho AI Assistant",
-    secret: false,
-  },
-  temperature: {
-    key: "temperature",
-    description: "Temperature mặc định cho AI Assistant",
-    secret: false,
-  },
-  max_output_tokens: {
-    key: "max_output_tokens",
-    description: "Giới hạn số token đầu ra của AI Assistant",
-    secret: false,
-  },
   base_score: {
     key: "base_score",
     description: "Điểm gốc mặc định của mỗi lớp khi bắt đầu tuần thi đua",
-    secret: false,
   },
 }
 
@@ -74,15 +48,6 @@ async function ensureCacheLoaded() {
   }
 
   return cachePromise
-}
-
-function maskSecret(value) {
-  const raw = String(value || "")
-  if (!raw) return ""
-  if (raw.length <= 4) {
-    return "*".repeat(raw.length)
-  }
-  return `${"*".repeat(Math.max(0, raw.length - 4))}${raw.slice(-4)}`
 }
 
 async function findByKey(settingKey) {
@@ -132,35 +97,18 @@ async function getAdminSettingsView() {
   const allSettings = await getAll()
   const output = {}
 
-  for (const [settingKey, record] of Object.entries(allSettings)) {
-    const definition = SETTING_DEFINITIONS[settingKey]
-    if (!definition) continue
-
+  for (const [settingKey, definition] of Object.entries(SETTING_DEFINITIONS)) {
+    const record = allSettings[settingKey]
     output[settingKey] = {
       key: settingKey,
       description: definition.description,
-      value: definition.secret ? "" : record.setting_value,
-      has_value: definition.secret ? Boolean(record.setting_value) : undefined,
-      masked_value: definition.secret ? maskSecret(record.setting_value) : undefined,
-      updated_at: record.updated_at,
-      updated_by: record.updated_by,
+      value: record?.setting_value || "",
+      updated_at: record?.updated_at || null,
+      updated_by: record?.updated_by || null,
     }
   }
 
   return output
-}
-
-async function getAiRuntimeConfig() {
-  const allSettings = await getAll()
-
-  return {
-    provider: String(allSettings.ai_provider?.setting_value || "gemini"),
-    model: String(allSettings.ai_model?.setting_value || "").trim(),
-    apiKey: String(allSettings.gemini_api_key?.setting_value || ""),
-    temperature: Number(allSettings.temperature?.setting_value || 0),
-    maxOutputTokens: Number(allSettings.max_output_tokens?.setting_value || 2048),
-    baseScore: Number(allSettings.base_score?.setting_value || 100),
-  }
 }
 
 module.exports = {
@@ -173,5 +121,4 @@ module.exports = {
   update,
   findByKey,
   getAdminSettingsView,
-  getAiRuntimeConfig,
 }
