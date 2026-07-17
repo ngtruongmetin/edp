@@ -1,23 +1,9 @@
 const { all, get } = require("../../utils/dbp")
 const { buildCodoParsePrompt } = require("./promptBuilder")
+const { generateViolationJson } = require("./gemini")
 const { validateCodoParseResponse } = require("./validator")
 
 const isProduction = process.env.NODE_ENV === "production"
-
-const fakeResponseText = JSON.stringify(
-  {
-    violations: [
-      {
-        ruleId: 4,
-        quantity: 2,
-        confidence: 0.98,
-        matchedText: "đi trễ",
-      },
-    ],
-  },
-  null,
-  2,
-)
 
 function normalizeDutyId(dutyId) {
   const parsed = Number(dutyId)
@@ -32,6 +18,14 @@ function logDevBlock(title, value) {
 
   console.log(title)
   console.log(value)
+}
+
+function logDevTextBlock(title, value) {
+  if (isProduction) return
+
+  console.log(title)
+  console.log(String(value || ""))
+  console.log("================================")
 }
 
 async function loadCodoDutyContext({ dutyId, redClass }) {
@@ -105,16 +99,145 @@ async function loadCodoDutyContext({ dutyId, redClass }) {
   }
 }
 
-function parseModelResponse(text) {
+function stripMarkdownFences(text) {
   const raw = String(text || "").trim()
-  let cleaned = raw
 
-  const fencedMatch = raw.match(/^```(?:json)?\s*([\s\S]*?)\s*```$/i)
-  if (fencedMatch) {
-    cleaned = fencedMatch[1].trim()
+  const fencedBlocks = Array.from(
+    raw.matchAll(/```(?:json)?\s*([\s\S]*?)\s*```/gi),
+  )
+
+  if (fencedBlocks.length > 0) {
+    return fencedBlocks.map((match) => String(match[1] || "").trim()).filter(Boolean)
   }
 
-  return JSON.parse(cleaned)
+  const stripped = raw
+    .replace(/```json/gi, "")
+    .replace(/```/g, "")
+    .trim()
+
+  return stripped ? [stripped] : []
+}
+
+function extractBalancedJson(text) {
+  const raw = String(text || "")
+  const startIndex = raw.search(/[\[{]/)
+
+  if (startIndex < 0) {
+    return null
+  }
+
+  const stack = []
+  let inString = false
+  let escaped = false
+
+  for (let index = startIndex; index < raw.length; index += 1) {
+    const char = raw[index]
+
+    if (inString) {
+      if (escaped) {
+        escaped = false
+        continue
+      }
+
+      if (char === "\\") {
+        escaped = true
+        continue
+      }
+
+      if (char === '"') {
+        inString = false
+      }
+
+      continue
+    }
+
+    if (char === '"') {
+      inString = true
+      continue
+    }
+
+    if (char === "{" || char === "[") {
+      stack.push(char)
+      continue
+    }
+
+    if (char === "}" || char === "]") {
+      const last = stack[stack.length - 1]
+      const isMatchingPair =
+        (last === "{" && char === "}") || (last === "[" && char === "]")
+
+      if (!isMatchingPair) {
+        return null
+      }
+
+      stack.pop()
+
+      if (stack.length === 0) {
+        return raw.slice(startIndex, index + 1).trim()
+      }
+    }
+  }
+
+  return null
+}
+
+function buildJsonCandidates(text) {
+  const raw = String(text || "").trim()
+  const candidates = []
+  const seen = new Set()
+
+  function pushCandidate(value) {
+    const normalized = String(value || "").trim()
+    if (!normalized || seen.has(normalized)) return
+    seen.add(normalized)
+    candidates.push(normalized)
+  }
+
+  pushCandidate(raw)
+
+  for (const candidate of stripMarkdownFences(raw)) {
+    pushCandidate(candidate)
+  }
+
+  const balancedFromRaw = extractBalancedJson(raw)
+  if (balancedFromRaw) {
+    pushCandidate(balancedFromRaw)
+  }
+
+  for (const candidate of [...candidates]) {
+    const balanced = extractBalancedJson(candidate)
+    if (balanced) {
+      pushCandidate(balanced)
+    }
+  }
+
+  return candidates
+}
+
+function createInvalidModelJsonError(rawResponse, cause) {
+  const error = new Error("Gemini trả về JSON không hợp lệ.")
+  error.status = 500
+  error.invalidModelJson = true
+  error.publicMessage = "Gemini trả về JSON không hợp lệ."
+  error.rawResponse = String(rawResponse || "")
+  error.cause = cause
+  return error
+}
+
+function parseModelResponse(text) {
+  const raw = String(text || "").trim()
+  const candidates = buildJsonCandidates(raw)
+  let lastParseError = null
+
+  for (const candidate of candidates) {
+    try {
+      return JSON.parse(candidate)
+    } catch (err) {
+      lastParseError = err
+    }
+  }
+
+  throw createInvalidModelJsonError(raw, lastParseError)
 }
 
 function validateAiResponse(data) {
@@ -129,7 +252,7 @@ function validateAiResponse(data) {
   return data
 }
 
-async function buildCodoParsePreview({ dutyId, message, redClass }) {
+async function parseCodoMessage({ dutyId, message, redClass }) {
   const trimmedMessage = String(message || "").trim()
   if (!trimmedMessage) {
     const error = new Error("Missing message")
@@ -144,10 +267,10 @@ async function buildCodoParsePreview({ dutyId, message, redClass }) {
     context,
     message: trimmedMessage,
   })
-  logDevBlock("===== AI PROMPT =====", prompt)
+  logDevTextBlock("===== AI PROMPT =====", prompt)
 
-  const rawResponse = fakeResponseText
-  logDevBlock("===== AI RAW RESPONSE =====", rawResponse)
+  const rawResponse = await generateViolationJson(prompt)
+  logDevTextBlock("===== GEMINI RAW RESPONSE =====", rawResponse)
 
   const parsed = parseModelResponse(rawResponse)
   logDevBlock("===== AI PARSED =====", JSON.stringify(parsed, null, 2))
@@ -155,63 +278,12 @@ async function buildCodoParsePreview({ dutyId, message, redClass }) {
   const valid = validateAiResponse(parsed)
   logDevBlock("===== AI VALID =====", JSON.stringify(valid, null, 2))
 
-  return {
-    status: "not_implemented",
-    prompt,
-  }
+  return valid
 }
-
-async function parseWithGemini({ dutyId, message, redClass }) {
-  const context = await loadCodoDutyContext({
-    dutyId,
-    redClass,
-  })
-
-  const prompt = await buildCodoParsePrompt({
-    context,
-    message,
-  })
-
-  // Phase 3 replacement point:
-  // const rawResponse = await Gemini.generateContent(prompt)
-  // const parsed = parseModelResponse(rawResponse)
-  // return validateAiResponse(parsed)
-
-  return {
-    prompt,
-    rawResponse: fakeResponseText,
-  }
-}
-
-/*
-Quick test cases for parseModelResponse() + validateAiResponse():
-
-PASS:
-{"violations":[{"ruleId":4,"quantity":2}]}
-
-PASS:
-```json
-{"violations":[{"ruleId":4,"quantity":2}]}
-```
-
-FAIL:
-abc
-
-FAIL:
-{"violations":[{"ruleId":"4"}]}
-
-FAIL:
-{"violations":[{"ruleId":4,"quantity":0}]}
-
-FAIL:
-{"violations":[{"ruleId":4,"quantity":2,"abc":123}]}
-*/
 
 module.exports = {
-  fakeResponseText,
   loadCodoDutyContext,
-  buildCodoParsePreview,
   parseModelResponse,
   validateAiResponse,
-  parseWithGemini,
+  parseCodoMessage,
 }

@@ -66,12 +66,12 @@ export default function AdminDashboard() {
       return
     }
 
-    loadClasses()
+    void loadClasses()
   }, [isOffline])
 
   useEffect(() => {
     if (isOffline) return
-    loadTrends(grade)
+    void loadTrends(grade)
   }, [grade, isOffline])
 
   useEffect(() => {
@@ -114,15 +114,15 @@ export default function AdminDashboard() {
     const lastIndex = trendWeeks.length - 1
     const ranked = [...trendClasses].map((c) => {
       const last = c.scores?.[lastIndex]
-      const total = (c.scores || []).reduce((s: number, v: number | null) => s + (Number(v) || 0), 0)
-      return { ...c, lastScore: Number(last ?? 0), totalScore: total }
+      const totalScore = (c.scores || []).reduce((sum: number, value: number | null) => sum + (Number(value) || 0), 0)
+      return { ...c, lastScore: Number(last ?? 0), totalScore }
     })
     ranked.sort((a, b) => b.lastScore - a.lastScore)
     return ranked
   }, [trendClasses, trendWeeks])
 
   const yRange = useMemo(() => {
-    const all = chartSeries.flatMap((s: any) => (s.scores || []).filter((v: any) => v != null))
+    const all = chartSeries.flatMap((series: any) => (series.scores || []).filter((value: any) => value != null))
     if (!all.length) return { min: 0, max: 1 }
     const min = Math.min(...all)
     const max = Math.max(...all)
@@ -155,13 +155,13 @@ export default function AdminDashboard() {
   const avgSeries = useMemo(() => {
     if (!trendWeeks.length || !trendClasses.length) return []
     return trendWeeks.map((_: any, idx: number) => {
-      const vals = trendClasses
-        .map((c: any) => c.scores?.[idx])
-        .filter((v: any) => v != null)
-        .map((v: any) => Number(v))
-      if (!vals.length) return null
-      const sum = vals.reduce((s: number, v: number) => s + v, 0)
-      return sum / vals.length
+      const values = trendClasses
+        .map((classItem: any) => classItem.scores?.[idx])
+        .filter((value: any) => value != null)
+        .map((value: any) => Number(value))
+      if (!values.length) return null
+      const sum = values.reduce((acc: number, value: number) => acc + value, 0)
+      return sum / values.length
     })
   }, [trendWeeks, trendClasses])
 
@@ -211,13 +211,14 @@ export default function AdminDashboard() {
               { label: "Tổng kết tháng", path: "/admin/month-summary" },
               { label: "Tổng kết học kỳ", path: "/admin/semester-summary" },
               { label: "Tổng kết năm học", path: "/admin/year-summary" },
-            ].map((a) => (
+              { label: "Cấu hình hệ thống", path: "/admin/system-settings" },
+            ].map((item) => (
               <button
-                key={a.path}
-                onClick={() => navigate(a.path)}
+                key={item.path}
+                onClick={() => navigate(item.path)}
                 className="group rounded-2xl border border-blue-100 bg-white px-4 py-4 text-left shadow-sm hover:bg-slate-50 transition"
               >
-                <div className="text-sm font-semibold text-gray-900">{a.label}</div>
+                <div className="text-sm font-semibold text-gray-900">{item.label}</div>
                 <div className="mt-2 text-xs text-gray-500">Mở nhanh</div>
               </button>
             ))}
@@ -275,18 +276,18 @@ export default function AdminDashboard() {
                       <line x1="40" y1="20" x2="40" y2="220" />
                       <line x1="580" y1="20" x2="580" y2="220" />
                     </g>
-                    {chartSeries.map((s: any, idx: number) => {
+                    {chartSeries.map((series: any, idx: number) => {
                       const color = palette[idx % palette.length]
-                      const points = (s.scores || [])
-                        .map((v: number | null, i: number) => {
+                      const points = (series.scores || [])
+                        .map((value: number | null, i: number) => {
                           const x = 40 + i * (540 / Math.max(1, trendWeeks.length - 1))
-                          const val = v == null ? yRange.min : Number(v)
-                          const t = (val - yRange.min) / (yRange.max - yRange.min || 1)
+                          const normalizedValue = value == null ? yRange.min : Number(value)
+                          const t = (normalizedValue - yRange.min) / (yRange.max - yRange.min || 1)
                           const y = 220 - t * 200
                           return `${x},${y}`
                         })
                         .join(" ")
-                      return <polyline key={s.class_name} fill="none" stroke={color} strokeWidth="2" points={points} />
+                      return <polyline key={series.class_name} fill="none" stroke={color} strokeWidth="2" points={points} />
                     })}
                     {avgSeries.length > 0 && (
                       <polyline
@@ -295,10 +296,10 @@ export default function AdminDashboard() {
                         strokeWidth="2.5"
                         strokeDasharray="6 6"
                         points={avgSeries
-                          .map((v, i) => {
+                          .map((value, i) => {
                             const x = 40 + i * (540 / Math.max(1, trendWeeks.length - 1))
-                            const val = v == null ? yRange.min : Number(v)
-                            const t = (val - yRange.min) / (yRange.max - yRange.min || 1)
+                            const normalizedValue = value == null ? yRange.min : Number(value)
+                            const t = (normalizedValue - yRange.min) / (yRange.max - yRange.min || 1)
                             const y = 220 - t * 200
                             return `${x},${y}`
                           })
@@ -337,17 +338,17 @@ export default function AdminDashboard() {
                       <div className="mt-2 text-gray-600">Top 5 tuần này</div>
                       <div className="mt-1 space-y-1">
                         {[...chartSeries]
-                          .map((c: any) => ({
-                            class_name: c.class_name,
-                            score: c.scores?.[hover.index],
+                          .map((classItem: any) => ({
+                            class_name: classItem.class_name,
+                            score: classItem.scores?.[hover.index],
                           }))
-                          .filter((c: any) => c.score != null)
+                          .filter((classItem: any) => classItem.score != null)
                           .sort((a: any, b: any) => Number(b.score) - Number(a.score))
                           .slice(0, 5)
-                          .map((c: any) => (
-                            <div key={c.class_name} className="flex items-center gap-2">
-                              <div className="min-w-[48px] font-semibold text-gray-900">{c.class_name}</div>
-                              <div className="text-gray-700">{formatScore(Number(c.score))}</div>
+                          .map((classItem: any) => (
+                            <div key={classItem.class_name} className="flex items-center gap-2">
+                              <div className="min-w-[48px] font-semibold text-gray-900">{classItem.class_name}</div>
+                              <div className="text-gray-700">{formatScore(Number(classItem.score))}</div>
                             </div>
                           ))}
                       </div>
@@ -359,14 +360,14 @@ export default function AdminDashboard() {
               <div className="rounded-2xl border border-blue-100 p-4">
                 <div className="text-xs text-gray-500">Bảng xếp hạng (tuần gần nhất)</div>
                 <div className="mt-3 space-y-2">
-                  {chartSeries.map((s: any, idx: number) => (
-                    <div key={s.class_name} className="flex items-center gap-3">
+                  {chartSeries.map((series: any, idx: number) => (
+                    <div key={series.class_name} className="flex items-center gap-3">
                       <div className="w-6 text-xs text-gray-500">#{idx + 1}</div>
                       <div className="min-w-0 flex-1 text-sm font-semibold text-gray-900">
-                        {s.class_name}
+                        {series.class_name}
                       </div>
                       <div className="text-sm font-semibold text-gray-900">
-                        {formatScore(Number(s.lastScore))}
+                        {formatScore(Number(series.lastScore))}
                       </div>
                     </div>
                   ))}

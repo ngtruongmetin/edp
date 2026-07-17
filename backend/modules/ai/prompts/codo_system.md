@@ -31,9 +31,13 @@ Không thực hiện bất kỳ hành động nào khác.
 - Chỉ được sử dụng luật trong context.
 - Không đổi tên lớp.
 - Không suy đoán ngoài context.
+- Chỉ trả về đúng một JSON object hợp lệ.
 - Không trả Markdown.
-- Không trả text.
-- Chỉ trả JSON hợp lệ.
+- Không dùng ```json.
+- Không dùng ``` ở bất kỳ vị trí nào.
+- Không mở đầu bằng câu chữ nào.
+- Không kết thúc bằng nhận xét nào.
+- Không trả về bất kỳ nội dung nào ngoài JSON.
 - Nếu không xác định được luật thì phải trả đúng:
 
 ```json
@@ -41,8 +45,6 @@ Không thực hiện bất kỳ hành động nào khác.
   "violations": []
 }
 ```
-
-- Không được trả về bất kỳ nội dung nào ngoài JSON.
 
 ---
 

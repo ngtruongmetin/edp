@@ -4,6 +4,39 @@ const { pool } = require("../config/database")
 const { get, run } = require("./dbp")
 const { hashPin, isHashedPin } = require("./pinSecurity")
 
+const DEFAULT_SYSTEM_SETTINGS = [
+  {
+    key: "gemini_api_key",
+    value: "",
+    description: "API Key dùng để gọi Google Gemini",
+  },
+  {
+    key: "ai_provider",
+    value: "gemini",
+    description: "Nhà cung cấp AI mặc định của hệ thống",
+  },
+  {
+    key: "ai_model",
+    value: "",
+    description: "Model AI mặc định cho AI Assistant",
+  },
+  {
+    key: "temperature",
+    value: "0",
+    description: "Temperature mặc định cho AI Assistant",
+  },
+  {
+    key: "max_output_tokens",
+    value: "2048",
+    description: "Giới hạn số token đầu ra của AI Assistant",
+  },
+  {
+    key: "base_score",
+    value: "100",
+    description: "Điểm gốc mặc định của mỗi lớp khi bắt đầu tuần thi đua",
+  },
+]
+
 async function initDb() {
   const schemaPath = path.join(__dirname, "..", "sql", "schema.postgresql.sql")
   const schemaSql = fs.readFileSync(schemaPath, "utf8")
@@ -18,6 +51,11 @@ async function initDb() {
   await pool.query(`
     ALTER TABLE accounts
     ADD COLUMN IF NOT EXISTS pin_locked_until BIGINT NOT NULL DEFAULT 0
+  `)
+
+  await pool.query(`
+    ALTER TABLE admins
+    DROP COLUMN IF EXISTS is_super_admin
   `)
 
   const pinRows = await pool.query(
@@ -55,6 +93,19 @@ async function initDb() {
         VALUES(?,?,?,?,?,?)
       `,
       ["2025-2026", "[]", "[]", null, now, now],
+    )
+  }
+
+  const now = new Date().toISOString()
+  for (const setting of DEFAULT_SYSTEM_SETTINGS) {
+    await pool.query(
+      `
+        INSERT INTO system_settings (setting_key, setting_value, description, updated_at, updated_by)
+        VALUES ($1, $2, $3, $4, $5)
+        ON CONFLICT (setting_key) DO UPDATE
+        SET description = EXCLUDED.description
+      `,
+      [setting.key, setting.value, setting.description, now, "system"],
     )
   }
 }

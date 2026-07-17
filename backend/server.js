@@ -79,6 +79,7 @@ app.use("/api/schedule", require("./modules/schedule/routes"))
 app.use("/api/duty", require("./modules/duty/routes"))
 app.use("/api/bonus", require("./modules/bonus/routes"))
 app.use("/api/ai", require("./modules/ai/routes"))
+app.use("/api/system-settings", require("./modules/system-settings/routes"))
 
 app.get("/", (req, res) => {
   res.send("EDP running")

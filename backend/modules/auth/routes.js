@@ -111,7 +111,7 @@ router.post("/admin/login", (req, res) => {
             if (sessionErr) return res.status(500).json({ error: sessionErr.message })
             req.session.user = {
                 role: "admin",
-                username: admin.username
+                username: admin.username,
             };
 
             req.session.save((saveErr) => {

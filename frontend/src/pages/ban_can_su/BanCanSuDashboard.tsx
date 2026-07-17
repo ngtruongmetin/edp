@@ -15,6 +15,7 @@ type Week = {
   week_number: number
   start_date: string
   end_date: string
+  base_points?: number
 }
 
 type Session = {
@@ -151,7 +152,14 @@ export default function BanCanSuDashboard() {
     try {
       setLoading(true)
       const res = await api.get(`/duty/bancansu/week/${id}`)
-      setWeek(res.data.week || null)
+      setWeek(
+        res.data.week
+          ? {
+              ...res.data.week,
+              base_points: Number(res.data.base_points || 120),
+            }
+          : null,
+      )
       setSessions(res.data.sessions || [])
     } catch (err: any) {
       console.error(err)
@@ -199,7 +207,7 @@ export default function BanCanSuDashboard() {
 
   const weekScoreStats = useMemo(() => {
     const signedSessions = sessions.filter((s) => s.status === "signed")
-    const basePoints = 120
+    const basePoints = Number(week?.base_points || 120)
     const bonus = signedSessions.reduce((sum, s) => sum + Number(s.bonus_points || 0), 0)
     const minus = Math.abs(
       signedSessions.reduce((sum, s) => sum + Number(s.violation_score || 0), 0),
@@ -208,7 +216,7 @@ export default function BanCanSuDashboard() {
     const total = plus - minus
 
     return { plus, minus, total }
-  }, [sessions])
+  }, [sessions, week?.base_points])
 
   return (
     <div className="min-h-screen flex flex-col bg-slate-50">

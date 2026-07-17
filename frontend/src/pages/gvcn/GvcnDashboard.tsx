@@ -16,6 +16,7 @@ type Week = {
   start_date: string
   end_date: string
   closed_at?: string | null
+  base_points?: number
 }
 
 type Session = {
@@ -169,7 +170,14 @@ export default function GvcnDashboard() {
     try {
       setLoading(true)
       const res = await api.get(`/duty/gvcn/week/${id}`)
-      setWeek(res.data.week || null)
+      setWeek(
+        res.data.week
+          ? {
+              ...res.data.week,
+              base_points: Number(res.data.base_points || 120),
+            }
+          : null,
+      )
       setSessions(res.data.sessions || [])
     } catch (err: any) {
       console.error(err)
@@ -247,7 +255,7 @@ export default function GvcnDashboard() {
       0,
     )
 
-    const basePoints = 120
+    const basePoints = Number(week?.base_points || 120)
 
     const myClosedWeekTotal = Number(
       (summary?.scores || []).find((r) => r.class_name === user?.class_name)?.score || 0,
@@ -266,7 +274,7 @@ export default function GvcnDashboard() {
       minus,
       total,
     }
-  }, [sessions, summary, user?.class_name])
+  }, [sessions, summary, user?.class_name, week?.base_points])
 
   return (
     <div className="min-h-screen flex flex-col bg-slate-50">

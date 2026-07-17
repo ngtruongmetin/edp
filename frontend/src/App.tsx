@@ -17,6 +17,7 @@ import AdminMonthSummary from "./pages/admin/AdminMonthSummary"
 import AdminSemesterSummary from "./pages/admin/AdminSemesterSummary"
 import AdminYearSummary from "./pages/admin/AdminYearSummary"
 import AdminTimetable from "./pages/admin/AdminTimetable"
+import AdminSystemSettings from "./pages/admin/AdminSystemSettings"
 
 import CodoDashboard from "./pages/co_do/CodoDashboard"
 import CodoLayout from "./pages/co_do/CodoLayout"
@@ -76,6 +77,7 @@ export default function App(){
           <Route path="month-summary" element={<AdminMonthSummary/>}/>
           <Route path="semester-summary" element={<AdminSemesterSummary/>}/>
           <Route path="year-summary" element={<AdminYearSummary/>}/>
+          <Route path="system-settings" element={<AdminSystemSettings/>}/>
           {/* mọi route admin sai */}
           <Route path="*" element={<NotFound/>}/>
         </Route>

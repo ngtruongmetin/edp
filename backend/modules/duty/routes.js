@@ -9,6 +9,7 @@ const crypto = require("crypto")
 
 const requireLogin = require("../../middleware/requireLogin")
 const requireRole = require("../../middleware/requireRole")
+const SystemSettingService = require("../system-settings/service")
 
 const time = require("../../utils/time")
 
@@ -115,7 +116,19 @@ function revisionActionLabel(action) {
   return "Chỉnh sửa"
 }
 
-const BASE_WEEK_POINTS = 120
+const DEFAULT_BASE_SCORE = 120
+
+async function loadBaseScore() {
+  const rawValue = await SystemSettingService.get("base_score", String(DEFAULT_BASE_SCORE))
+  const parsedValue = Number(rawValue)
+  return Number.isFinite(parsedValue) ? parsedValue : DEFAULT_BASE_SCORE
+}
+
+function withBaseScore(cb) {
+  loadBaseScore()
+    .then((baseScore) => cb(null, baseScore))
+    .catch((err) => cb(err))
+}
 
 function latestSignatureJoin(alias = "ds") {
   // Join the most recent signature per session (supports re-signing).
@@ -211,53 +224,57 @@ function ensureDailySessionsForDate({ weekId, date }, cb) {
 }
 
 function computeWeekScores(weekId, cb) {
-  db.all(
-    `
-      WITH class_list AS (
-        SELECT name as class_name
-        FROM classes
-        WHERE is_active = 1
-      ),
-      session_base AS (
+  withBaseScore((baseErr, baseScore) => {
+    if (baseErr) return cb(baseErr)
+
+    db.all(
+      `
+        WITH class_list AS (
+          SELECT name as class_name
+          FROM classes
+          WHERE is_active = 1
+        ),
+        session_base AS (
+          SELECT
+            s.id,
+            s.duty_class as class_name,
+            COALESCE(SUM(r.score_delta * v.quantity), 0) as violation_score,
+            COALESCE(MAX(b.points), 0) as bonus_points
+          FROM duty_sessions s
+          LEFT JOIN duty_violations v
+            ON v.session_id = s.id
+          LEFT JOIN rules r
+            ON r.id = v.rule_id
+          LEFT JOIN daily_bonus b
+            ON b.week_id = s.week_id
+           AND b.date = s.date
+           AND b.class_name = s.duty_class
+          WHERE s.week_id=?
+            AND s.status='signed'
+          GROUP BY s.id
+        ),
+        class_totals AS (
+          SELECT
+            class_name,
+            SUM(violation_score + bonus_points) as session_score
+          FROM session_base
+          GROUP BY class_name
+        )
         SELECT
-          s.id,
-          s.duty_class as class_name,
-          COALESCE(SUM(r.score_delta * v.quantity), 0) as violation_score,
-          COALESCE(MAX(b.points), 0) as bonus_points
-        FROM duty_sessions s
-        LEFT JOIN duty_violations v
-          ON v.session_id = s.id
-        LEFT JOIN rules r
-          ON r.id = v.rule_id
-        LEFT JOIN daily_bonus b
-          ON b.week_id = s.week_id
-         AND b.date = s.date
-         AND b.class_name = s.duty_class
-        WHERE s.week_id=?
-          AND s.status='signed'
-        GROUP BY s.id
-      ),
-      class_totals AS (
-        SELECT
-          class_name,
-          SUM(violation_score + bonus_points) as session_score
-        FROM session_base
-        GROUP BY class_name
-      )
-      SELECT
-        cl.class_name,
-        (? + COALESCE(ct.session_score, 0) + COALESCE(wb.points, 0)) as score
-      FROM class_list cl
-      LEFT JOIN class_totals ct
-        ON ct.class_name = cl.class_name
-      LEFT JOIN weekly_bonus wb
-        ON wb.week_id = ?
-       AND wb.class_name = cl.class_name
-      ORDER BY score DESC
-    `,
-    [weekId, BASE_WEEK_POINTS, weekId],
-    cb,
-  )
+          cl.class_name,
+          (? + COALESCE(ct.session_score, 0) + COALESCE(wb.points, 0)) as score
+        FROM class_list cl
+        LEFT JOIN class_totals ct
+          ON ct.class_name = cl.class_name
+        LEFT JOIN weekly_bonus wb
+          ON wb.week_id = ?
+         AND wb.class_name = cl.class_name
+        ORDER BY score DESC
+      `,
+      [weekId, baseScore, weekId],
+      cb,
+    )
+  })
 }
 
 function weekSessionCounts(weekId, cb) {
@@ -283,74 +300,78 @@ function weekSessionCounts(weekId, cb) {
 }
 
 function weekBreakdowns(weekId, cb) {
-  db.all(
-    `
-      WITH class_list AS (
-        SELECT name as class_name, grade
-        FROM classes
-        WHERE is_active = 1
-      ),
-      signed_sessions AS (
-        SELECT id, duty_class, date
-        FROM duty_sessions
-        WHERE week_id=?
-          AND status='signed'
-      ),
-      daily_by_class AS (
+  withBaseScore((baseErr, baseScore) => {
+    if (baseErr) return cb(baseErr)
+
+    db.all(
+      `
+        WITH class_list AS (
+          SELECT name as class_name, grade
+          FROM classes
+          WHERE is_active = 1
+        ),
+        signed_sessions AS (
+          SELECT id, duty_class, date
+          FROM duty_sessions
+          WHERE week_id=?
+            AND status='signed'
+        ),
+        daily_by_class AS (
+          SELECT
+            s.duty_class as class_name,
+            COALESCE(SUM(b.points), 0) as daily_points,
+            MIN(b.min_score) as min_score
+          FROM signed_sessions s
+          LEFT JOIN daily_bonus b
+            ON b.week_id = ?
+           AND b.date = s.date
+           AND b.class_name = s.duty_class
+          GROUP BY s.duty_class
+        ),
+        vio_by_class AS (
+          SELECT
+            s.duty_class as class_name,
+            COALESCE(SUM(r.score_delta * v.quantity), 0) as violation_sum
+          FROM signed_sessions s
+          LEFT JOIN duty_violations v
+            ON v.session_id = s.id
+          LEFT JOIN rules r
+            ON r.id = v.rule_id
+          GROUP BY s.duty_class
+        ),
+        weekly_by_class AS (
+          SELECT class_name, points as weekly_points, reason
+          FROM weekly_bonus
+          WHERE week_id=?
+        )
         SELECT
-          s.duty_class as class_name,
-          COALESCE(SUM(b.points), 0) as daily_points,
-          MIN(b.min_score) as min_score
-        FROM signed_sessions s
-        LEFT JOIN daily_bonus b
-          ON b.week_id = ?
-         AND b.date = s.date
-         AND b.class_name = s.duty_class
-        GROUP BY s.duty_class
-      ),
-      vio_by_class AS (
-        SELECT
-          s.duty_class as class_name,
-          COALESCE(SUM(r.score_delta * v.quantity), 0) as violation_sum
-        FROM signed_sessions s
-        LEFT JOIN duty_violations v
-          ON v.session_id = s.id
-        LEFT JOIN rules r
-          ON r.id = v.rule_id
-        GROUP BY s.duty_class
-      ),
-      weekly_by_class AS (
-        SELECT class_name, points as weekly_points, reason
-        FROM weekly_bonus
-        WHERE week_id=?
-      )
-      SELECT
-        cl.grade,
-        cl.class_name,
-        ? as base_points,
-        COALESCE(db.daily_points, 0) as daily_points,
-        COALESCE(wb.weekly_points, 0) as weekly_points,
-        COALESCE(vb.violation_sum, 0) as violation_sum,
-        (? + COALESCE(db.daily_points, 0) + COALESCE(wb.weekly_points, 0)) as plus_points,
-        CASE
-          WHEN COALESCE(vb.violation_sum, 0) < 0 THEN -COALESCE(vb.violation_sum, 0)
-          ELSE 0
-        END as minus_points,
-        (? + COALESCE(db.daily_points, 0) + COALESCE(wb.weekly_points, 0) + COALESCE(vb.violation_sum, 0)) as total_score,
-        db.min_score as min_score,
-        wb.reason as weekly_reason
-      FROM class_list cl
-      LEFT JOIN daily_by_class db
-        ON db.class_name = cl.class_name
-      LEFT JOIN vio_by_class vb
-        ON vb.class_name = cl.class_name
-      LEFT JOIN weekly_by_class wb
-        ON wb.class_name = cl.class_name
-      ORDER BY cl.grade ASC, total_score DESC, cl.class_name ASC
-    `,
-    [weekId, weekId, weekId, BASE_WEEK_POINTS, BASE_WEEK_POINTS, BASE_WEEK_POINTS],
-    cb,
-  )
+          cl.grade,
+          cl.class_name,
+          ? as base_points,
+          COALESCE(db.daily_points, 0) as daily_points,
+          COALESCE(wb.weekly_points, 0) as weekly_points,
+          COALESCE(vb.violation_sum, 0) as violation_sum,
+          (? + COALESCE(db.daily_points, 0) + COALESCE(wb.weekly_points, 0)) as plus_points,
+          CASE
+            WHEN COALESCE(vb.violation_sum, 0) < 0 THEN -COALESCE(vb.violation_sum, 0)
+            ELSE 0
+          END as minus_points,
+          (? + COALESCE(db.daily_points, 0) + COALESCE(wb.weekly_points, 0) + COALESCE(vb.violation_sum, 0)) as total_score,
+          db.min_score as min_score,
+          wb.reason as weekly_reason
+        FROM class_list cl
+        LEFT JOIN daily_by_class db
+          ON db.class_name = cl.class_name
+        LEFT JOIN vio_by_class vb
+          ON vb.class_name = cl.class_name
+        LEFT JOIN weekly_by_class wb
+          ON wb.class_name = cl.class_name
+        ORDER BY cl.grade ASC, total_score DESC, cl.class_name ASC
+      `,
+      [weekId, weekId, weekId, baseScore, baseScore, baseScore],
+      cb,
+    )
+  })
 }
 
 function parseWeekIds(input) {
@@ -2622,12 +2643,15 @@ router.get(
                         String(a.date).localeCompare(String(b.date)),
                       )
 
-                      res.json({
-                        week,
-                        base_points: BASE_WEEK_POINTS,
-                        breakdown: row,
-                        days,
-                        weekly_bonus: weeklyBonus || null,
+                      withBaseScore((baseErr, baseScore) => {
+                        if (baseErr) return res.status(500).json({ error: baseErr.message })
+                        res.json({
+                          week,
+                          base_points: baseScore,
+                          breakdown: row,
+                          days,
+                          weekly_bonus: weeklyBonus || null,
+                        })
                       })
                     },
                   )
@@ -4131,7 +4155,10 @@ router.get(
         [week.id, dutyClass],
         (err, rows) => {
           if (err) return res.status(500).json({ error: err.message })
-          res.json({ week, sessions: rows || [] })
+          withBaseScore((baseErr, baseScore) => {
+            if (baseErr) return res.status(500).json({ error: baseErr.message })
+            res.json({ week, sessions: rows || [], base_points: baseScore })
+          })
         },
       )
     })
@@ -4196,7 +4223,10 @@ router.get(
             [week.id, dutyClass],
             (err, rows) => {
               if (err) return res.status(500).json({ error: err.message })
-              res.json({ week, sessions: rows || [] })
+              withBaseScore((baseErr, baseScore) => {
+                if (baseErr) return res.status(500).json({ error: baseErr.message })
+                res.json({ week, sessions: rows || [], base_points: baseScore })
+              })
             },
           )
         })
@@ -4358,7 +4388,10 @@ router.get(
             [week.id, dutyClass],
             (err, rows) => {
               if (err) return res.status(500).json({ error: err.message })
-              res.json({ week, sessions: rows || [] })
+              withBaseScore((baseErr, baseScore) => {
+                if (baseErr) return res.status(500).json({ error: baseErr.message })
+                res.json({ week, sessions: rows || [], base_points: baseScore })
+              })
             },
           )
         })
