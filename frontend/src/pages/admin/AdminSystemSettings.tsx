@@ -22,19 +22,14 @@ type SettingsResponse = {
   settings: Record<string, SettingItem>
 }
 
-type ModelListResponse = {
-  success: boolean
-  models: string[]
-  message?: string
-}
-
 type TestAiResponse = {
   success: boolean
   provider?: string
   status?: number
   message?: string
   suggestion?: string
-  model?: string
+  model?: string | null
+  models?: string[]
 }
 
 const providerOptions = [
@@ -92,73 +87,19 @@ export default function AdminSystemSettings() {
     void loadSettings()
   }, [canAccess])
 
-  async function loadAvailableModels(options?: {
-    preferredModel?: string
-    silent?: boolean
-  }) {
+  useEffect(() => {
     if (aiProvider !== "gemini") {
-      setModelOptions(mergeModelOptions([], options?.preferredModel || aiModel))
-      return
+      setModelOptions(mergeModelOptions([], aiModel))
     }
-
-    try {
-      setModelsLoading(true)
-      if (!options?.silent) {
-        setError(null)
-      }
-
-      const res = await api.get<ModelListResponse>("/system-settings/ai/models")
-      const mergedModels = mergeModelOptions(
-        res.data.models || [],
-        options?.preferredModel || aiModel,
-      )
-
-      setModelOptions(mergedModels)
-
-      if (!String(options?.preferredModel || aiModel || "").trim() && mergedModels[0]) {
-        setAiModel(mergedModels[0])
-      }
-
-      if (!options?.silent) {
-        setNotice("Đã làm mới danh sách model.")
-      }
-    } catch (err: any) {
-      console.error(err)
-      const message =
-        err?.response?.data?.message ||
-        err?.response?.data?.error ||
-        "Không thể tải danh sách model."
-
-      setModelOptions(mergeModelOptions([], options?.preferredModel || aiModel))
-      setError(message)
-    } finally {
-      setModelsLoading(false)
-    }
-  }
-
-  async function loadSettings() {
-    try {
-      setPageLoading(true)
-      setError(null)
-      const res = await api.get<SettingsResponse>("/system-settings")
-      const settings = res.data.settings
-
-      applySettings(settings)
-      await loadAvailableModels({
-        preferredModel: settings.ai_model?.value || "",
-        silent: true,
-      })
-    } catch (err: any) {
-      console.error(err)
-      setError(err?.response?.data?.error || "Không tải được cấu hình hệ thống")
-    } finally {
-      setPageLoading(false)
-    }
-  }
+  }, [aiModel, aiProvider])
 
   function applySettings(settings: Record<string, SettingItem>) {
-    setAiProvider(settings.ai_provider?.value || "gemini")
-    setAiModel(settings.ai_model?.value || "")
+    const savedProvider = settings.ai_provider?.value || "gemini"
+    const savedModel = settings.ai_model?.value || ""
+
+    setAiProvider(savedProvider)
+    setAiModel(savedModel)
+    setModelOptions(mergeModelOptions([], savedModel))
     setTemperature(settings.temperature?.value || "0")
     setMaxOutputTokens(settings.max_output_tokens?.value || "2048")
     setBaseScore(settings.base_score?.value || "100")
@@ -167,59 +108,182 @@ export default function AdminSystemSettings() {
     setHasGeminiApiKey(Boolean(settings.gemini_api_key?.has_value))
   }
 
-  async function saveSettings(options?: { silent?: boolean }) {
-    setSaving(true)
-    setError(null)
-    setNotice(null)
+  async function loadSettings() {
+    try {
+      setPageLoading(true)
+      setError(null)
+      setNotice(null)
+
+      const res = await api.get<SettingsResponse>("/system-settings")
+      applySettings(res.data.settings)
+    } catch (err: any) {
+      console.error(err)
+      setError(err?.response?.data?.error || "Không tải được cấu hình hệ thống")
+    } finally {
+      setPageLoading(false)
+    }
+  }
+
+  function buildAiConnectionPayload() {
+    return {
+      provider: aiProvider,
+      apiKey: geminiApiKey.trim(),
+    }
+  }
+
+  function buildAiSavePayload() {
+    return {
+      provider: aiProvider,
+      apiKey: geminiApiKey.trim(),
+      model: aiModel.trim(),
+      temperature: Number(temperature),
+      max_output_tokens: Number(maxOutputTokens),
+    }
+  }
+
+  async function runAiConnectionCheck(options?: {
+    successMessage?: string
+    silentErrors?: boolean
+  }) {
+    const payload = buildAiConnectionPayload()
+
+    if (!payload.provider) {
+      setError("Vui lòng chọn nhà cung cấp AI.")
+      return null
+    }
+
+    if (!payload.apiKey) {
+      setError("Vui lòng nhập API Key trước khi kiểm tra.")
+      return null
+    }
 
     try {
-      const payload: Record<string, string | number> = {
-        ai_provider: aiProvider,
-        ai_model: aiModel.trim(),
-        temperature: Number(temperature),
-        max_output_tokens: Number(maxOutputTokens),
-        base_score: Number(baseScore),
+      setError(null)
+      setNotice(null)
+
+      const res = await api.post<TestAiResponse>("/system-settings/ai/test-connection", payload)
+      const nextModels = mergeModelOptions(res.data.models || [], aiModel)
+
+      setModelOptions(nextModels)
+
+      if (!String(aiModel || "").trim() && nextModels[0]) {
+        setAiModel(nextModels[0])
       }
 
-      if (geminiApiKey.trim()) {
-        payload.gemini_api_key = geminiApiKey.trim()
+      if (options?.successMessage) {
+        setNotice(options.successMessage)
+      } else if (res.data?.message) {
+        setNotice(res.data.message)
       }
 
-      const res = await api.put<SettingsResponse>("/system-settings", {
-        settings: payload,
+      return res.data
+    } catch (err: any) {
+      console.error(err)
+      if (!options?.silentErrors) {
+        setError(
+          err?.response?.data?.message ||
+            err?.response?.data?.error ||
+            "Không thể kiểm tra API Key.",
+        )
+      }
+      return null
+    }
+  }
+
+  async function refreshModelOptions() {
+    if (aiProvider !== "gemini") {
+      setModelOptions(mergeModelOptions([], aiModel))
+      return
+    }
+
+    try {
+      setModelsLoading(true)
+      await runAiConnectionCheck({
+        successMessage: "Đã làm mới danh sách model.",
       })
+    } finally {
+      setModelsLoading(false)
+    }
+  }
 
+  async function testApi() {
+    try {
+      setTesting(true)
+      await runAiConnectionCheck({
+        successMessage: "Kết nối AI thành công.",
+      })
+    } finally {
+      setTesting(false)
+    }
+  }
+
+  async function saveAiSettings() {
+    const payload = buildAiSavePayload()
+
+    if (!payload.provider) {
+      setError("Vui lòng chọn nhà cung cấp AI.")
+      return false
+    }
+
+    if (!payload.apiKey) {
+      setError("Vui lòng nhập API Key trước khi lưu.")
+      return false
+    }
+
+    if (!payload.model) {
+      setError("Vui lòng chọn model trước khi lưu.")
+      return false
+    }
+
+    try {
+      setSaving(true)
+      setError(null)
+      setNotice(null)
+
+      const res = await api.put<SettingsResponse>("/system-settings/ai", payload)
       applySettings(res.data.settings)
-      if (!options?.silent) {
-        setNotice("Đã lưu cấu hình hệ thống")
-      }
+      setNotice("Đã lưu cấu hình AI.")
       return true
     } catch (err: any) {
       console.error(err)
-      setError(err?.response?.data?.error || "Không lưu được cấu hình")
+      setError(err?.response?.data?.error || "Không lưu được cấu hình AI.")
       return false
     } finally {
       setSaving(false)
     }
   }
 
-  async function testApi() {
-    const saved = await saveSettings({ silent: true })
-    if (!saved) return
-
+  async function saveCompetitionSettings() {
     try {
-      setTesting(true)
+      setSaving(true)
       setError(null)
       setNotice(null)
 
-      const res = await api.post<TestAiResponse>("/system-settings/test-ai")
-      setNotice(res.data?.message || "Kết nối AI thành công")
+      const res = await api.put<SettingsResponse>("/system-settings", {
+        settings: {
+          base_score: Number(baseScore),
+        },
+      })
+
+      applySettings(res.data.settings)
+      setNotice("Đã lưu cấu hình hệ thống.")
+      return true
     } catch (err: any) {
       console.error(err)
-      setError(err?.response?.data?.message || err?.response?.data?.error || "AI unavailable")
+      setError(err?.response?.data?.error || "Không lưu được cấu hình.")
+      return false
     } finally {
-      setTesting(false)
+      setSaving(false)
     }
+  }
+
+  async function handleSave() {
+    if (activeTab === "ai") {
+      await saveAiSettings()
+      return
+    }
+
+    await saveCompetitionSettings()
   }
 
   const aiProviderHelp = useMemo(() => {
@@ -262,7 +326,7 @@ export default function AdminSystemSettings() {
 
             <div className="lg:ml-auto flex flex-wrap gap-3">
               <button
-                onClick={() => void saveSettings()}
+                onClick={() => void handleSave()}
                 disabled={saving || pageLoading}
                 className="rounded-2xl bg-white px-5 py-3 text-sm font-semibold text-[#2e77df] shadow-sm transition active:scale-[0.98] disabled:opacity-60"
               >
@@ -354,7 +418,7 @@ export default function AdminSystemSettings() {
                   <span className="text-sm font-semibold text-slate-900">Model</span>
                   <button
                     type="button"
-                    onClick={() => void loadAvailableModels({ silent: false })}
+                    onClick={() => void refreshModelOptions()}
                     disabled={modelsLoading || pageLoading || aiProvider !== "gemini"}
                     className="rounded-xl border border-blue-100 bg-white px-3 py-2 text-xs font-semibold text-[#2e77df] transition active:scale-[0.98] disabled:opacity-60"
                   >
@@ -380,7 +444,7 @@ export default function AdminSystemSettings() {
                   )}
                 </select>
                 <div className="text-xs text-slate-500">
-                  Danh sách model được lấy trực tiếp từ Gemini API của tài khoản hiện tại.
+                  Danh sách model sẽ được tải sau khi API Key hiện tại được kiểm tra thành công.
                 </div>
               </div>
 
@@ -434,7 +498,7 @@ export default function AdminSystemSettings() {
                   value={geminiApiKey}
                   onChange={(e) => setGeminiApiKey(e.target.value)}
                   className="flex-1 rounded-2xl border border-blue-100 bg-white px-4 py-3 text-sm outline-none focus:border-[#2e77df]"
-                  placeholder="Nhập API Key mới để thay thế"
+                  placeholder="Nhập API Key để kiểm tra và lưu"
                 />
                 <button
                   type="button"
@@ -447,7 +511,7 @@ export default function AdminSystemSettings() {
               </div>
 
               <div className="mt-3 text-xs text-slate-500">
-                Nút kiểm tra sẽ lưu cấu hình hiện tại trước khi gọi Gemini.
+                Nút kiểm tra sẽ dùng trực tiếp Provider và API Key đang nhập trên form, không lưu xuống database.
               </div>
             </div>
           </div>

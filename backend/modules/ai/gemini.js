@@ -211,6 +211,38 @@ function mapGeminiError(err, model) {
   })
 }
 
+function normalizeRuntimeOverrides(overrides = {}) {
+  return {
+    provider: String(overrides.provider || "").trim().toLowerCase(),
+    model: normalizeModelName(overrides.model) || "",
+    apiKey: String(overrides.apiKey || "").trim(),
+    temperature: Number(overrides.temperature),
+    maxOutputTokens: Number(overrides.maxOutputTokens),
+  }
+}
+
+function ensureGeminiProvider(provider) {
+  if (provider && provider !== "gemini") {
+    throw createAiUnavailableError("AI unavailable", undefined, {
+      httpStatus: 400,
+      aiStatus: 400,
+      adminMessage: "Nhà cung cấp AI hiện tại chưa được hỗ trợ.",
+      suggestion: "Hiện tại hệ thống chỉ hỗ trợ Gemini.",
+    })
+  }
+}
+
+function ensureApiKeyPresent(apiKey) {
+  if (!apiKey) {
+    throw createAiUnavailableError("AI unavailable", undefined, {
+      httpStatus: 400,
+      aiStatus: 400,
+      adminMessage: "Chưa nhập Gemini API Key.",
+      suggestion: "Hãy nhập Gemini API Key để kiểm tra kết nối.",
+    })
+  }
+}
+
 async function getGeminiRuntimeConfig() {
   const config = await SystemSettingService.getAiRuntimeConfig()
 
@@ -237,8 +269,31 @@ async function getGeminiRuntimeConfig() {
   }
 }
 
-async function generateContentText(prompt) {
-  const config = await getGeminiRuntimeConfig()
+async function getGeminiConfigFromOverrides(overrides = {}) {
+  const config = normalizeRuntimeOverrides(overrides)
+
+  ensureGeminiProvider(config.provider || "gemini")
+  ensureApiKeyPresent(config.apiKey)
+
+  return {
+    provider: config.provider || "gemini",
+    model: config.model || FALLBACK_GEMINI_MODEL,
+    apiKey: config.apiKey,
+    temperature: Number.isFinite(config.temperature) ? config.temperature : 0,
+    maxOutputTokens: Number.isInteger(config.maxOutputTokens)
+      ? config.maxOutputTokens
+      : 2048,
+  }
+}
+
+async function resolveGeminiConfig(overrides) {
+  return overrides
+    ? getGeminiConfigFromOverrides(overrides)
+    : getGeminiRuntimeConfig()
+}
+
+async function generateContentText(prompt, overrides) {
+  const config = await resolveGeminiConfig(overrides)
 
   try {
     const client = await getClient(config.apiKey)
@@ -286,8 +341,8 @@ function supportsGenerateContent(model) {
   return actions.some((action) => action.includes("generatecontent"))
 }
 
-async function listAvailableGeminiModels() {
-  const config = await getGeminiRuntimeConfig()
+async function listAvailableGeminiModels(overrides) {
+  const config = await resolveGeminiConfig(overrides)
 
   try {
     const client = await getClient(config.apiKey)
@@ -323,17 +378,16 @@ async function listAvailableGeminiModels() {
   }
 }
 
-async function testGeminiConnection() {
-  const result = await generateContentText([
-    "Chỉ trả về JSON hợp lệ.",
-    '{"violations":[]}',
-  ].join("\n"))
+async function testGeminiConnection(overrides) {
+  const config = await resolveGeminiConfig(overrides)
+  const models = await listAvailableGeminiModels(config)
 
   return {
     success: true,
-    provider: result.provider,
-    model: result.model,
-    message: `Kết nối AI thành công với model '${result.model}'.`,
+    provider: GEMINI_PROVIDER,
+    model: config.model || null,
+    models,
+    message: "Kết nối AI thành công.",
   }
 }
 

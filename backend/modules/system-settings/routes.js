@@ -92,6 +92,83 @@ function validateSettingsPayload(payload) {
   return normalized
 }
 
+function validateAiConnectionPayload(payload) {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+    const error = new Error("Invalid AI connection payload")
+    error.status = 400
+    throw error
+  }
+
+  const provider = String(payload.provider || "").trim().toLowerCase()
+  const apiKey = String(payload.apiKey || "").trim()
+
+  if (!SUPPORTED_AI_PROVIDERS.includes(provider)) {
+    const error = new Error("Nhà cung cấp AI không hợp lệ")
+    error.status = 400
+    throw error
+  }
+
+  if (!apiKey) {
+    const error = new Error("API Key không được để trống")
+    error.status = 400
+    throw error
+  }
+
+  return { provider, apiKey }
+}
+
+function validateAiSettingsPayload(payload) {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+    const error = new Error("Invalid AI settings payload")
+    error.status = 400
+    throw error
+  }
+
+  const provider = String(payload.provider || "").trim().toLowerCase()
+  const apiKey = String(payload.apiKey || "").trim()
+  const model = String(payload.model || "").trim()
+  const temperature = toNumber(payload.temperature)
+  const maxOutputTokens = toNumber(payload.max_output_tokens)
+
+  if (!SUPPORTED_AI_PROVIDERS.includes(provider)) {
+    const error = new Error("Nhà cung cấp AI không hợp lệ")
+    error.status = 400
+    throw error
+  }
+
+  if (!apiKey) {
+    const error = new Error("API Key không được để trống")
+    error.status = 400
+    throw error
+  }
+
+  if (!model) {
+    const error = new Error("Model AI không hợp lệ")
+    error.status = 400
+    throw error
+  }
+
+  if (!Number.isFinite(temperature) || temperature < 0 || temperature > 2) {
+    const error = new Error("Temperature phải nằm trong khoảng 0 đến 2")
+    error.status = 400
+    throw error
+  }
+
+  if (!Number.isInteger(maxOutputTokens) || maxOutputTokens <= 0) {
+    const error = new Error("Max Output Tokens phải là số nguyên dương")
+    error.status = 400
+    throw error
+  }
+
+  return {
+    ai_provider: provider,
+    gemini_api_key: apiKey,
+    ai_model: model,
+    temperature: String(temperature),
+    max_output_tokens: String(maxOutputTokens),
+  }
+}
+
 function buildAiAdminErrorResponse(err) {
   return {
     success: false,
@@ -114,12 +191,41 @@ router.get("/", requireLogin, requireRole(["admin"]), async (req, res) => {
 
 router.get("/ai/models", requireLogin, requireRole(["admin"]), async (req, res) => {
   try {
-    const models = await listAvailableGeminiModels()
+    const provider = String(req.query?.provider || "").trim()
+    const apiKey = String(req.query?.apiKey || "").trim()
+    const models =
+      provider || apiKey
+        ? await listAvailableGeminiModels({ provider, apiKey })
+        : await listAvailableGeminiModels()
     res.json({ success: true, models })
   } catch (err) {
     console.error(err)
     const payload = buildAiAdminErrorResponse(err)
     res.status(payload.status || 500).json(payload)
+  }
+})
+
+router.post("/ai/test-connection", requireLogin, requireRole(["admin"]), async (req, res) => {
+  try {
+    const payload = validateAiConnectionPayload(req.body)
+    const result = await testGeminiConnection(payload)
+    res.json(result)
+  } catch (err) {
+    console.error(err)
+    const payload = buildAiAdminErrorResponse(err)
+    res.status(payload.status || 500).json(payload)
+  }
+})
+
+router.put("/ai", requireLogin, requireRole(["admin"]), async (req, res) => {
+  try {
+    const updates = validateAiSettingsPayload(req.body)
+    await SystemSettingService.update(updates, req.session.user?.username || "system")
+    const settings = await SystemSettingService.getAdminSettingsView()
+    res.json({ success: true, settings })
+  } catch (err) {
+    console.error(err)
+    res.status(err.status || 500).json({ error: err.message || "Internal error" })
   }
 })
 
