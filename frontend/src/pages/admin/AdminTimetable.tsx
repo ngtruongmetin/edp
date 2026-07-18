@@ -97,7 +97,7 @@ export default function AdminTimetable() {
   }
 
   return (
-    <div className="min-h-screen flex flex-col bg-slate-50">
+    <div className="min-h-screen flex flex-col bg-[radial-gradient(circle_at_top,#edf5ff_0%,#f8fbff_34%,#f3f6fb_100%)]">
       <Navbar />
 
       <div className="flex-1 max-w-6xl mx-auto w-full px-4 pt-6 pb-10 space-y-5">
@@ -109,7 +109,7 @@ export default function AdminTimetable() {
           <span className="font-medium text-gray-700">Thời khóa biểu</span>
         </div>
 
-        <div className="rounded-3xl bg-white p-5 shadow-sm ring-1 ring-blue-50">
+        <div className="edp-glass-panel rounded-[32px] p-5 sm:p-6">
           <div className="text-xl font-semibold text-gray-900">Nhập thời khóa biểu</div>
           <div className="mt-2 grid grid-cols-1 lg:grid-cols-[1fr_160px] gap-3">
             <div className="w-full">
@@ -140,7 +140,7 @@ export default function AdminTimetable() {
           </div>
         </div>
 
-        <div className="rounded-3xl bg-white p-5 shadow-sm ring-1 ring-blue-50">
+        <div className="edp-glass-panel rounded-[32px] p-5 sm:p-6">
           <div className="text-sm font-semibold text-gray-900">Danh sách thời khóa biểu</div>
           <div className="mt-3 overflow-x-auto">
             <table className="w-full text-sm border-collapse">
@@ -176,7 +176,7 @@ export default function AdminTimetable() {
           </div>
         </div>
 
-        <div className="rounded-3xl bg-white p-5 shadow-sm ring-1 ring-blue-50">
+        <div className="edp-glass-panel rounded-[32px] p-5 sm:p-6">
           <div className="text-sm font-semibold text-gray-900">Tra cứu thời khóa biểu</div>
           <div className="mt-3 grid grid-cols-1 lg:grid-cols-[220px_200px_140px] gap-3">
             <select

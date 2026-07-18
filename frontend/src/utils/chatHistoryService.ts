@@ -19,8 +19,9 @@ export type DutyAssistantResultMessage = {
   role: "assistant"
   timestamp: string
   kind: "result"
-  status: "draft" | "saved"
+  status: "draft" | "saved" | "edited"
   isEditing: boolean
+  lastSavedSignature?: string | null
   parsed: DutyAssistantParsedViolationDraft[]
 }
 
@@ -66,7 +67,7 @@ function isDutyAssistantResultMessage(value: any): value is DutyAssistantResultM
     typeof value.id === "string" &&
     value.role === "assistant" &&
     value.kind === "result" &&
-    (value.status === "draft" || value.status === "saved") &&
+    (value.status === "draft" || value.status === "saved" || value.status === "edited") &&
     typeof value.isEditing === "boolean" &&
     Array.isArray(value.parsed)
   )
@@ -99,7 +100,14 @@ function normalizeHistory(value: any): DutyAssistantHistory | null {
             Number.isFinite(Number(item.quantity)),
         )
 
-        return parsed.length === message.parsed.length
+        if (parsed.length !== message.parsed.length) {
+          return false
+        }
+
+        return (
+          message.lastSavedSignature == null ||
+          typeof message.lastSavedSignature === "string"
+        )
       })
     : []
 

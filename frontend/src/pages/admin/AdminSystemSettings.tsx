@@ -1,10 +1,14 @@
-import { useEffect, useMemo, useState } from "react"
-import { Link, Navigate } from "react-router-dom"
+﻿import { useEffect, useMemo, useState } from "react"
+import { Navigate } from "react-router-dom"
 
 import { api } from "../../api/api"
 import { useAuth } from "../../auth/AuthContext"
-import Footer from "../../components/Footer"
-import Navbar from "../../components/Navbar"
+import {
+  AdminBreadcrumb,
+  AdminHeroCard,
+  AdminPageShell,
+  AdminSectionCard,
+} from "../../components/admin/AdminUi"
 import { usePageTitle } from "../../utils/usePageTitle"
 
 type SettingItem = {
@@ -413,238 +417,204 @@ export default function AdminSystemSettings() {
   }
 
   return (
-    <div className="min-h-screen flex flex-col bg-slate-50">
-      <Navbar />
+    <AdminPageShell maxWidthClassName="max-w-6xl">
+      <AdminBreadcrumb current="Cấu hình hệ thống" />
 
-      <div className="flex-1 max-w-6xl mx-auto w-full px-4 sm:px-6 py-8 space-y-6">
-        <div className="text-sm text-gray-500 flex items-center gap-2">
-          <Link to="/admin/dashboard" className="hover:text-[#2e77df]">
-            Bảng điều khiển
-          </Link>
-          <span>/</span>
-          <span className="font-medium text-gray-700">Cấu hình hệ thống</span>
-        </div>
-
-        <div className="rounded-3xl bg-gradient-to-br from-[#2e77df] via-[#2b6fd0] to-[#1f5fc0] text-white shadow-lg">
-          <div className="px-8 py-7 flex flex-col gap-4 lg:flex-row lg:items-center">
-            <div className="min-w-0">
-              <div className="text-xs uppercase tracking-[0.2em] text-white/70">
-                Quản trị
-              </div>
-              <h1 className="mt-2 text-3xl font-semibold">Cấu hình hệ thống</h1>
-              <p className="mt-2 text-sm text-white/80">
-                Quản lý cấu hình AI đang hoạt động và các tham số hệ thống mà không cần sửa mã nguồn.
-              </p>
-            </div>
-
-            <div className="lg:ml-auto flex flex-wrap gap-3">
-              {activeTab === "ai" && (
-                <button
-                  onClick={() => void testApi()}
-                  disabled={testing || saving || pageLoading}
-                  className="rounded-2xl border border-white/30 bg-white/10 px-5 py-3 text-sm font-semibold text-white transition active:scale-[0.98] disabled:opacity-60"
-                >
-                  {testing ? "Đang kiểm tra..." : "Kiểm tra API"}
-                </button>
-              )}
+      <AdminHeroCard
+        eyebrow="Quản trị"
+        title="Cấu hình hệ thống"
+        description="Quản lý cấu hình AI đang hoạt động và các tham số hệ thống mà không cần sửa mã nguồn."
+        actions={
+          <>
+            {activeTab === "ai" && (
               <button
-                onClick={() => void handleSave()}
-                disabled={saving || pageLoading || (activeTab === "ai" && !testPassed)}
-                className="rounded-2xl bg-white px-5 py-3 text-sm font-semibold text-[#2e77df] shadow-sm transition active:scale-[0.98] disabled:opacity-60"
+                onClick={() => void testApi()}
+                disabled={testing || saving || pageLoading}
+                className="min-h-11 rounded-[18px] border border-white/70 bg-white/72 px-4 text-sm font-semibold text-slate-700 shadow-[0_12px_24px_rgba(15,23,42,0.06)] transition duration-200 active:scale-[0.98] disabled:opacity-60"
               >
-                {saving ? "Đang lưu..." : "Lưu"}
+                {testing ? "Đang kiểm tra..." : "Kiểm tra API"}
               </button>
-            </div>
-          </div>
-        </div>
-
-        {error && (
-          <div className="rounded-2xl border border-red-100 bg-red-50 px-4 py-3 text-sm text-red-700">
-            {error}
-          </div>
-        )}
-
-        {notice && (
-          <div className="rounded-2xl border border-emerald-100 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
-            {notice}
-          </div>
-        )}
-
-        <div className="rounded-3xl bg-white p-3 shadow-sm ring-1 ring-blue-50">
-          <div className="flex flex-wrap gap-2">
+            )}
             <button
-              type="button"
-              onClick={() => setActiveTab("ai")}
-              className={`rounded-2xl px-4 py-2 text-sm font-semibold transition ${activeTab === "ai"
-                ? "bg-[#2e77df] text-white shadow-sm"
-                : "text-slate-600 hover:bg-slate-50"
-                }`}
+              onClick={() => void handleSave()}
+              disabled={saving || pageLoading || (activeTab === "ai" && !testPassed)}
+              className="min-h-11 rounded-[18px] bg-[#2e77df] px-4 text-sm font-semibold text-white shadow-[0_12px_24px_rgba(46,119,223,0.22)] transition duration-200 active:scale-[0.98] disabled:opacity-60"
             >
-              Cấu hình AI
+              {saving ? "Đang lưu..." : "Lưu"}
             </button>
-            <button
-              type="button"
-              onClick={() => setActiveTab("competition")}
-              className={`rounded-2xl px-4 py-2 text-sm font-semibold transition ${activeTab === "competition"
-                ? "bg-[#2e77df] text-white shadow-sm"
-                : "text-slate-600 hover:bg-slate-50"
-                }`}
-            >
-              Quy chế thi đua
-            </button>
-          </div>
+          </>
+        }
+      />
+
+      {error && (
+        <div className="rounded-2xl border border-red-100 bg-red-50 px-4 py-3 text-sm text-red-700">
+          {error}
         </div>
+      )}
 
-        {pageLoading ? (
-          <div className="rounded-3xl bg-white p-6 shadow-sm ring-1 ring-blue-50 text-sm text-slate-600">
-            Đang tải cấu hình...
+      {notice && (
+        <div className="rounded-2xl border border-emerald-100 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
+          {notice}
+        </div>
+      )}
+
+      <AdminSectionCard className="p-3">
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={() => setActiveTab("ai")}
+            className={`rounded-2xl px-4 py-2 text-sm font-semibold transition ${activeTab === "ai" ? "bg-[#2e77df] text-white shadow-sm" : "text-slate-600 hover:bg-slate-50"}`}
+          >
+            Cấu hình AI
+          </button>
+          <button
+            type="button"
+            onClick={() => setActiveTab("competition")}
+            className={`rounded-2xl px-4 py-2 text-sm font-semibold transition ${activeTab === "competition" ? "bg-[#2e77df] text-white shadow-sm" : "text-slate-600 hover:bg-slate-50"}`}
+          >
+            Quy chế thi đua
+          </button>
+        </div>
+      </AdminSectionCard>
+
+      {pageLoading ? (
+        <AdminSectionCard className="text-sm text-slate-600">Đang tải cấu hình...</AdminSectionCard>
+      ) : activeTab === "ai" ? (
+        <AdminSectionCard className="space-y-6">
+          <div>
+            <h2 className="text-lg font-semibold text-slate-900">Cấu hình AI đang hoạt động</h2>
+            <p className="mt-1 text-sm text-slate-500">
+              Hệ thống chỉ lưu một cấu hình AI. Bạn cần Test API thành công trước khi Save.
+            </p>
           </div>
-        ) : activeTab === "ai" ? (
-          <div className="rounded-3xl bg-white p-6 shadow-sm ring-1 ring-blue-50 space-y-6">
-            <div>
-              <h2 className="text-lg font-semibold text-slate-900">Cấu hình AI đang hoạt động</h2>
-              <p className="mt-1 text-sm text-slate-500">
-                Hệ thống chỉ lưu một cấu hình AI. Bạn cần Test API thành công trước khi Save.
-              </p>
-            </div>
 
-            <div className="grid gap-5 lg:grid-cols-2">
-              <label className="space-y-2 lg:col-span-2">
-                <span className="text-sm font-semibold text-slate-900">API Key</span>
-                <input
-                  type="text"
-                  value={apiKey}
-                  onChange={(e) => handleApiKeyChange(e.target.value)}
-                  className="w-full rounded-2xl border border-blue-100 bg-white px-4 py-3 text-sm outline-none focus:border-[#2e77df]"
-                  placeholder="Dán API Key tại đây"
-                />
-                <div className="text-xs text-slate-500">{aiProviderHelp}</div>
-              </label>
+          <div className="grid gap-5 lg:grid-cols-2">
+            <label className="space-y-2 lg:col-span-2">
+              <span className="text-sm font-semibold text-slate-900">API Key</span>
+              <input
+                type="text"
+                value={apiKey}
+                onChange={(e) => handleApiKeyChange(e.target.value)}
+                className="w-full rounded-2xl border border-blue-100 bg-white px-4 py-3 text-sm outline-none focus:border-[#2e77df]"
+                placeholder="Dán API Key tại đây"
+              />
+              <div className="text-xs text-slate-500">{aiProviderHelp}</div>
+            </label>
 
-              <label className="space-y-2">
-                <span className="text-sm font-semibold text-slate-900">Provider</span>
-                <select
-                  value={aiProvider}
-                  onChange={(e) => handleProviderChange(e.target.value)}
-                  className="w-full rounded-2xl border border-blue-100 bg-white px-4 py-3 text-sm outline-none focus:border-[#2e77df]"
+            <label className="space-y-2">
+              <span className="text-sm font-semibold text-slate-900">Provider</span>
+              <select
+                value={aiProvider}
+                onChange={(e) => handleProviderChange(e.target.value)}
+                className="w-full rounded-2xl border border-blue-100 bg-white px-4 py-3 text-sm outline-none focus:border-[#2e77df]"
+              >
+                {providerOptions.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <label className="space-y-2">
+              <span className="text-sm font-semibold text-slate-900">Temperature</span>
+              <input
+                type="number"
+                min={0}
+                max={2}
+                step="0.1"
+                value={temperature}
+                onChange={(e) => setTemperature(e.target.value)}
+                className="w-full rounded-2xl border border-blue-100 bg-white px-4 py-3 text-sm outline-none focus:border-[#2e77df]"
+              />
+            </label>
+
+            <label className="space-y-2 lg:col-span-2">
+              <span className="text-sm font-semibold text-slate-900">Base URL</span>
+              <input
+                type="text"
+                value={baseUrl}
+                onChange={(e) => setBaseUrl(e.target.value)}
+                className="w-full rounded-2xl border border-blue-100 bg-white px-4 py-3 text-sm outline-none focus:border-[#2e77df]"
+                placeholder="https://api.example.com/v1"
+              />
+            </label>
+
+            <div className="space-y-2 lg:col-span-2">
+              <div className="flex items-center justify-between gap-3">
+                <span className="text-sm font-semibold text-slate-900">Model</span>
+                <button
+                  type="button"
+                  onClick={() => void refreshModelOptions()}
+                  disabled={modelsLoading || pageLoading || !apiKey.trim()}
+                  className="rounded-xl border border-blue-100 bg-white px-3 py-2 text-xs font-semibold text-[#2e77df] transition active:scale-[0.98] disabled:opacity-60"
                 >
-                  {providerOptions.map((option) => (
-                    <option key={option.value} value={option.value}>
-                      {option.label}
-                    </option>
-                  ))}
-                </select>
-              </label>
-
-              <label className="space-y-2">
-                <span className="text-sm font-semibold text-slate-900">Temperature</span>
-                <input
-                  type="number"
-                  min={0}
-                  max={2}
-                  step="0.1"
-                  value={temperature}
-                  onChange={(e) => setTemperature(e.target.value)}
-                  className="w-full rounded-2xl border border-blue-100 bg-white px-4 py-3 text-sm outline-none focus:border-[#2e77df]"
-                />
-              </label>
-
-              <label className="space-y-2 lg:col-span-2">
-                <span className="text-sm font-semibold text-slate-900">Base URL</span>
-                <input
-                  type="text"
-                  value={baseUrl}
-                  onChange={(e) => setBaseUrl(e.target.value)}
-                  className="w-full rounded-2xl border border-blue-100 bg-white px-4 py-3 text-sm outline-none focus:border-[#2e77df]"
-                  placeholder="https://api.example.com/v1"
-                />
-              </label>
-
-              <div className="space-y-2 lg:col-span-2">
-                <div className="flex items-center justify-between gap-3">
-                  <span className="text-sm font-semibold text-slate-900">Model</span>
-                  <button
-                    type="button"
-                    onClick={() => void refreshModelOptions()}
-                    disabled={modelsLoading || pageLoading || !apiKey.trim()}
-                    className="rounded-xl border border-blue-100 bg-white px-3 py-2 text-xs font-semibold text-[#2e77df] transition active:scale-[0.98] disabled:opacity-60"
-                  >
-                    {modelsLoading ? "Đang tải..." : "Làm mới danh sách"}
-                  </button>
-                </div>
-
-                <select
-                  value={aiModel}
-                  onChange={(e) => setAiModel(e.target.value)}
-                  className="w-full rounded-2xl border border-blue-100 bg-white px-4 py-3 text-sm outline-none focus:border-[#2e77df]"
-                >
-                  {!modelOptions.length ? (
-                    <option value="">
-                      {modelsLoading ? "Đang tải model..." : "Chưa có model khả dụng"}
-                    </option>
-                  ) : (
-                    modelOptions.map((model) => (
-                      <option key={model} value={model}>
-                        {model}
-                      </option>
-                    ))
-                  )}
-                </select>
-
-                <div className="text-xs text-slate-500">
-                  Danh sách model sẽ được tải từ provider hiện tại sau khi Test API hoặc làm mới danh sách.
-                </div>
+                  {modelsLoading ? "Đang tải..." : "Làm mới danh sách"}
+                </button>
               </div>
-            </div>
 
-            <div className="rounded-3xl border border-blue-100 bg-slate-50/80 p-5">
-              <div className="flex flex-wrap items-center gap-3">
-                <div>
-                  <div className="text-sm font-semibold text-slate-900">Luồng cấu hình</div>
-                  <div className="mt-1 text-xs text-slate-500">
-                    1. Nhập API Key. 2. Test API để xác thực và tải model. 3. Chọn model. 4. Save cấu hình đang hoạt động.
-                  </div>
-                </div>
+              <select
+                value={aiModel}
+                onChange={(e) => setAiModel(e.target.value)}
+                className="w-full rounded-2xl border border-blue-100 bg-white px-4 py-3 text-sm outline-none focus:border-[#2e77df]"
+              >
+                {!modelOptions.length ? (
+                  <option value="">{modelsLoading ? "Đang tải model..." : "Chưa có model khả dụng"}</option>
+                ) : (
+                  modelOptions.map((model) => (
+                    <option key={model} value={model}>
+                      {model}
+                    </option>
+                  ))
+                )}
+              </select>
 
-                <div className={`ml-auto rounded-full px-3 py-1 text-xs font-semibold ${testPassed
-                  ? "bg-emerald-100 text-emerald-700"
-                  : "bg-amber-100 text-amber-700"
-                  }`}>
-                  {testPassed ? "Đã test thành công" : "Chưa test cấu hình hiện tại"}
-                </div>
+              <div className="text-xs text-slate-500">
+                Danh sách model sẽ được tải từ provider hiện tại sau khi Test API hoặc làm mới danh sách.
               </div>
             </div>
           </div>
-        ) : (
-          <div className="rounded-3xl bg-white p-6 shadow-sm ring-1 ring-blue-50 space-y-6">
-            <div>
-              <h2 className="text-lg font-semibold text-slate-900">Cấu hình thi đua</h2>
-              <p className="mt-1 text-sm text-slate-500">
-                Quản lý các tham số gốc cho hệ thống thi đua.
-              </p>
-            </div>
 
-            <div className="grid gap-5 lg:grid-cols-2">
-              <label className="space-y-2">
-                <span className="text-sm font-semibold text-slate-900">Điểm gốc mỗi lớp</span>
-                <input
-                  type="number"
-                  min={0}
-                  step="1"
-                  value={baseScore}
-                  onChange={(e) => setBaseScore(e.target.value)}
-                  className="w-full rounded-2xl border border-blue-100 bg-white px-4 py-3 text-sm outline-none focus:border-[#2e77df]"
-                />
-                <div className="text-xs text-slate-500">
-                  Là số điểm mặc định của mỗi lớp khi bắt đầu tuần thi đua.
+          <div className="rounded-[28px] border border-white/70 bg-white/78 p-5 shadow-[0_16px_30px_rgba(15,23,42,0.05)]">
+            <div className="flex flex-wrap items-center gap-3">
+              <div>
+                <div className="text-sm font-semibold text-slate-900">Luồng cấu hình</div>
+                <div className="mt-1 text-xs text-slate-500">
+                  1. Nhập API Key. 2. Test API để xác thực và tải model. 3. Chọn model. 4. Save cấu hình đang hoạt động.
                 </div>
-              </label>
+              </div>
+
+              <div className={`ml-auto rounded-full px-3 py-1 text-xs font-semibold ${testPassed ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-700"}`}>
+                {testPassed ? "Đã test thành công" : "Chưa test cấu hình hiện tại"}
+              </div>
             </div>
           </div>
-        )}
-      </div>
+        </AdminSectionCard>
+      ) : (
+        <AdminSectionCard className="space-y-6">
+          <div>
+            <h2 className="text-lg font-semibold text-slate-900">Cấu hình thi đua</h2>
+            <p className="mt-1 text-sm text-slate-500">Quản lý các tham số gốc cho hệ thống thi đua.</p>
+          </div>
 
-      <Footer />
-    </div>
+          <div className="grid gap-5 lg:grid-cols-2">
+            <label className="space-y-2">
+              <span className="text-sm font-semibold text-slate-900">Điểm gốc mỗi lớp</span>
+              <input
+                type="number"
+                min={0}
+                step="1"
+                value={baseScore}
+                onChange={(e) => setBaseScore(e.target.value)}
+                className="w-full rounded-2xl border border-blue-100 bg-white px-4 py-3 text-sm outline-none focus:border-[#2e77df]"
+              />
+              <div className="text-xs text-slate-500">
+                Là số điểm mặc định của mỗi lớp khi bắt đầu tuần thi đua.
+              </div>
+            </label>
+          </div>
+        </AdminSectionCard>
+      )}
+    </AdminPageShell>
   )
 }

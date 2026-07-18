@@ -71,6 +71,20 @@ type ConfidenceMeta = {
   warning: boolean
 }
 
+type SaveStateMeta = {
+  label: string
+  badgeClass: string
+}
+
+type AssistantParsedViolationDraft = ParsedViolationDraft & {
+  savedViolationId?: number | null
+}
+
+type EditableResultMessage = ResultMessage & {
+  deletedSavedViolationIds?: number[]
+  parsed: AssistantParsedViolationDraft[]
+}
+
 function createId(prefix: string) {
   return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
 }
@@ -129,6 +143,112 @@ function getConfidenceMeta(confidence?: number): ConfidenceMeta | null {
     badgeClass: "border-red-100 bg-red-50 text-red-600",
     warning: true,
   }
+}
+
+function getSaveStateMeta(status: ResultMessage["status"]): SaveStateMeta | null {
+  if (status === "saved") {
+    return {
+      label: "Đã lưu",
+      badgeClass: "bg-emerald-50 text-emerald-700",
+    }
+  }
+
+  if (status === "edited") {
+    return {
+      label: "Có thay đổi chưa lưu",
+      badgeClass: "bg-amber-50 text-amber-700",
+    }
+  }
+
+  return null
+}
+
+function buildParsedSignature(parsed: ParsedViolationDraft[]) {
+  return JSON.stringify(
+    parsed.map((item) => ({
+      className: item.className,
+      quantity: Number(item.quantity || 0),
+      ruleId: item.ruleId,
+    })),
+  )
+}
+
+function resolveDraftStatus(
+  parsed: ParsedViolationDraft[],
+  lastSavedSignature?: string | null,
+): ResultMessage["status"] {
+  if (!lastSavedSignature) {
+    return "draft"
+  }
+
+  return buildParsedSignature(parsed) === lastSavedSignature ? "saved" : "edited"
+}
+
+function getSavedViolationId(item: ParsedViolationDraft) {
+  const savedViolationId = (item as AssistantParsedViolationDraft).savedViolationId
+  return Number.isInteger(savedViolationId) ? Number(savedViolationId) : null
+}
+
+function OverflowMarquee({ text }: { text: string }) {
+  const containerRef = useRef<HTMLDivElement | null>(null)
+  const textRef = useRef<HTMLSpanElement | null>(null)
+  const [isOverflowing, setIsOverflowing] = useState(false)
+
+  useEffect(() => {
+    const container = containerRef.current
+    const textElement = textRef.current
+
+    if (!container || !textElement) {
+      return
+    }
+
+    const measure = () => {
+      setIsOverflowing(textElement.scrollWidth > container.clientWidth)
+    }
+
+    measure()
+
+    const resizeObserver =
+      typeof ResizeObserver !== "undefined"
+        ? new ResizeObserver(() => measure())
+        : null
+
+    resizeObserver?.observe(container)
+    resizeObserver?.observe(textElement)
+    window.addEventListener("resize", measure)
+
+    return () => {
+      resizeObserver?.disconnect()
+      window.removeEventListener("resize", measure)
+    }
+  }, [text])
+
+  if (!isOverflowing) {
+    return (
+      <div ref={containerRef} className="relative overflow-hidden">
+        <span ref={textRef} className="whitespace-nowrap text-[15px] font-semibold text-slate-900">
+          {text}
+        </span>
+      </div>
+    )
+  }
+
+  return (
+    <div ref={containerRef} className="relative overflow-hidden">
+      <span ref={textRef} className="invisible whitespace-nowrap text-[15px] font-semibold text-slate-900">
+        {text}
+      </span>
+      <div
+        aria-hidden="true"
+        className="absolute inset-y-0 left-0 flex w-max whitespace-nowrap text-[15px] font-semibold text-slate-900 will-change-transform [animation:edp-ticker_12s_linear_infinite]"
+      >
+        <span className="shrink-0 pr-14">{text}</span>
+        <span aria-hidden="true" className="shrink-0 pr-14">
+          {text}
+        </span>
+      </div>
+    </div>
+  )
 }
 function getWeekdayDisplay(value?: string | Date | null) {
   if (!value) return ""
@@ -314,12 +434,13 @@ type ResultSheetProps = {
   onRuleChange: (itemId: string, ruleId: number | null) => void
   onClassChange: (itemId: string, className: string) => void
   onQuantityChange: (itemId: string, nextQuantity: number) => void
+  onDeleteViolation: (itemId: string) => void
   onOpenAddViolation: () => void
   onConfirm: () => void
   onCancel: () => void
 }
 
-function ResultSheet({
+function ResultSheetV2({
   message,
   rules,
   classes,
@@ -328,11 +449,18 @@ function ResultSheet({
   onRuleChange,
   onClassChange,
   onQuantityChange,
+  onDeleteViolation,
   onOpenAddViolation,
   onConfirm,
   onCancel,
 }: ResultSheetProps) {
-  const isSaved = message.status === "saved"
+  const saveState = getSaveStateMeta(message.status)
+  const isCurrentSaved =
+    Boolean(message.lastSavedSignature) &&
+    buildParsedSignature(message.parsed) === message.lastSavedSignature
+  const confirmButtonSaved = message.status === "saved" && isCurrentSaved
+  const confirmButtonLabel = confirmButtonSaved ? "Đã lưu" : isSaving ? "Đang lưu" : "Xác nhận"
+  const hasSavedOnce = Boolean(message.lastSavedSignature)
 
   return (
     <div className="edp-spring-in rounded-[30px] border border-white/65 bg-white/80 p-4 shadow-[0_18px_36px_rgba(15,23,42,0.08)] backdrop-blur-xl">
@@ -349,9 +477,9 @@ function ResultSheet({
 
           <div className="mt-3 flex items-center justify-between gap-3">
             <p className="text-sm font-medium text-slate-700">Đã hiểu nội dung.</p>
-            {isSaved ? (
-              <span className="rounded-full bg-emerald-50 px-2.5 py-1 text-[11px] font-semibold text-emerald-700">
-                Đã lưu
+            {saveState ? (
+              <span className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${saveState.badgeClass}`}>
+                {saveState.label}
               </span>
             ) : null}
           </div>
@@ -362,12 +490,23 @@ function ResultSheet({
             <div className="space-y-3">
               {message.parsed.map((item) => {
                 const rule = getRuleMeta(item.ruleId, rules)
+                const confidence = getConfidenceMeta(item.confidence)
 
                 return (
                   <div
                     key={item.id}
-                    className="space-y-3 rounded-[24px] border border-slate-200/70 bg-white/82 p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.85)]"
+                    className="relative space-y-3 rounded-[24px] border border-slate-200/70 bg-white/82 p-4 pr-12 shadow-[inset_0_1px_0_rgba(255,255,255,0.85)]"
                   >
+                    <button
+                      type="button"
+                      onClick={() => onDeleteViolation(item.id)}
+                      className="absolute right-3 top-3 flex h-8 w-8 items-center justify-center rounded-full border border-slate-200/80 bg-white text-lg leading-none text-slate-400 transition duration-200 hover:text-red-600 active:scale-[0.96] disabled:opacity-50"
+                      aria-label="Xóa vi phạm"
+                      disabled={isSaving}
+                    >
+                      ×
+                    </button>
+
                     <div>
                       <div className="mb-2 text-xs uppercase tracking-[0.14em] text-slate-400">
                         Lớp
@@ -405,7 +544,7 @@ function ResultSheet({
                           type="button"
                           onClick={() => onQuantityChange(item.id, item.quantity - 1)}
                           className="flex h-10 w-10 items-center justify-center rounded-2xl border border-slate-200/80 bg-white text-lg font-semibold text-slate-700 transition duration-200 active:scale-[0.96]"
-                          disabled={isSaving || isSaved}
+                          disabled={isSaving}
                         >
                           -
                         </button>
@@ -413,7 +552,7 @@ function ResultSheet({
                           type="button"
                           onClick={() => onQuantityChange(item.id, item.quantity + 1)}
                           className="flex h-10 w-10 items-center justify-center rounded-2xl border border-slate-200/80 bg-white text-lg font-semibold text-slate-700 transition duration-200 active:scale-[0.96]"
-                          disabled={isSaving || isSaved}
+                          disabled={isSaving}
                         >
                           +
                         </button>
@@ -427,30 +566,24 @@ function ResultSheet({
                       </div>
                     </div>
 
-                    {getConfidenceMeta(item.confidence) ? (
-                      (() => {
-                        const confidence = getConfidenceMeta(item.confidence)
-
-                        return confidence ? (
-                          <div className="rounded-[22px] border border-slate-200/80 bg-white/90 px-4 py-3">
-                            <div className="flex items-center justify-between gap-3">
-                              <div className="text-xs uppercase tracking-[0.14em] text-slate-400">
-                                Độ tin cậy
-                              </div>
-                              <span
-                                className={`rounded-full border px-2.5 py-1 text-xs font-semibold ${confidence.badgeClass}`}
-                              >
-                                {confidence.label}
-                              </span>
-                            </div>
-                            {confidence.warning ? (
-                              <div className="mt-2 text-xs text-amber-700">
-                                AI chưa chắc chắn về kết quả này. Vui lòng kiểm tra kỹ trước khi xác nhận.
-                              </div>
-                            ) : null}
+                    {confidence ? (
+                      <div className="rounded-[22px] border border-slate-200/80 bg-white/90 px-4 py-3">
+                        <div className="flex items-center justify-between gap-3">
+                          <div className="text-xs uppercase tracking-[0.14em] text-slate-400">
+                            Độ tin cậy
                           </div>
-                        ) : null
-                      })()
+                          <span
+                            className={`rounded-full border px-2.5 py-1 text-xs font-semibold ${confidence.badgeClass}`}
+                          >
+                            {confidence.label}
+                          </span>
+                        </div>
+                        {confidence.warning ? (
+                          <div className="mt-2 text-xs text-amber-700">
+                            AI chưa chắc chắn về kết quả này. Vui lòng kiểm tra kỹ trước khi xác nhận.
+                          </div>
+                        ) : null}
+                      </div>
                     ) : null}
                   </div>
                 )
@@ -465,17 +598,13 @@ function ResultSheet({
               ) : (
                 message.parsed.map((item) => {
                   const rule = getRuleMeta(item.ruleId, rules)
+                  const confidence = getConfidenceMeta(item.confidence)
 
                   return (
-                    <>
-                      <div
-                        key={item.id}
-                        className="grid grid-cols-[1fr_auto] items-center gap-3 rounded-[20px] bg-white/85 px-4 py-3"
-                      >
+                    <div key={item.id} className="space-y-3">
+                      <div className="grid grid-cols-[1fr_auto] items-center gap-3 rounded-[20px] bg-white/85 px-4 py-3">
                         <div className="min-w-0">
-                          <div className="truncate text-[15px] font-semibold text-slate-900">
-                            ✓ {rule?.name || "Chưa chọn lỗi"} ×{item.quantity}
-                          </div>
+                          <OverflowMarquee text={`✓ ${rule?.name || "Chưa chọn lỗi"} ×${item.quantity}`} />
                           <div className="mt-1 text-xs text-slate-500">
                             {item.className || "--"} • Điểm {getViolationScore(item.ruleId, item.quantity, rules)}
                           </div>
@@ -485,32 +614,26 @@ function ResultSheet({
                         </div>
                       </div>
 
-                      {getConfidenceMeta(item.confidence) ? (
-                        (() => {
-                          const confidence = getConfidenceMeta(item.confidence)
-
-                          return confidence ? (
-                            <div className="mt-3 rounded-[20px] border border-slate-200/80 bg-white/85 px-4 py-3">
-                              <div className="flex items-center justify-between gap-3">
-                                <div className="text-xs uppercase tracking-[0.14em] text-slate-400">
-                                  Độ tin cậy
-                                </div>
-                                <span
-                                  className={`rounded-full border px-2.5 py-1 text-xs font-semibold ${confidence.badgeClass}`}
-                                >
-                                  {confidence.label}
-                                </span>
-                              </div>
-                              {confidence.warning ? (
-                                <div className="mt-2 text-xs text-amber-700">
-                                  AI chưa chắc chắn về kết quả này. Vui lòng kiểm tra kỹ trước khi xác nhận.
-                                </div>
-                              ) : null}
+                      {confidence ? (
+                        <div className="rounded-[20px] border border-slate-200/80 bg-white/85 px-4 py-3">
+                          <div className="flex items-center justify-between gap-3">
+                            <div className="text-xs uppercase tracking-[0.14em] text-slate-400">
+                              Độ tin cậy
                             </div>
-                          ) : null
-                        })()
+                            <span
+                              className={`rounded-full border px-2.5 py-1 text-xs font-semibold ${confidence.badgeClass}`}
+                            >
+                              {confidence.label}
+                            </span>
+                          </div>
+                          {confidence.warning ? (
+                            <div className="mt-2 text-xs text-amber-700">
+                              AI chưa chắc chắn về kết quả này. Vui lòng kiểm tra kỹ trước khi xác nhận.
+                            </div>
+                          ) : null}
+                        </div>
                       ) : null}
-                    </>
+                    </div>
                   )
                 })
               )}
@@ -519,34 +642,39 @@ function ResultSheet({
 
           <div className="my-4 h-px bg-gradient-to-r from-transparent via-slate-200 to-transparent" />
 
-          <div className="grid grid-cols-3 gap-2">
+          <div className={`grid gap-2 ${hasSavedOnce ? "grid-cols-2" : "grid-cols-3"}`}>
             <button
               type="button"
               onClick={onConfirm}
-              disabled={isSaving || isSaved || message.parsed.length === 0}
-              className="min-h-11 rounded-[20px] bg-[#2e77df] px-3 text-sm font-semibold text-white shadow-[0_10px_22px_rgba(46,119,223,0.22)] transition duration-200 active:scale-[0.98] disabled:opacity-50"
+              disabled={isSaving || message.parsed.length === 0 || confirmButtonSaved}
+              className={`min-h-11 rounded-[20px] px-3 text-sm font-semibold transition duration-200 ${confirmButtonSaved
+                  ? "cursor-default bg-slate-200 text-slate-500 shadow-none opacity-60"
+                  : "bg-[#2e77df] text-white shadow-[0_10px_22px_rgba(46,119,223,0.22)] active:scale-[0.98] disabled:opacity-50"
+                }`}
             >
-              {isSaving ? "Đang lưu" : "Xác nhận"}
+              {confirmButtonLabel}
             </button>
             <button
               type="button"
               onClick={onStartEdit}
-              disabled={isSaving || isSaved}
+              disabled={isSaving}
               className="min-h-11 rounded-[20px] border border-slate-200/80 bg-white/82 px-3 text-sm font-semibold text-slate-700 transition duration-200 active:scale-[0.98] disabled:opacity-50"
             >
-              {message.isEditing ? "Đang sửa" : "Chỉnh sửa"}
+              {message.isEditing ? "Ẩn" : "Chỉnh sửa"}
             </button>
-            <button
-              type="button"
-              onClick={onCancel}
-              disabled={isSaving || isSaved}
-              className="min-h-11 rounded-[20px] border border-red-100 bg-white/82 px-3 text-sm font-semibold text-red-600 transition duration-200 active:scale-[0.98] disabled:opacity-50"
-            >
-              Hủy
-            </button>
+            {!hasSavedOnce ? (
+              <button
+                type="button"
+                onClick={onCancel}
+                disabled={isSaving}
+                className="min-h-11 rounded-[20px] border border-red-100 bg-white/82 px-3 text-sm font-semibold text-red-600 transition duration-200 active:scale-[0.98] disabled:opacity-50"
+              >
+                Hủy
+              </button>
+            ) : null}
           </div>
 
-          {message.isEditing && !isSaved ? (
+          {message.isEditing ? (
             <button
               type="button"
               onClick={onOpenAddViolation}
@@ -778,6 +906,28 @@ export default function CodoDutyAssistant() {
     }))
   }
 
+  function updateEditableResultMessage(
+    messageId: string,
+    updater: (message: EditableResultMessage) => Omit<EditableResultMessage, "status"> & {
+      status?: ResultMessage["status"]
+    },
+  ) {
+    updateResultMessage(messageId, (message) => {
+      const nextMessage = updater(message as EditableResultMessage)
+      const lastSavedSignature = nextMessage.lastSavedSignature ?? message.lastSavedSignature ?? null
+      const nextStatus =
+        nextMessage.status === "saved" && buildParsedSignature(nextMessage.parsed) === lastSavedSignature
+          ? "saved"
+          : resolveDraftStatus(nextMessage.parsed, lastSavedSignature)
+
+      return {
+        ...nextMessage,
+        lastSavedSignature,
+        status: nextStatus,
+      }
+    })
+  }
+
   function handleSlashCommand(input: string): boolean {
     const normalized = input.trim().toLowerCase()
     const signCommands = new Set(["/ky", "/ki", "/sign"])
@@ -922,14 +1072,14 @@ export default function CodoDutyAssistant() {
   }
 
   function handleStartEdit(messageId: string) {
-    updateResultMessage(messageId, (message) => ({
+    updateEditableResultMessage(messageId, (message) => ({
       ...message,
-      isEditing: true,
+      isEditing: !message.isEditing,
     }))
   }
 
   function handleRuleChange(messageId: string, itemId: string, ruleId: number | null) {
-    updateResultMessage(messageId, (message) => ({
+    updateEditableResultMessage(messageId, (message) => ({
       ...message,
       parsed: message.parsed.map((item) =>
         item.id === itemId
@@ -943,7 +1093,7 @@ export default function CodoDutyAssistant() {
   }
 
   function handleClassChange(messageId: string, itemId: string, className: string) {
-    updateResultMessage(messageId, (message) => ({
+    updateEditableResultMessage(messageId, (message) => ({
       ...message,
       parsed: message.parsed.map((item) =>
         item.id === itemId
@@ -957,7 +1107,7 @@ export default function CodoDutyAssistant() {
   }
 
   function handleQuantityChange(messageId: string, itemId: string, nextQuantity: number) {
-    updateResultMessage(messageId, (message) => ({
+    updateEditableResultMessage(messageId, (message) => ({
       ...message,
       parsed: message.parsed.map((item) =>
         item.id === itemId
@@ -970,6 +1120,20 @@ export default function CodoDutyAssistant() {
     }))
   }
 
+  function handleDeleteViolation(messageId: string, itemId: string) {
+    updateEditableResultMessage(messageId, (message) => ({
+      ...message,
+      deletedSavedViolationIds: [
+        ...(message.deletedSavedViolationIds || []),
+        ...message.parsed
+          .filter((item) => item.id === itemId)
+          .map(getSavedViolationId)
+          .filter((id): id is number => id != null),
+      ],
+      parsed: message.parsed.filter((item) => item.id !== itemId),
+    }))
+  }
+
   function handleOpenAddViolation(messageId: string) {
     updateHistory((current) => ({
       ...current,
@@ -978,7 +1142,7 @@ export default function CodoDutyAssistant() {
   }
 
   function handleAddViolationToDraft(messageId: string, ruleId: number) {
-    updateResultMessage(messageId, (message) => ({
+    updateEditableResultMessage(messageId, (message) => ({
       ...message,
       isEditing: true,
       parsed: [
@@ -1010,9 +1174,17 @@ export default function CodoDutyAssistant() {
   async function handleConfirm(messageId: string) {
     const targetMessage = messages.find(
       (message): message is ResultMessage => isResultMessage(message) && message.id === messageId,
-    )
+    ) as EditableResultMessage | undefined
 
     if (!targetMessage || !session?.id) return
+
+    if (
+      targetMessage.status === "saved" &&
+      targetMessage.lastSavedSignature &&
+      buildParsedSignature(targetMessage.parsed) === targetMessage.lastSavedSignature
+    ) {
+      return
+    }
 
     const invalidItem = targetMessage.parsed.find(
       (item) =>
@@ -1029,19 +1201,43 @@ export default function CodoDutyAssistant() {
     setSavingMessageId(messageId)
 
     try {
+      const previousSavedIds = [
+        ...(targetMessage.deletedSavedViolationIds || []),
+        ...targetMessage.parsed
+          .map(getSavedViolationId)
+          .filter((id): id is number => id != null),
+      ]
+      const uniquePreviousSavedIds = Array.from(new Set(previousSavedIds))
+
+      for (const id of uniquePreviousSavedIds) {
+        await api.delete(`/duty/violation/${id}`)
+      }
+
+      const savedIdByDraftId = new Map<string, number>()
+
       for (const item of targetMessage.parsed) {
-        await api.post("/duty/violation", {
+        const res = await api.post("/duty/violation", {
           session_id: session.id,
           rule_id: item.ruleId,
           quantity: item.quantity,
           note: "",
         })
+
+        if (Number.isInteger(res.data?.id)) {
+          savedIdByDraftId.set(item.id, Number(res.data.id))
+        }
       }
 
-      updateResultMessage(messageId, (message) => ({
+      updateEditableResultMessage(messageId, (message) => ({
         ...message,
         status: "saved",
         isEditing: false,
+        deletedSavedViolationIds: [],
+        parsed: message.parsed.map((item) => ({
+          ...item,
+          savedViolationId: savedIdByDraftId.get(item.id) ?? getSavedViolationId(item),
+        })),
+        lastSavedSignature: buildParsedSignature(message.parsed),
       }))
 
       toast.success("Đã lưu vi phạm vào phiếu trực")
@@ -1063,6 +1259,14 @@ export default function CodoDutyAssistant() {
 
   return (
     <div className="edp-mobile-shell edp-assistant-shell flex min-h-[100dvh] flex-col overflow-hidden bg-[radial-gradient(circle_at_top,#eef5ff_0%,#f8fbff_36%,#f3f6fb_100%)]">
+      <style>
+        {`
+          @keyframes edp-ticker {
+            from { transform: translate3d(0, 0, 0); }
+            to { transform: translate3d(-50%, 0, 0); }
+          }
+        `}
+      </style>
       <Navbar />
 
       <div className="mx-auto flex min-h-0 w-full max-w-md flex-1 flex-col overflow-hidden">
@@ -1115,7 +1319,7 @@ export default function CodoDutyAssistant() {
 
                 if (isResultMessage(message)) {
                   return (
-                    <ResultSheet
+                    <ResultSheetV2
                       key={message.id}
                       message={message}
                       rules={rules}
@@ -1125,6 +1329,7 @@ export default function CodoDutyAssistant() {
                       onRuleChange={(itemId, ruleId) => handleRuleChange(message.id, itemId, ruleId)}
                       onClassChange={(itemId, className) => handleClassChange(message.id, itemId, className)}
                       onQuantityChange={(itemId, quantity) => handleQuantityChange(message.id, itemId, quantity)}
+                      onDeleteViolation={(itemId) => handleDeleteViolation(message.id, itemId)}
                       onOpenAddViolation={() => handleOpenAddViolation(message.id)}
                       onConfirm={() => void handleConfirm(message.id)}
                       onCancel={() => handleCancelDraft(message.id)}
@@ -1277,36 +1482,37 @@ export default function CodoDutyAssistant() {
           />
 
           <div
-            className="absolute inset-x-0 bottom-0 mx-auto w-full max-w-md rounded-t-[32px] border border-white/55 bg-white/78 p-4 shadow-[0_-18px_42px_rgba(15,23,42,0.12)] backdrop-blur-2xl"
+            className="absolute inset-x-0 bottom-0 mx-auto flex h-[70dvh] w-full max-w-md flex-col overflow-hidden rounded-t-[32px] border border-white/55 bg-white/78 p-4 shadow-[0_-18px_42px_rgba(15,23,42,0.12)] backdrop-blur-2xl"
             style={{
               paddingBottom:
                 "calc(1rem + env(safe-area-inset-bottom) + var(--edp-keyboard-offset, 0px))",
-              maxHeight: "70dvh",
             }}
           >
             <div className="mx-auto mb-4 h-1.5 w-14 rounded-full bg-slate-200" />
-            <div className="flex items-center justify-between gap-3">
-              <div>
-                <div className="text-base font-semibold text-slate-900">Thêm lỗi</div>
-                <div className="mt-1 text-sm text-slate-500">
-                  Chọn thêm một vi phạm để bổ sung vào draft hiện tại.
+            <div className="shrink-0">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <div className="text-base font-semibold text-slate-900">Thêm lỗi</div>
+                  <div className="mt-1 text-sm text-slate-500">
+                    Chọn thêm một vi phạm để bổ sung vào draft hiện tại.
+                  </div>
                 </div>
+                <button
+                  type="button"
+                  onClick={() =>
+                    updateHistory((current) => ({
+                      ...current,
+                      activeSheetMessageId: null,
+                    }))
+                  }
+                  className="rounded-full bg-white/80 px-3 py-1.5 text-xs font-semibold text-slate-700"
+                >
+                  Đóng
+                </button>
               </div>
-              <button
-                type="button"
-                onClick={() =>
-                  updateHistory((current) => ({
-                    ...current,
-                    activeSheetMessageId: null,
-                  }))
-                }
-                className="rounded-full bg-white/80 px-3 py-1.5 text-xs font-semibold text-slate-700"
-              >
-                Đóng
-              </button>
             </div>
 
-            <div className="mt-4 space-y-2 overflow-y-auto pb-1">
+            <div className="mt-4 min-h-0 flex-1 space-y-2 overflow-y-auto overscroll-contain pb-1 [touch-action:pan-y] [-webkit-overflow-scrolling:touch]">
               {rules.map((rule) => (
                 <button
                   key={rule.id}
@@ -1318,9 +1524,7 @@ export default function CodoDutyAssistant() {
                     <SparkleIcon />
                   </div>
                   <div className="min-w-0 flex-1">
-                    <div className="truncate text-[15px] font-semibold text-slate-900">
-                      {rule.name}
-                    </div>
+                    <OverflowMarquee text={rule.name} />
                     <div className="mt-0.5 text-xs text-slate-500">
                       {rule.category}
                     </div>
@@ -1337,3 +1541,4 @@ export default function CodoDutyAssistant() {
     </div>
   )
 }
+

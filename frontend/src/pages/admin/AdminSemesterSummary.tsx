@@ -169,7 +169,7 @@ export default function AdminSemesterSummary() {
   }
 
   return (
-    <div className="min-h-screen flex flex-col bg-slate-50">
+    <div className="min-h-screen flex flex-col bg-[radial-gradient(circle_at_top,#edf5ff_0%,#f8fbff_34%,#f3f6fb_100%)]">
       <Navbar />
 
       <div className="flex-1 max-w-5xl mx-auto w-full px-4 pt-6 pb-10 space-y-5">
@@ -181,7 +181,7 @@ export default function AdminSemesterSummary() {
           <span className="font-medium text-gray-700">Tổng kết học kỳ</span>
         </div>
 
-        <div className="rounded-3xl bg-white p-5 shadow-sm ring-1 ring-blue-50">
+        <div className="edp-glass-panel rounded-[32px] p-5 sm:p-6">
           <div className="flex flex-col lg:flex-row lg:items-end gap-4">
             <div className="min-w-0">
               <div className="text-xl font-semibold text-gray-900">Tổng kết học kỳ</div>
@@ -277,7 +277,7 @@ export default function AdminSemesterSummary() {
         </div>
 
         {loading ? (
-          <div className="rounded-3xl bg-white p-5 shadow-sm ring-1 ring-blue-50">
+          <div className="edp-glass-panel rounded-[32px] p-5 sm:p-6">
             <div className="text-sm text-gray-600">Đang tải dữ liệu...</div>
           </div>
         ) : (
@@ -285,7 +285,7 @@ export default function AdminSemesterSummary() {
             {([10, 11, 12] as const).map((g) => (
               <div
                 key={g}
-                className="rounded-3xl bg-white p-0 shadow-sm ring-1 ring-blue-50 overflow-hidden"
+                className="edp-glass-panel rounded-[32px] p-0 overflow-hidden"
               >
                 <div className="px-5 py-4 flex items-center">
                   <div className="text-sm font-semibold text-gray-900">Khối {g}</div>

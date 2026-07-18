@@ -87,7 +87,7 @@ export default function AdminDutyWeek() {
   const selectedWeek = weekId != null ? weeks.find((w) => w.id === weekId) : null
 
   return (
-    <div className="min-h-screen flex flex-col bg-slate-50">
+    <div className="min-h-screen flex flex-col bg-[radial-gradient(circle_at_top,#edf5ff_0%,#f8fbff_34%,#f3f6fb_100%)]">
       <Navbar />
 
       <div className="flex-1 max-w-5xl mx-auto w-full px-4 pt-6 pb-10 space-y-5">
@@ -99,7 +99,7 @@ export default function AdminDutyWeek() {
           <span className="font-medium text-gray-700">Phiếu trực theo tuần</span>
         </div>
 
-        <div className="rounded-3xl bg-white p-5 shadow-sm ring-1 ring-blue-50">
+        <div className="edp-glass-panel rounded-[32px] p-5 sm:p-6">
           <div className="flex flex-col sm:flex-row sm:items-center gap-3">
             <div>
               <div className="text-xl font-semibold text-gray-900">Phiếu trực</div>
@@ -140,11 +140,11 @@ export default function AdminDutyWeek() {
         </div>
 
         {loading ? (
-          <div className="rounded-3xl bg-white p-5 shadow-sm ring-1 ring-blue-50">
+          <div className="edp-glass-panel rounded-[32px] p-5 sm:p-6">
             <div className="text-sm text-gray-600">Đang tải dữ liệu...</div>
           </div>
         ) : (
-          <div className="rounded-3xl bg-white p-0 shadow-sm ring-1 ring-blue-50 overflow-hidden">
+          <div className="edp-glass-panel rounded-[32px] p-0 overflow-hidden">
             <div className="px-5 py-4 text-sm font-semibold text-gray-900">
               {sessions.length} phiếu trong tuần
             </div>
