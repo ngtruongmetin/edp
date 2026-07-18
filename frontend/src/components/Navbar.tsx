@@ -63,7 +63,7 @@ export default function Navbar() {
 
   return (
     <>
-      <header className="sticky top-0 z-40 hidden border-b border-slate-200/80 bg-white/95 text-slate-900 backdrop-blur md:block">
+      <header data-edp-desktop-navbar className="sticky top-0 z-40 hidden border-b border-slate-200/80 bg-white/95 text-slate-900 backdrop-blur md:block">
         <div className="mx-auto flex h-16 max-w-6xl items-center px-4 sm:px-6 lg:px-8">
           <NavLink to="/" className="flex items-center gap-3 font-semibold">
             <span className="flex h-10 w-10 items-center justify-center rounded-2xl bg-[#2e77df] shadow-sm">

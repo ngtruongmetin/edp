@@ -747,6 +747,68 @@ export default function CodoDutyAssistant() {
     messagesEndRef.current?.scrollIntoView({ block: "end", behavior: "smooth" })
   }, [messages, isSending, activeSheetMessageId, isBooting])
 
+  useLayoutEffect(() => {
+    if (typeof window === "undefined") {
+      return
+    }
+
+    const root = document.documentElement
+    const navbar = document.querySelector<HTMLElement>("[data-edp-desktop-navbar]")
+
+    if (!navbar) {
+      root.style.setProperty("--edp-assistant-header-top", "0px")
+      return
+    }
+
+    const desktopQuery = window.matchMedia("(min-width: 768px)")
+    let frameId: number | null = null
+
+    const updateHeaderTop = () => {
+      if (!desktopQuery.matches) {
+        root.style.setProperty("--edp-assistant-header-top", "0px")
+        return
+      }
+
+      const navbarHeight = navbar.getBoundingClientRect().height
+      const nextTop = Math.max(0, navbarHeight - window.scrollY)
+
+      root.style.setProperty("--edp-assistant-header-top", `${nextTop}px`)
+    }
+
+    const scheduleUpdate = () => {
+      if (frameId != null) {
+        return
+      }
+
+      frameId = window.requestAnimationFrame(() => {
+        frameId = null
+        updateHeaderTop()
+      })
+    }
+
+    updateHeaderTop()
+    window.addEventListener("scroll", scheduleUpdate, { passive: true })
+    window.addEventListener("resize", scheduleUpdate)
+    desktopQuery.addEventListener("change", scheduleUpdate)
+
+    const resizeObserver =
+      typeof ResizeObserver !== "undefined" ? new ResizeObserver(scheduleUpdate) : null
+
+    resizeObserver?.observe(navbar)
+
+    return () => {
+      if (frameId != null) {
+        window.cancelAnimationFrame(frameId)
+      }
+
+      resizeObserver?.disconnect()
+      window.removeEventListener("scroll", scheduleUpdate)
+      window.removeEventListener("resize", scheduleUpdate)
+      desktopQuery.removeEventListener("change", scheduleUpdate)
+      root.style.removeProperty("--edp-assistant-header-top")
+    }
+  }, [])
+
   useEffect(() => {
     if (!dutyId || !numericDutyId || !Number.isInteger(numericDutyId) || numericDutyId <= 0) {
       setInvalidDuty(true)
@@ -1288,7 +1350,7 @@ export default function CodoDutyAssistant() {
       <Navbar />
 
       <div className="mx-auto flex min-h-0 w-full max-w-md flex-1 flex-col overflow-hidden">
-        <header className="fixed left-1/2 top-0 z-30 w-full max-w-md -translate-x-1/2 px-4 pb-3 pt-3 md:top-16">
+        <header className="fixed left-1/2 top-0 z-30 w-full max-w-md -translate-x-1/2 px-4 pb-3 pt-3 md:top-[var(--edp-assistant-header-top,0px)]">
           <div className="edp-glass-panel edp-spring-in flex min-h-[76px] items-center gap-3 rounded-[28px] px-3 py-3">
             <button
               type="button"
