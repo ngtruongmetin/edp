@@ -33,6 +33,9 @@ function isCheckError(err) {
 }
 
 function mapDatabaseError(err, fallbackMessage = "Lỗi cơ sở dữ liệu") {
+  if (err?.status) {
+    return { status: err.status, error: err.message || fallbackMessage }
+  }
   if (isForeignKeyError(err)) {
     return { status: 409, error: "Dữ liệu liên quan không tồn tại hoặc đã bị xóa" }
   }

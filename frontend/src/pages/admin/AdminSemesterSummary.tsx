@@ -1,19 +1,26 @@
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useState } from "react"
 import { Link } from "react-router-dom"
-import { api } from "../../api/api"
+import toast from "react-hot-toast"
 
+import { api } from "../../api/api"
 import Navbar from "../../components/Navbar"
 import Footer from "../../components/Footer"
-import toast from "react-hot-toast"
+import { getApiErrorMessage } from "../../utils/getApiErrorMessage"
 import { usePageTitle } from "../../utils/usePageTitle"
+
+type SemesterOption = {
+  id: number
+  semester_key: string
+  name: string
+  school_year_name: string
+  month_keys: string[]
+  closed_at: string | null
+}
 
 export default function AdminSemesterSummary() {
   usePageTitle("EDP | Tổng kết học kỳ")
-  const [months, setMonths] = useState<any[]>([])
-  const [yearKey, setYearKey] = useState("2025-2026")
-  const [semester, setSemester] = useState<"1" | "2">("1")
-  const [semesterKey, setSemesterKey] = useState<string | null>(null)
-  const [monthKeys, setMonthKeys] = useState<string[]>([])
+  const [semesters, setSemesters] = useState<SemesterOption[]>([])
+  const [semesterKey, setSemesterKey] = useState("")
 
   const [loading, setLoading] = useState(true)
   const [closedAt, setClosedAt] = useState<string | null>(null)
@@ -27,134 +34,119 @@ export default function AdminSemesterSummary() {
   const [savingAdj, setSavingAdj] = useState(false)
 
   useEffect(() => {
-    boot()
+    void boot()
   }, [])
 
   async function boot() {
     setLoading(true)
     try {
-      const res = await api.get("/duty/admin/month/list")
-      setMonths(res.data.months || [])
+      const res = await api.get("/duty/admin/semester/list")
+      const list: SemesterOption[] = res.data.semesters || []
+      setSemesters(list)
+      if (!semesterKey && list.length) {
+        setSemesterKey(list[0].semester_key)
+        setClosedAt(list[0].closed_at || null)
+      }
+    } catch (err) {
+      toast.error(getApiErrorMessage(err, "Không tải được danh sách học kỳ"))
     } finally {
       setLoading(false)
     }
   }
 
-  const monthOptions = useMemo(() => {
-    return months.map((m: any) => ({
-      key: m.month_key,
-      label: `Tháng ${m.month_key}`,
-    }))
-  }, [months])
-
-  function toggleMonth(key: string) {
-    setMonthKeys((prev) => (prev.includes(key) ? prev.filter((x) => x !== key) : [...prev, key]))
-  }
-
-  function buildSemesterKey() {
-    const y = yearKey.trim()
-    if (!/^\d{4}-\d{4}$/.test(y)) return null
-    return `${y}-HK${semester}`
+  function selectedSemester() {
+    return semesters.find((item) => item.semester_key === semesterKey) || null
   }
 
   async function preview() {
-    const key = buildSemesterKey()
-    if (!key) {
-      toast.error("Nhập năm học dạng yyyy-yyyy")
-      return
-    }
-    if (monthKeys.length === 0) {
-      toast.error("Chọn ít nhất 1 tháng")
+    if (!semesterKey) {
+      toast.error("Chọn học kỳ")
       return
     }
     setLoading(true)
     try {
-      const res = await api.post("/duty/admin/semester/preview", {
-        semester_key: key,
-        month_keys: monthKeys,
-      })
-      setSemesterKey(res.data.semester_key)
+      const res = await api.post("/duty/admin/semester/preview", { semester_key: semesterKey })
       setClosedAt(res.data.closed_at || null)
       setScoresByGrade(res.data.scores_by_grade || { 10: [], 11: [], 12: [] })
+    } catch (err) {
+      toast.error(getApiErrorMessage(err, "Không tải được kết quả học kỳ"))
     } finally {
       setLoading(false)
     }
   }
 
-  async function saveSemester() {
-    const key = buildSemesterKey()
-    if (!key) {
-      toast.error("Nhập năm học dạng yyyy-yyyy")
-      return
-    }
-    if (monthKeys.length === 0) {
-      toast.error("Chọn ít nhất 1 tháng")
-      return
-    }
-    await api.post("/duty/admin/semester/save", {
-      semester_key: key,
-      month_keys: monthKeys,
-    })
-    toast.success("Đã lưu học kỳ")
-  }
-
   async function closeSemester() {
-    const key = buildSemesterKey()
-    if (!key) return
+    if (!semesterKey) return
     if (!confirm("Tổng kết học kỳ và khóa chỉnh sửa?")) return
-    await api.post("/duty/admin/semester/close", { semester_key: key, month_keys: monthKeys })
-    await preview()
+    try {
+      await api.post("/duty/admin/semester/close", { semester_key: semesterKey })
+      toast.success("Đã tổng kết học kỳ")
+      await preview()
+      await boot()
+    } catch (err) {
+      toast.error(getApiErrorMessage(err, "Không thể tổng kết học kỳ"))
+    }
   }
 
   async function reopenSemester() {
-    const key = buildSemesterKey()
-    if (!key) return
+    if (!semesterKey) return
     if (!confirm("Mở khóa học kỳ này?")) return
-    await api.post("/duty/admin/semester/reopen", { semester_key: key })
-    await preview()
+    try {
+      await api.post("/duty/admin/semester/reopen", { semester_key: semesterKey })
+      toast.success("Đã mở khóa học kỳ")
+      await preview()
+      await boot()
+    } catch (err) {
+      toast.error(getApiErrorMessage(err, "Không thể mở khóa học kỳ"))
+    }
   }
 
   async function exportExcel() {
-    const key = semesterKey || buildSemesterKey()
-    if (!key) return
-    const res = await api.get(`/duty/admin/semester/${encodeURIComponent(key)}/export`, {
-      responseType: "blob",
-    })
-    const blob = new Blob([res.data], {
-      type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-    })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement("a")
-    a.href = url
-    a.download = `ket_qua_thi_dua_${key}.xlsx`
-    document.body.appendChild(a)
-    a.click()
-    a.remove()
-    URL.revokeObjectURL(url)
+    if (!semesterKey) return
+    try {
+      const res = await api.get(`/duty/admin/semester/${encodeURIComponent(semesterKey)}/export`, {
+        responseType: "blob",
+      })
+      const blob = new Blob([res.data], {
+        type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      })
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement("a")
+      a.href = url
+      a.download = `ket_qua_thi_dua_${semesterKey}.xlsx`
+      document.body.appendChild(a)
+      a.click()
+      a.remove()
+      URL.revokeObjectURL(url)
+    } catch (err) {
+      toast.error(getApiErrorMessage(err, "Không tải được file Excel"))
+    }
   }
 
   async function openDetail(className: string) {
-    const key = semesterKey || buildSemesterKey()
-    if (!key) return
+    if (!semesterKey) return
     setDetailClass(className)
     setDetail(null)
-    const res = await api.get(
-      `/duty/admin/semester/${encodeURIComponent(key)}/class/${encodeURIComponent(className)}/breakdown`,
-    )
-    setDetail(res.data)
-    setAdjPlus(String(res.data?.breakdown?.adjust_plus ?? 0))
-    setAdjMinus(String(res.data?.breakdown?.adjust_minus ?? 0))
-    setAdjReason(String(res.data?.breakdown?.adjust_reason ?? ""))
+    try {
+      const res = await api.get(
+        `/duty/admin/semester/${encodeURIComponent(semesterKey)}/class/${encodeURIComponent(className)}/breakdown`,
+      )
+      setDetail(res.data)
+      setAdjPlus(String(res.data?.breakdown?.adjust_plus ?? 0))
+      setAdjMinus(String(res.data?.breakdown?.adjust_minus ?? 0))
+      setAdjReason(String(res.data?.breakdown?.adjust_reason ?? ""))
+    } catch (err) {
+      setDetailClass(null)
+      toast.error(getApiErrorMessage(err, "Không tải được chi tiết lớp"))
+    }
   }
 
   async function saveAdjustment() {
-    if (!detailClass) return
-    const key = semesterKey || buildSemesterKey()
-    if (!key) return
+    if (!detailClass || !semesterKey) return
     setSavingAdj(true)
     try {
       await api.post("/duty/admin/semester/adjustment", {
-        semester_key: key,
+        semester_key: semesterKey,
         class_name: detailClass,
         plus_points: Number(adjPlus || 0),
         minus_points: Number(adjMinus || 0),
@@ -163,10 +155,35 @@ export default function AdminSemesterSummary() {
       toast.success("Đã lưu")
       await preview()
       await openDetail(detailClass)
+    } catch (err) {
+      toast.error(getApiErrorMessage(err, "Không thể lưu điều chỉnh"))
     } finally {
       setSavingAdj(false)
     }
   }
+
+  async function deleteAdjustment() {
+    if (!detailClass || !semesterKey) return
+    if (!confirm("Xóa điểm cộng/trừ của lớp này?")) return
+    setSavingAdj(true)
+    try {
+      await api.delete("/duty/admin/semester/adjustment", {
+        data: { semester_key: semesterKey, class_name: detailClass },
+      })
+      setAdjPlus("0")
+      setAdjMinus("0")
+      setAdjReason("")
+      toast.success("Đã xóa")
+      await preview()
+      await openDetail(detailClass)
+    } catch (err) {
+      toast.error(getApiErrorMessage(err, "Không thể xóa điều chỉnh"))
+    } finally {
+      setSavingAdj(false)
+    }
+  }
+
+  const currentSemester = selectedSemester()
 
   return (
     <div className="min-h-screen flex flex-col bg-[radial-gradient(circle_at_top,#edf5ff_0%,#f8fbff_34%,#f3f6fb_100%)]">
@@ -186,34 +203,29 @@ export default function AdminSemesterSummary() {
             <div className="min-w-0">
               <div className="text-xl font-semibold text-gray-900">Tổng kết học kỳ</div>
               <div className="mt-1 text-sm text-gray-600">
-                Chọn năm học, học kỳ, tháng. Có điểm cộng trừ riêng theo học kỳ, khóa và xuất Excel.
+                Chọn học kỳ đã tạo trong quản lý lịch trực. Hệ thống tự lấy toàn bộ tháng và tuần thuộc học kỳ.
               </div>
-              {closedAt ? (
-                <div className="mt-1 text-xs text-gray-500">Đã tổng kết: {closedAt}</div>
-              ) : null}
+              {closedAt ? <div className="mt-1 text-xs text-gray-500">Đã tổng kết: {closedAt}</div> : null}
             </div>
 
-            <div className="lg:ml-auto grid grid-cols-1 sm:grid-cols-4 gap-3 w-full lg:w-auto">
-              <input
-                value={yearKey}
-                onChange={(e) => setYearKey(e.target.value)}
-                placeholder="yyyy-yyyy"
-                className="rounded-2xl border border-blue-100 px-4 py-2.5 text-sm shadow-sm outline-none focus:border-[#2e77df]"
-              />
+            <div className="lg:ml-auto w-full lg:w-80">
               <select
-                value={semester}
-                onChange={(e) => setSemester(e.target.value as "1" | "2")}
-                className="rounded-2xl border border-blue-100 px-4 py-2.5 text-sm shadow-sm outline-none focus:border-[#2e77df]"
+                value={semesterKey}
+                onChange={(e) => {
+                  const key = e.target.value
+                  setSemesterKey(key)
+                  const semester = semesters.find((item) => item.semester_key === key)
+                  setClosedAt(semester?.closed_at || null)
+                }}
+                className="w-full rounded-2xl border border-blue-100 px-4 py-2.5 text-sm shadow-sm outline-none focus:border-[#2e77df]"
               >
-                <option value="1">Học kỳ I</option>
-                <option value="2">Học kỳ II</option>
+                <option value="">Chọn học kỳ</option>
+                {semesters.map((semester) => (
+                  <option key={semester.semester_key} value={semester.semester_key}>
+                    {semester.name} - {semester.school_year_name}
+                  </option>
+                ))}
               </select>
-              <button
-                onClick={saveSemester}
-                className="rounded-2xl bg-white px-4 py-2.5 text-sm font-semibold text-gray-900 shadow-sm ring-1 ring-blue-50"
-              >
-                Lưu học kỳ
-              </button>
             </div>
           </div>
 
@@ -226,52 +238,30 @@ export default function AdminSemesterSummary() {
             </button>
             <button
               onClick={exportExcel}
-              disabled={!buildSemesterKey()}
+              disabled={!semesterKey}
               className="rounded-2xl bg-white px-4 py-2.5 text-sm font-semibold text-gray-900 shadow-sm ring-1 ring-blue-50 disabled:opacity-50"
             >
               Xuất Excel
             </button>
           </div>
 
-          <div className="mt-4 grid grid-cols-1 lg:grid-cols-2 gap-4">
-            <div className="rounded-2xl bg-slate-50 p-4">
-              <div className="text-sm font-semibold text-gray-900">Chọn tháng</div>
-              <div className="mt-2 max-h-56 overflow-y-auto space-y-2">
-                {monthOptions.map((m) => (
-                  <label
-                    key={m.key}
-                    className="flex items-center gap-2 rounded-xl bg-white px-3 py-2 ring-1 ring-blue-50"
-                  >
-                    <input
-                      type="checkbox"
-                      checked={monthKeys.includes(m.key)}
-                      onChange={() => toggleMonth(m.key)}
-                    />
-                    <span className="text-sm text-gray-800">{m.label}</span>
-                  </label>
-                ))}
-                {monthOptions.length === 0 ? (
-                  <div className="text-sm text-gray-600">Chưa có tháng.</div>
-                ) : null}
-              </div>
-            </div>
-
-            <div className="rounded-2xl bg-slate-50 p-4 flex flex-wrap gap-3 items-center">
-              <button
-                onClick={closeSemester}
-                disabled={!!closedAt || !buildSemesterKey()}
-                className="rounded-2xl bg-emerald-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm disabled:opacity-50"
-              >
-                Tổng kết & khóa
-              </button>
-              <button
-                onClick={reopenSemester}
-                disabled={!closedAt || !buildSemesterKey()}
-                className="rounded-2xl bg-white px-4 py-2.5 text-sm font-semibold text-gray-900 shadow-sm ring-1 ring-blue-50 disabled:opacity-50"
-              >
-                Mở khóa
-              </button>
-              <div className="text-xs text-gray-600 ml-auto">{monthKeys.length} tháng được chọn</div>
+          <div className="mt-4 rounded-2xl bg-slate-50 p-4 flex flex-wrap gap-3 items-center">
+            <button
+              onClick={closeSemester}
+              disabled={!!closedAt || !semesterKey}
+              className="rounded-2xl bg-emerald-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm disabled:opacity-50"
+            >
+              Tổng kết & khóa
+            </button>
+            <button
+              onClick={reopenSemester}
+              disabled={!closedAt || !semesterKey}
+              className="rounded-2xl bg-white px-4 py-2.5 text-sm font-semibold text-gray-900 shadow-sm ring-1 ring-blue-50 disabled:opacity-50"
+            >
+              Mở khóa
+            </button>
+            <div className="text-xs text-gray-600 ml-auto">
+              {currentSemester ? `${currentSemester.month_keys.length} tháng thuộc học kỳ` : "Chưa chọn học kỳ"}
             </div>
           </div>
         </div>
@@ -283,31 +273,24 @@ export default function AdminSemesterSummary() {
         ) : (
           <div className="space-y-4">
             {([10, 11, 12] as const).map((g) => (
-              <div
-                key={g}
-                className="edp-glass-panel rounded-[32px] p-0 overflow-hidden"
-              >
+              <div key={g} className="edp-glass-panel rounded-[32px] p-0 overflow-hidden">
                 <div className="px-5 py-4 flex items-center">
                   <div className="text-sm font-semibold text-gray-900">Khối {g}</div>
-                  <div className="ml-auto text-xs text-gray-500">
-                    {(scoresByGrade?.[g] || []).length} lớp
-                  </div>
+                  <div className="ml-auto text-xs text-gray-500">{(scoresByGrade?.[g] || []).length} lớp</div>
                 </div>
                 <div className="divide-y divide-blue-50">
-                  {(scoresByGrade?.[g] || []).map((r: any) => (
+                  {(scoresByGrade?.[g] || []).map((r: any, idx: number) => (
                     <button
                       key={r.class_name}
-                      onClick={() => openDetail(r.class_name)}
+                      onClick={() => void openDetail(r.class_name)}
                       className="w-full px-5 py-4 flex items-center text-left hover:bg-slate-50 transition"
                     >
                       <div className="w-10 text-sm font-semibold text-gray-500">
-                        #{r.rank ?? "-"}
+                        #{Number(r.rank || 0) > 0 ? r.rank : idx + 1}
                       </div>
                       <div className="min-w-0 flex-1">
                         <div className="text-[15px] font-semibold text-gray-900">{r.class_name}</div>
-                        {r.note ? (
-                          <div className="text-xs font-semibold text-amber-700">{r.note}</div>
-                        ) : null}
+                        {r.note ? <div className="text-xs font-semibold text-amber-700">{r.note}</div> : null}
                       </div>
                       <div className="text-lg font-semibold text-gray-900">{r.total_score}</div>
                     </button>
@@ -332,9 +315,7 @@ export default function AdminSemesterSummary() {
             />
             <div className="absolute inset-x-0 bottom-0 mx-auto w-full max-w-md rounded-t-3xl bg-white p-5 shadow-2xl md:left-1/2 md:top-1/2 md:bottom-auto md:inset-x-auto md:-translate-x-1/2 md:-translate-y-1/2 md:max-w-xl md:rounded-3xl">
               <div className="flex items-center gap-2">
-                <div className="text-base font-semibold text-gray-900">
-                  Chi tiết điểm: {detailClass}
-                </div>
+                <div className="text-base font-semibold text-gray-900">Chi tiết điểm: {detailClass}</div>
                 <button
                   className="ml-auto rounded-full bg-gray-100 px-3 py-1 text-xs font-semibold text-gray-700"
                   onClick={() => {
@@ -373,9 +354,7 @@ export default function AdminSemesterSummary() {
                   </div>
 
                   <div className="rounded-2xl bg-slate-50 p-4">
-                    <div className="text-sm font-semibold text-gray-900">
-                      Điểm cộng trừ riêng theo học kỳ
-                    </div>
+                    <div className="text-sm font-semibold text-gray-900">Điểm cộng trừ riêng theo học kỳ</div>
                     <div className="mt-3 grid grid-cols-2 gap-3">
                       <div>
                         <div className="text-[11px] text-gray-500">Điểm cộng</div>
@@ -408,6 +387,13 @@ export default function AdminSemesterSummary() {
                       className="mt-3 w-full rounded-2xl bg-[#2e77df] px-4 py-2.5 text-sm font-semibold text-white shadow-sm disabled:opacity-50"
                     >
                       {closedAt ? "Học kỳ đã khóa" : savingAdj ? "Đang lưu..." : "Lưu"}
+                    </button>
+                    <button
+                      onClick={() => void deleteAdjustment()}
+                      disabled={savingAdj || !!closedAt}
+                      className="mt-2 w-full rounded-2xl bg-white px-4 py-2.5 text-sm font-semibold text-red-600 shadow-sm ring-1 ring-red-100 disabled:opacity-50"
+                    >
+                      Xóa điều chỉnh
                     </button>
                   </div>
                 </div>

@@ -5,6 +5,14 @@ const SETTING_DEFINITIONS = {
     key: "base_score",
     description: "Điểm gốc mặc định của mỗi lớp khi bắt đầu tuần thi đua",
   },
+  school_year: {
+    key: "school_year",
+    description: "Năm học đang dùng cho cấu trúc học kỳ, tháng và tuần",
+  },
+  use_electronic_gradebook: {
+    key: "use_electronic_gradebook",
+    description: "Ap dung so dau bai dien tu khi tong ket tuan",
+  },
 }
 
 let settingsCache = null

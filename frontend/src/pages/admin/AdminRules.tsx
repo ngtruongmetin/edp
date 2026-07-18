@@ -212,6 +212,25 @@ export default function AdminRules() {
     }
   }
 
+  async function downloadTemplate() {
+    try {
+      const res = await api.get("/rules/template", {
+        responseType: "blob",
+      })
+      const url = window.URL.createObjectURL(new Blob([res.data]))
+      const link = document.createElement("a")
+      link.href = url
+      link.download = "template_rules.xlsx"
+      document.body.appendChild(link)
+      link.click()
+      document.body.removeChild(link)
+      window.URL.revokeObjectURL(url)
+    } catch (err: any) {
+      console.error(err)
+      toast.error(err?.response?.data?.error || "Không tải được file mẫu")
+    }
+  }
+
   return (
     <div className="min-h-screen flex flex-col bg-[radial-gradient(circle_at_top,#edf5ff_0%,#f8fbff_34%,#f3f6fb_100%)]">
       <Navbar />
@@ -255,6 +274,13 @@ export default function AdminRules() {
                 className="min-h-11 rounded-[18px] border border-white/70 bg-white/72 px-4 text-sm font-semibold text-slate-700 shadow-[0_12px_24px_rgba(15,23,42,0.06)] transition duration-200 active:scale-[0.98] disabled:opacity-60"
               >
                 {exporting ? "Đang export..." : "Export Excel"}
+              </button>
+              <button
+                type="button"
+                onClick={() => void downloadTemplate()}
+                className="min-h-11 rounded-[18px] border border-white/70 bg-white/72 px-4 text-sm font-semibold text-slate-700 shadow-[0_12px_24px_rgba(15,23,42,0.06)] transition duration-200 active:scale-[0.98]"
+              >
+                Tải file mẫu
               </button>
               <button
                 type="button"

@@ -1,10 +1,12 @@
 import { useEffect, useMemo, useState } from "react"
 import { Link } from "react-router-dom"
+import toast from "react-hot-toast"
 import { api } from "../../api/api"
 
 import Navbar from "../../components/Navbar"
 import Footer from "../../components/Footer"
 import { localISODate } from "../../utils/dateLocal"
+import { getApiErrorMessage } from "../../utils/getApiErrorMessage"
 import { usePageTitle } from "../../utils/usePageTitle"
 
 type Week = {
@@ -40,6 +42,8 @@ export default function AdminWeeklySummary() {
       const id = current?.id ?? (list.length ? list[0].id : null)
       setWeekId(id)
       if (id) await load(id)
+    } catch (err) {
+      toast.error(getApiErrorMessage(err, "Không tải được danh sách tuần"))
     } finally {
       setLoading(false)
     }
@@ -50,6 +54,8 @@ export default function AdminWeeklySummary() {
     try {
       const res = await api.get(`/duty/admin/week/${id}/summary`)
       setSummary(res.data)
+    } catch (err) {
+      toast.error(getApiErrorMessage(err, "Không tải được tổng kết tuần"))
     } finally {
       setLoading(false)
     }
@@ -57,55 +63,69 @@ export default function AdminWeeklySummary() {
 
   async function exportExcel() {
     if (!weekId) return
-    const res = await api.get(`/duty/admin/week/${weekId}/export`, {
-      responseType: "blob",
-    })
-    const blob = new Blob([res.data], {
-      type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-    })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement("a")
-    a.href = url
-    a.download = `ket_qua_thi_dua_tuan_${summary?.week?.week_number || weekId}.xlsx`
-    document.body.appendChild(a)
-    a.click()
-    a.remove()
-    URL.revokeObjectURL(url)
+    try {
+      const res = await api.get(`/duty/admin/week/${weekId}/export`, {
+        responseType: "blob",
+      })
+      const blob = new Blob([res.data], {
+        type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      })
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement("a")
+      a.href = url
+      a.download = `ket_qua_thi_dua_tuan_${summary?.week?.week_number || weekId}.xlsx`
+      document.body.appendChild(a)
+      a.click()
+      a.remove()
+      URL.revokeObjectURL(url)
+    } catch (err) {
+      toast.error(getApiErrorMessage(err, "Không tải được file Excel"))
+    }
   }
 
   async function openDetail(className: string) {
     if (!weekId) return
     setDetailClass(className)
     setDetail(null)
-    const res = await api.get(
-      `/duty/admin/week/${weekId}/class/${encodeURIComponent(className)}/breakdown`,
-    )
-    setDetail(res.data)
+    try {
+      const res = await api.get(
+        `/duty/admin/week/${weekId}/class/${encodeURIComponent(className)}/breakdown`,
+      )
+      setDetail(res.data)
+    } catch (err) {
+      setDetailClass(null)
+      toast.error(getApiErrorMessage(err, "Không tải được chi tiết lớp"))
+    }
   }
 
   async function closeWeek() {
     if (!weekId) return
-    const stats = await api.get(`/duty/admin/week/${weekId}/stats`)
-    const drafts = Number(stats.data.draft_count || 0)
-    const msg =
-      drafts > 0
-        ? `Tuần này còn ${drafts} phiếu chưa ký. Phiếu nháp sẽ không được tính. Vẫn tổng kết và khóa tuần?`
-        : "Tổng kết tuần này và khóa chỉnh sửa?"
-    if (!confirm(msg)) return
     try {
+      const stats = await api.get(`/duty/admin/week/${weekId}/stats`)
+      const drafts = Number(stats.data.draft_count || 0)
+      const msg =
+        drafts > 0
+          ? `Tuần này còn ${drafts} phiếu chưa ký. Phiếu nháp sẽ không được tính. Vẫn tổng kết và khóa tuần?`
+          : "Tổng kết tuần này và khóa chỉnh sửa?"
+      if (!confirm(msg)) return
       await api.post(`/duty/admin/week/${weekId}/close`)
+      toast.success("Đã tổng kết tuần")
       await load(weekId)
-    } catch (err: any) {
-      const msg = err?.response?.data?.error || "Không thể tổng kết tuần"
-      alert(msg)
+    } catch (err) {
+      toast.error(getApiErrorMessage(err, "Không thể tổng kết tuần"))
     }
   }
 
   async function reopenWeek() {
     if (!weekId) return
     if (!confirm("Mở khóa tuần này (cho phép chỉnh sửa lại)?")) return
-    await api.post(`/duty/admin/week/${weekId}/reopen`)
-    await load(weekId)
+    try {
+      await api.post(`/duty/admin/week/${weekId}/reopen`)
+      toast.success("Đã mở khóa tuần")
+      await load(weekId)
+    } catch (err) {
+      toast.error(getApiErrorMessage(err, "Không thể mở khóa tuần"))
+    }
   }
 
   function formatDateISO(dateStr: string) {

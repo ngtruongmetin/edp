@@ -61,6 +61,28 @@ export default function AdminTimetable() {
     }
   }
 
+  async function downloadTemplate() {
+    try {
+      const res = await api.get("/bonus/admin/timetable/template", {
+        responseType: "blob",
+      })
+      const blob = new Blob([res.data], {
+        type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      })
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement("a")
+      a.href = url
+      a.download = "template_timetable.xlsx"
+      document.body.appendChild(a)
+      a.click()
+      a.remove()
+      URL.revokeObjectURL(url)
+    } catch (err: any) {
+      const msg = err?.response?.data?.error || "Không tải được file mẫu"
+      alert(msg)
+    }
+  }
+
   function formatDateVN(dateStr: string) {
     if (!dateStr) return ""
     const [y, m, d] = dateStr.split("-")
@@ -111,7 +133,7 @@ export default function AdminTimetable() {
 
         <div className="edp-glass-panel rounded-[32px] p-5 sm:p-6">
           <div className="text-xl font-semibold text-gray-900">Nhập thời khóa biểu</div>
-          <div className="mt-2 grid grid-cols-1 lg:grid-cols-[1fr_160px] gap-3">
+          <div className="mt-2 grid grid-cols-1 lg:grid-cols-[1fr_160px_160px] gap-3">
             <div className="w-full">
               <label className="inline-flex h-11 w-full cursor-pointer items-center justify-between rounded-2xl border border-blue-100 bg-white px-4 text-sm font-medium text-gray-700 shadow-sm hover:bg-slate-50">
                 <span>Chọn file thời khóa biểu</span>
@@ -136,6 +158,12 @@ export default function AdminTimetable() {
               className="rounded-2xl bg-[#2e77df] px-4 py-2.5 text-sm font-semibold text-white shadow-sm disabled:opacity-50"
             >
               {uploading ? "Đang tải lên..." : "Tải TKB"}
+            </button>
+            <button
+              onClick={() => void downloadTemplate()}
+              className="rounded-2xl bg-white px-4 py-2.5 text-sm font-semibold text-gray-900 shadow-sm ring-1 ring-blue-50"
+            >
+              Tải file mẫu
             </button>
           </div>
         </div>

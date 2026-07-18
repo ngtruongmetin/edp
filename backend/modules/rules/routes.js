@@ -184,6 +184,37 @@ router.get(
 )
 
 router.get(
+  "/template",
+  requireLogin,
+  requireRole(["admin"]),
+  async (req, res) => {
+    try {
+      const workbook = new ExcelJS.Workbook()
+      const sheet = buildRulesWorksheet(workbook)
+
+      sheet.addRow({
+        category: "Nề nếp",
+        name: "Đi học muộn",
+        score_delta: -5,
+      })
+      sheet.addRow({
+        category: "Phong trào",
+        name: "Tham gia hoạt động tốt",
+        score_delta: 10,
+      })
+      styleRulesSheet(sheet)
+
+      const buffer = await workbook.xlsx.writeBuffer()
+      res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+      res.setHeader("Content-Disposition", 'attachment; filename="template_rules.xlsx"')
+      res.send(Buffer.from(buffer))
+    } catch (err) {
+      res.status(500).json({ error: err.message || "Cannot create template" })
+    }
+  },
+)
+
+router.get(
   "/export",
   requireLogin,
   requireRole(["admin"]),

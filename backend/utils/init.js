@@ -15,6 +15,16 @@ const DEFAULT_SYSTEM_SETTINGS = [
     value: "100",
     description: "Điểm gốc mặc định của mỗi lớp khi bắt đầu tuần thi đua",
   },
+  {
+    key: "school_year",
+    value: "2026-2027",
+    description: "Năm học đang dùng cho cấu trúc học kỳ, tháng và tuần",
+  },
+  {
+    key: "use_electronic_gradebook",
+    value: "1",
+    description: "Ap dung so dau bai dien tu khi tong ket tuan",
+  },
 ]
 
 function detectProviderFromApiKey(apiKey) {
@@ -107,6 +117,102 @@ async function seedAiSettings(now) {
   )
 }
 
+async function ensureDefaultTimeHierarchy(now) {
+  await pool.query(`
+    UPDATE months
+    SET month_key = $1
+    WHERE month_key = $2
+      AND NOT EXISTS (
+        SELECT 1
+        FROM months existing
+        WHERE existing.month_key = $1
+      )
+  `, ["09/2026", "2026-09"])
+
+  await pool.query(`
+    UPDATE month_summaries
+    SET month_key = $1
+    WHERE month_key = $2
+      AND NOT EXISTS (
+        SELECT 1
+        FROM month_summaries existing
+        WHERE existing.month_key = $1
+      )
+  `, ["09/2026", "2026-09"])
+
+  await pool.query(`
+    UPDATE month_adjustments ma
+    SET month_key = $1
+    WHERE month_key = $2
+      AND NOT EXISTS (
+        SELECT 1
+        FROM month_adjustments existing
+        WHERE existing.month_key = $1
+          AND existing.class_name = ma.class_name
+      )
+  `, ["09/2026", "2026-09"])
+
+  await pool.query(`
+    UPDATE month_scores ms
+    SET month_key = $1
+    WHERE month_key = $2
+      AND NOT EXISTS (
+        SELECT 1
+        FROM month_scores existing
+        WHERE existing.month_key = $1
+          AND existing.class_name = ms.class_name
+      )
+  `, ["09/2026", "2026-09"])
+
+  await pool.query(`
+    UPDATE semester_summaries
+    SET month_keys = REPLACE(month_keys, '"2026-09"', '"09/2026"')
+    WHERE month_keys LIKE '%"2026-09"%'
+  `)
+
+  const schoolYear = await pool.query(
+    `
+      INSERT INTO school_years (name, start_year, end_year, created_at)
+      VALUES ($1, $2, $3, $4)
+      ON CONFLICT (name) DO UPDATE
+      SET start_year = EXCLUDED.start_year,
+          end_year = EXCLUDED.end_year
+      RETURNING id
+    `,
+    ["2026-2027", 2026, 2027, now],
+  )
+  const schoolYearId = schoolYear.rows[0].id
+
+  const semester = await pool.query(
+    `
+      INSERT INTO semesters (school_year_id, semester_number, name, created_at)
+      VALUES ($1, $2, $3, $4)
+      ON CONFLICT (school_year_id, semester_number) DO UPDATE
+      SET name = EXCLUDED.name
+      RETURNING id
+    `,
+    [schoolYearId, 1, "Học kỳ I", now],
+  )
+  const semesterId = semester.rows[0].id
+
+  await pool.query(
+    `
+      INSERT INTO months (semester_id, month_number, month_key, name, created_at)
+      VALUES ($1, $2, $3, $4, $5)
+      ON CONFLICT (month_key) DO UPDATE
+      SET semester_id = EXCLUDED.semester_id,
+          month_number = EXCLUDED.month_number,
+          name = EXCLUDED.name
+      RETURNING id
+    `,
+    [semesterId, 9, "09/2026", "Tháng 9", now],
+  )
+  await pool.query(`
+    ALTER TABLE schedule_weeks
+    ALTER COLUMN month_id SET NOT NULL
+  `)
+}
+
 async function initDb() {
   const schemaPath = path.join(__dirname, "..", "sql", "schema.postgresql.sql")
   const schemaSql = fs.readFileSync(schemaPath, "utf8")
@@ -150,20 +256,21 @@ async function initDb() {
          password_changed_codo = COALESCE(password_changed_codo, password_changed, 0)`,
   )
 
+  const now = new Date().toISOString()
+  await ensureDefaultTimeHierarchy(now)
+
   const row = await get(`SELECT COUNT(*)::int as c FROM year_summaries`)
   const count = Number(row?.c || 0)
   if (count === 0) {
-    const now = new Date().toISOString()
     await run(
       `
         INSERT INTO year_summaries (year_key, week_ids, semester_keys, closed_at, created_at, updated_at)
         VALUES(?,?,?,?,?,?)
       `,
-      ["2025-2026", "[]", "[]", null, now, now],
+      ["2026-2027", "[]", "[]", null, now, now],
     )
   }
 
-  const now = new Date().toISOString()
   await seedSystemSettings(now)
   await seedAiSettings(now)
 }

@@ -20,6 +20,29 @@ function toNumber(value) {
   return Number(value)
 }
 
+function normalizeSchoolYear(value) {
+  const input = String(value || "").trim().replace("–", "-")
+  const match = input.match(/^(\d{4})-(\d{4})$/)
+  if (!match) return null
+
+  const startYear = Number(match[1])
+  const endYear = Number(match[2])
+  if (endYear !== startYear + 1) return null
+
+  return `${startYear}-${endYear}`
+}
+
+function normalizeBooleanSetting(value) {
+  if (value === true) return "1"
+  if (value === false) return "0"
+
+  const normalized = String(value || "").trim().toLowerCase()
+  if (["1", "true", "yes", "co", "có"].includes(normalized)) return "1"
+  if (["0", "false", "no", "khong", "không"].includes(normalized)) return "0"
+
+  return null
+}
+
 function buildAdminAiErrorResponse(err, fallbackProvider = "custom") {
   const provider = String(err?.provider || fallbackProvider || "custom").trim().toLowerCase()
   const label = getProviderLabel(provider)
@@ -54,6 +77,28 @@ function validateGeneralSettingsPayload(payload) {
     }
 
     normalized.base_score = String(baseScore)
+  }
+
+  if ("school_year" in settings) {
+    const schoolYear = normalizeSchoolYear(settings.school_year)
+    if (!schoolYear) {
+      const error = new Error("Năm học phải đúng định dạng yyyy-yyyy, ví dụ 2026-2027")
+      error.status = 400
+      throw error
+    }
+
+    normalized.school_year = schoolYear
+  }
+
+  if ("use_electronic_gradebook" in settings) {
+    const enabled = normalizeBooleanSetting(settings.use_electronic_gradebook)
+    if (enabled === null) {
+      const error = new Error("Cau hinh so dau bai dien tu khong hop le")
+      error.status = 400
+      throw error
+    }
+
+    normalized.use_electronic_gradebook = enabled
   }
 
   if (Object.keys(normalized).length === 0) {

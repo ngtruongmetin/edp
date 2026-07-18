@@ -11,6 +11,7 @@ import AdminDashboard from "./pages/admin/AdminDashboard"
 import AdminClasses from "./pages/admin/AdminClasses"
 import AdminRules from "./pages/admin/AdminRules"
 import AdminSchedule from "./pages/admin/AdminSchedule"
+import AdminTimeManagement from "./pages/admin/AdminTimeManagement"
 import AdminDutyManage from "./pages/admin/AdminDutyManage"
 import AdminWeeklySummary from "./pages/admin/AdminWeeklySummary"
 import AdminMonthSummary from "./pages/admin/AdminMonthSummary"
@@ -69,6 +70,7 @@ export default function App(){
           <Route path="dashboard" element={<AdminDashboard/>}/>
           <Route path="classes" element={<AdminClasses/>}/>
           <Route path="rules" element={<AdminRules/>}/>
+          <Route path="time-management" element={<AdminTimeManagement/>}/>
           <Route path="schedule" element={<AdminSchedule/>}/>
           <Route path="duty" element={<AdminDutyManage/>}/>
           <Route path="timetable" element={<AdminTimetable/>}/>

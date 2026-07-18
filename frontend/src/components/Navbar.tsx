@@ -1,5 +1,7 @@
+import { useState } from "react"
 import { NavLink, useNavigate } from "react-router-dom"
 import { useAuth } from "../auth/AuthContext"
+import ModalShell from "./ModalShell"
 import { getDashboardPath } from "../utils/authRoutes"
 
 function DashboardIcon() {
@@ -45,14 +47,30 @@ function LogoutIcon() {
 export default function Navbar() {
   const { user, loading, logout, isOffline } = useAuth()
   const navigate = useNavigate()
+  const [showLogoutConfirm, setShowLogoutConfirm] = useState(false)
+  const [isLoggingOut, setIsLoggingOut] = useState(false)
 
   async function handleLogout() {
+    setIsLoggingOut(true)
     try {
       await logout()
       navigate("/")
     } catch (err) {
       console.error(err)
+    } finally {
+      setIsLoggingOut(false)
+      setShowLogoutConfirm(false)
     }
+  }
+
+  function openLogoutConfirm() {
+    if (isLoggingOut) return
+    setShowLogoutConfirm(true)
+  }
+
+  function closeLogoutConfirm() {
+    if (isLoggingOut) return
+    setShowLogoutConfirm(false)
   }
 
   const dashboardPath = user ? getDashboardPath(user.role) : "/"
@@ -112,7 +130,8 @@ export default function Navbar() {
             )}
             {!loading && user ? (
               <button
-                onClick={handleLogout}
+                type="button"
+                onClick={openLogoutConfirm}
                 className="rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 shadow-sm transition hover:border-[#2e77df] hover:bg-blue-50 hover:text-[#2e77df]"
               >
                 Đăng xuất
@@ -172,7 +191,7 @@ export default function Navbar() {
           {user ? (
             <button
               type="button"
-              onClick={handleLogout}
+              onClick={openLogoutConfirm}
               className="flex min-h-14 flex-col items-center justify-center rounded-2xl px-2 py-2 text-[11px] font-semibold text-slate-500 transition active:scale-[0.98] hover:bg-slate-50 hover:text-slate-900"
             >
               <span className="mb-1 flex h-6 w-6 items-center justify-center">
@@ -204,6 +223,38 @@ export default function Navbar() {
           </div>
         )}
       </nav>
+
+      {showLogoutConfirm && (
+        <ModalShell className="edp-glass-panel edp-spring-in max-w-md rounded-[26px] p-6 sm:p-7">
+          <div>
+            <h2 className="text-2xl font-semibold tracking-tight text-slate-900">
+              Đăng xuất
+            </h2>
+            <p className="mt-3 text-sm leading-6 text-slate-600 sm:text-[15px]">
+              Bạn có chắc chắn muốn đăng xuất khỏi EduDiscipline Platform không?
+            </p>
+          </div>
+
+          <div className="mt-6 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
+            <button
+              type="button"
+              onClick={closeLogoutConfirm}
+              disabled={isLoggingOut}
+              className="min-h-11 rounded-[18px] border border-white/70 bg-white/70 px-4 text-sm font-semibold text-slate-700 shadow-[0_10px_24px_rgba(15,23,42,0.06)] transition duration-200 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              Hủy
+            </button>
+            <button
+              type="button"
+              onClick={() => void handleLogout()}
+              disabled={isLoggingOut}
+              className="min-h-11 rounded-[18px] bg-[#2e77df] px-4 text-sm font-semibold text-white shadow-[0_12px_24px_rgba(46,119,223,0.22)] transition duration-200 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {isLoggingOut ? "Đang đăng xuất..." : "Đăng xuất"}
+            </button>
+          </div>
+        </ModalShell>
+      )}
     </>
   )
 }

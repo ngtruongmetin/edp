@@ -1,28 +1,27 @@
-import { useEffect, useMemo, useRef, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { Link } from "react-router-dom"
-import { api } from "../../api/api"
+import toast from "react-hot-toast"
 
+import { api } from "../../api/api"
 import Navbar from "../../components/Navbar"
 import Footer from "../../components/Footer"
-import toast from "react-hot-toast"
+import { getApiErrorMessage } from "../../utils/getApiErrorMessage"
 import { usePageTitle } from "../../utils/usePageTitle"
 
-type Week = {
+type MonthOption = {
   id: number
-  week_number: number
-  start_date: string
-  end_date: string
+  month_key: string
+  name: string
+  semester_name: string
+  school_year_name: string
+  week_ids: number[]
+  closed_at: string | null
 }
 
 export default function AdminMonthSummary() {
   usePageTitle("EDP | Tổng kết tháng")
-  const [weeks, setWeeks] = useState<Week[]>([])
-  const [months, setMonths] = useState<any[]>([])
-  const [selectedMonth, setSelectedMonth] = useState("")
-  const [monthInput, setMonthInput] = useState("")
-  const [monthKey, setMonthKey] = useState<string | null>(null)
-  const [weekIds, setWeekIds] = useState<number[]>([])
-
+  const [months, setMonths] = useState<MonthOption[]>([])
+  const [monthKey, setMonthKey] = useState("")
   const [loading, setLoading] = useState(true)
   const [closedAt, setClosedAt] = useState<string | null>(null)
   const [scoresByGrade, setScoresByGrade] = useState<any>({ 10: [], 11: [], 12: [] })
@@ -36,133 +35,122 @@ export default function AdminMonthSummary() {
   const monthAdjFileRef = useRef<HTMLInputElement | null>(null)
 
   useEffect(() => {
-    boot()
+    void boot()
   }, [])
 
   async function boot() {
     setLoading(true)
     try {
-      const res = await api.get("/schedule/admin")
-      setWeeks(res.data || [])
-      const m = await api.get("/duty/admin/month/list")
-      setMonths(m.data.months || [])
+      const res = await api.get("/duty/admin/month/list")
+      const list: MonthOption[] = res.data.months || []
+      setMonths(list)
+      if (!monthKey && list.length) {
+        setMonthKey(list[0].month_key)
+        setClosedAt(list[0].closed_at || null)
+      }
+    } catch (err) {
+      toast.error(getApiErrorMessage(err, "Không tải được danh sách tháng"))
     } finally {
       setLoading(false)
     }
   }
 
-  function formatDateISO(dateStr: string) {
-    if (!dateStr) return ""
-    const [y, m, d] = dateStr.split("-")
-    return `${d}/${m}/${y}`
-  }
-
-  const weekOptions = useMemo(() => {
-    return weeks.map((w) => ({
-      id: w.id,
-      label: `Tuần ${w.week_number} (${formatDateISO(w.start_date)} - ${formatDateISO(w.end_date)})`,
-    }))
-  }, [weeks])
-
-  function toggleWeek(id: number) {
-    setWeekIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]))
+  function selectedMonth() {
+    return months.find((item) => item.month_key === monthKey) || null
   }
 
   async function preview() {
-    if (!monthInput.trim()) {
-      toast.error("Nhập tháng (mm/yyyy)")
+    if (!monthKey) {
+      toast.error("Chọn tháng")
       return
     }
     setLoading(true)
     try {
-      const payload: any = { month_key: monthInput.trim() }
-      if (weekIds.length) payload.week_ids = weekIds
-      const res = await api.post("/duty/admin/month/preview", payload)
-      setMonthKey(res.data.month_key)
+      const res = await api.post("/duty/admin/month/preview", { month_key: monthKey })
       setClosedAt(res.data.closed_at || null)
       setScoresByGrade(res.data.scores_by_grade || { 10: [], 11: [], 12: [] })
+    } catch (err) {
+      toast.error(getApiErrorMessage(err, "Không tải được kết quả tháng"))
     } finally {
       setLoading(false)
     }
   }
 
-  async function saveMonth() {
-    if (!monthInput.trim()) {
-      toast.error("Nhập tháng (mm/yyyy)")
-      return
-    }
-    if (weekIds.length === 0) {
-      toast.error("Chọn ít nhất 1 tuần")
-      return
-    }
-    await api.post("/duty/admin/month/save", {
-      month_key: monthInput.trim(),
-      week_ids: weekIds,
-    })
-    toast.success("Đã lưu tháng")
-    const m = await api.get("/duty/admin/month/list")
-    setMonths(m.data.months || [])
-  }
-
   async function closeMonth() {
-    if (!monthInput.trim()) return
+    if (!monthKey) return
     if (!confirm("Tổng kết tháng và khóa chỉnh sửa?")) return
-    const payload: any = { month_key: monthInput.trim() }
-    if (weekIds.length) payload.week_ids = weekIds
-    await api.post("/duty/admin/month/close", payload)
-    await preview()
+    try {
+      await api.post("/duty/admin/month/close", { month_key: monthKey })
+      toast.success("Đã tổng kết tháng")
+      await preview()
+      await boot()
+    } catch (err) {
+      toast.error(getApiErrorMessage(err, "Không thể tổng kết tháng"))
+    }
   }
 
   async function reopenMonth() {
-    if (!monthInput.trim()) return
+    if (!monthKey) return
     if (!confirm("Mở khóa tháng này?")) return
-    await api.post("/duty/admin/month/reopen", { month_key: monthInput.trim() })
-    await preview()
+    try {
+      await api.post("/duty/admin/month/reopen", { month_key: monthKey })
+      toast.success("Đã mở khóa tháng")
+      await preview()
+      await boot()
+    } catch (err) {
+      toast.error(getApiErrorMessage(err, "Không thể mở khóa tháng"))
+    }
   }
 
   async function exportExcel() {
-    const key = monthKey || monthInput.trim()
-    if (!key) return
-    const res = await api.get(`/duty/admin/month/${encodeURIComponent(key)}/export`, {
-      responseType: "blob",
-    })
-    const blob = new Blob([res.data], {
-      type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-    })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement("a")
-    a.href = url
-    a.download = `ket_qua_thi_dua_thang_${key}.xlsx`
-    document.body.appendChild(a)
-    a.click()
-    a.remove()
-    URL.revokeObjectURL(url)
+    if (!monthKey) return
+    try {
+      const res = await api.get(`/duty/admin/month/${encodeURIComponent(monthKey)}/export`, {
+        responseType: "blob",
+      })
+      const blob = new Blob([res.data], {
+        type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      })
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement("a")
+      a.href = url
+      a.download = `ket_qua_thi_dua_thang_${monthKey.replace(/[\\/]/g, "-")}.xlsx`
+      document.body.appendChild(a)
+      a.click()
+      a.remove()
+      URL.revokeObjectURL(url)
+    } catch (err) {
+      toast.error(getApiErrorMessage(err, "Không tải được file Excel"))
+    }
   }
 
   async function openDetail(className: string) {
-    const key = monthKey || monthInput.trim()
-    if (!key) return
+    if (!monthKey) return
     setDetailClass(className)
     setDetail(null)
-    const res = await api.get(
-      `/duty/admin/month/${encodeURIComponent(key)}/class/${encodeURIComponent(className)}/breakdown`,
-    )
-    setDetail(res.data)
-    const delta =
-      Number(res.data?.breakdown?.adjust_plus || 0) - Number(res.data?.breakdown?.adjust_minus || 0)
-    setAdjDelta(String(delta))
-    setAdjReason(String(res.data?.breakdown?.adjust_reason ?? ""))
+    try {
+      const res = await api.get(
+        `/duty/admin/month/${encodeURIComponent(monthKey)}/class/${encodeURIComponent(className)}/breakdown`,
+      )
+      setDetail(res.data)
+      const delta =
+        Number(res.data?.breakdown?.adjust_plus || 0) -
+        Number(res.data?.breakdown?.adjust_minus || 0)
+      setAdjDelta(String(delta))
+      setAdjReason(String(res.data?.breakdown?.adjust_reason ?? ""))
+    } catch (err) {
+      setDetailClass(null)
+      toast.error(getApiErrorMessage(err, "Không tải được chi tiết lớp"))
+    }
   }
 
   async function saveAdjustment() {
-    if (!detailClass) return
-    const key = monthKey || monthInput.trim()
-    if (!key) return
+    if (!detailClass || !monthKey) return
     setSavingAdj(true)
     try {
       const delta = Number(adjDelta || 0)
       await api.post("/duty/admin/month/adjustment", {
-        month_key: key,
+        month_key: monthKey,
         class_name: detailClass,
         plus_points: delta > 0 ? delta : 0,
         minus_points: delta < 0 ? -delta : 0,
@@ -171,15 +159,36 @@ export default function AdminMonthSummary() {
       toast.success("Đã lưu")
       await preview()
       await openDetail(detailClass)
+    } catch (err) {
+      toast.error(getApiErrorMessage(err, "Không thể lưu điều chỉnh"))
+    } finally {
+      setSavingAdj(false)
+    }
+  }
+
+  async function deleteAdjustment() {
+    if (!detailClass || !monthKey) return
+    if (!confirm("Xóa điểm cộng/trừ của lớp này?")) return
+    setSavingAdj(true)
+    try {
+      await api.delete("/duty/admin/month/adjustment", {
+        data: { month_key: monthKey, class_name: detailClass },
+      })
+      setAdjDelta("0")
+      setAdjReason("")
+      toast.success("Đã xóa")
+      await preview()
+      await openDetail(detailClass)
+    } catch (err) {
+      toast.error(getApiErrorMessage(err, "Không thể xóa điều chỉnh"))
     } finally {
       setSavingAdj(false)
     }
   }
 
   async function uploadMonthAdjustmentFile(file: File) {
-    const key = monthKey || monthInput.trim()
-    if (!key) {
-      toast.error("Nhập/chọn tháng trước")
+    if (!monthKey) {
+      toast.error("Chọn tháng trước")
       return
     }
     setUploadingMonthAdj(true)
@@ -192,7 +201,7 @@ export default function AdminMonthSummary() {
       })
       const base64 = dataUrl.includes(",") ? dataUrl.split(",")[1] : dataUrl
       const res = await api.post("/duty/admin/month/adjustment/upload", {
-        month_key: key,
+        month_key: monthKey,
         file_name: file.name,
         file_data: base64,
       })
@@ -207,6 +216,29 @@ export default function AdminMonthSummary() {
       if (monthAdjFileRef.current) monthAdjFileRef.current.value = ""
     }
   }
+
+  async function downloadAdjustmentTemplate() {
+    try {
+      const res = await api.get("/duty/admin/month/adjustment/template", {
+        responseType: "blob",
+      })
+      const blob = new Blob([res.data], {
+        type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      })
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement("a")
+      a.href = url
+      a.download = "template_month_adjustments.xlsx"
+      document.body.appendChild(a)
+      a.click()
+      a.remove()
+      URL.revokeObjectURL(url)
+    } catch (err: any) {
+      toast.error(err?.response?.data?.error || "Không tải được file mẫu")
+    }
+  }
+
+  const currentMonth = selectedMonth()
 
   return (
     <div className="min-h-screen flex flex-col bg-[radial-gradient(circle_at_top,#edf5ff_0%,#f8fbff_34%,#f3f6fb_100%)]">
@@ -226,48 +258,29 @@ export default function AdminMonthSummary() {
             <div className="min-w-0">
               <div className="text-xl font-semibold text-gray-900">Tổng kết tháng</div>
               <div className="mt-1 text-sm text-gray-600">
-                Nhập tháng (mm/yyyy), chọn tuần, thêm điểm cộng trừ riêng theo tháng rồi khóa và xuất Excel.
+                Chọn tháng đã tạo trong quản lý lịch trực. Hệ thống tự lấy toàn bộ tuần thuộc tháng.
               </div>
-              {closedAt ? (
-                <div className="mt-1 text-xs text-gray-500">Đã tổng kết: {closedAt}</div>
-              ) : null}
+              {closedAt ? <div className="mt-1 text-xs text-gray-500">Đã tổng kết: {closedAt}</div> : null}
             </div>
 
-            <div className="lg:ml-auto grid grid-cols-1 sm:grid-cols-3 gap-3 w-full lg:w-auto">
+            <div className="lg:ml-auto w-full lg:w-80">
               <select
-                value={selectedMonth}
+                value={monthKey}
                 onChange={(e) => {
                   const key = e.target.value
-                  setSelectedMonth(key)
-                  const m = months.find((x: any) => x.month_key === key)
-                  if (m) {
-                    setMonthInput(m.month_key)
-                    setWeekIds(m.week_ids || [])
-                    setMonthKey(m.month_key)
-                    setClosedAt(m.closed_at || null)
-                  }
+                  setMonthKey(key)
+                  const month = months.find((item) => item.month_key === key)
+                  setClosedAt(month?.closed_at || null)
                 }}
-                className="rounded-2xl border border-blue-100 px-4 py-2.5 text-sm shadow-sm outline-none focus:border-[#2e77df]"
+                className="w-full rounded-2xl border border-blue-100 px-4 py-2.5 text-sm shadow-sm outline-none focus:border-[#2e77df]"
               >
                 <option value="">Chọn tháng</option>
-                {months.map((m: any) => (
-                  <option key={m.month_key} value={m.month_key}>
-                    Tháng {m.month_key}
+                {months.map((month) => (
+                  <option key={month.month_key} value={month.month_key}>
+                    {month.name} ({month.month_key}) - {month.semester_name}, {month.school_year_name}
                   </option>
                 ))}
               </select>
-              <input
-                value={monthInput}
-                onChange={(e) => setMonthInput(e.target.value)}
-                placeholder="mm/yyyy"
-                className="rounded-2xl border border-blue-100 px-4 py-2.5 text-sm shadow-sm outline-none focus:border-[#2e77df]"
-              />
-              <button
-                onClick={saveMonth}
-                className="rounded-2xl bg-white px-4 py-2.5 text-sm font-semibold text-gray-900 shadow-sm ring-1 ring-blue-50"
-              >
-                Lưu tháng
-              </button>
             </div>
           </div>
 
@@ -280,14 +293,20 @@ export default function AdminMonthSummary() {
             </button>
             <button
               onClick={() => monthAdjFileRef.current?.click()}
-              disabled={!monthInput.trim() || !!closedAt || uploadingMonthAdj}
+              disabled={!monthKey || !!closedAt || uploadingMonthAdj}
               className="rounded-2xl bg-white px-4 py-2.5 text-sm font-semibold text-gray-900 shadow-sm ring-1 ring-blue-50 disabled:opacity-50"
             >
               {uploadingMonthAdj ? "Đang nhập..." : "Nhập Excel cộng/trừ"}
             </button>
             <button
+              onClick={() => void downloadAdjustmentTemplate()}
+              className="rounded-2xl bg-white px-4 py-2.5 text-sm font-semibold text-gray-900 shadow-sm ring-1 ring-blue-50"
+            >
+              Tải file mẫu
+            </button>
+            <button
               onClick={exportExcel}
-              disabled={!monthInput.trim()}
+              disabled={!monthKey}
               className="rounded-2xl bg-white px-4 py-2.5 text-sm font-semibold text-gray-900 shadow-sm ring-1 ring-blue-50 disabled:opacity-50"
             >
               Xuất Excel
@@ -299,52 +318,28 @@ export default function AdminMonthSummary() {
               className="hidden"
               onChange={(e) => {
                 const file = e.target.files?.[0]
-                if (file) uploadMonthAdjustmentFile(file)
+                if (file) void uploadMonthAdjustmentFile(file)
               }}
             />
           </div>
 
-          <div className="mt-4 grid grid-cols-1 lg:grid-cols-2 gap-4">
-            <div className="rounded-2xl bg-slate-50 p-4">
-              <div className="text-sm font-semibold text-gray-900">Chọn tuần</div>
-              <div className="mt-2 max-h-56 overflow-y-auto space-y-2">
-                {weekOptions.map((w) => (
-                  <label
-                    key={w.id}
-                    className="flex items-center gap-2 rounded-xl bg-white px-3 py-2 ring-1 ring-blue-50"
-                  >
-                    <input
-                      type="checkbox"
-                      checked={weekIds.includes(w.id)}
-                      onChange={() => toggleWeek(w.id)}
-                    />
-                    <span className="text-sm text-gray-800">{w.label}</span>
-                  </label>
-                ))}
-                {weekOptions.length === 0 ? (
-                  <div className="text-sm text-gray-600">Chưa có tuần.</div>
-                ) : null}
-              </div>
-            </div>
-
-            <div className="rounded-2xl bg-slate-50 p-4 flex flex-wrap gap-3 items-center">
-              <button
-                onClick={closeMonth}
-                disabled={!!closedAt || !monthInput.trim()}
-                className="rounded-2xl bg-emerald-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm disabled:opacity-50"
-              >
-                Tổng kết & khóa
-              </button>
-              <button
-                onClick={reopenMonth}
-                disabled={!closedAt || !monthInput.trim()}
-                className="rounded-2xl bg-white px-4 py-2.5 text-sm font-semibold text-gray-900 shadow-sm ring-1 ring-blue-50 disabled:opacity-50"
-              >
-                Mở khóa
-              </button>
-              <div className="text-xs text-gray-600 ml-auto">
-                {weekIds.length} tuần được chọn
-              </div>
+          <div className="mt-4 rounded-2xl bg-slate-50 p-4 flex flex-wrap gap-3 items-center">
+            <button
+              onClick={closeMonth}
+              disabled={!!closedAt || !monthKey}
+              className="rounded-2xl bg-emerald-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm disabled:opacity-50"
+            >
+              Tổng kết & khóa
+            </button>
+            <button
+              onClick={reopenMonth}
+              disabled={!closedAt || !monthKey}
+              className="rounded-2xl bg-white px-4 py-2.5 text-sm font-semibold text-gray-900 shadow-sm ring-1 ring-blue-50 disabled:opacity-50"
+            >
+              Mở khóa
+            </button>
+            <div className="text-xs text-gray-600 ml-auto">
+              {currentMonth ? `${currentMonth.week_ids.length} tuần thuộc tháng` : "Chưa chọn tháng"}
             </div>
           </div>
         </div>
@@ -356,39 +351,30 @@ export default function AdminMonthSummary() {
         ) : (
           <div className="space-y-4">
             {([10, 11, 12] as const).map((g) => (
-              <div
-                key={g}
-                className="edp-glass-panel rounded-[32px] p-0 overflow-hidden"
-              >
+              <div key={g} className="edp-glass-panel rounded-[32px] p-0 overflow-hidden">
                 <div className="px-5 py-4 flex items-center">
                   <div className="text-sm font-semibold text-gray-900">Khối {g}</div>
-                  <div className="ml-auto text-xs text-gray-500">
-                    {(scoresByGrade?.[g] || []).length} lớp
-                  </div>
+                  <div className="ml-auto text-xs text-gray-500">{(scoresByGrade?.[g] || []).length} lớp</div>
                 </div>
                 <div className="divide-y divide-blue-50">
-                  {(scoresByGrade?.[g] || []).map((r: any) => (
+                  {(scoresByGrade?.[g] || []).map((r: any, idx: number) => (
                     <button
                       key={r.class_name}
-                      onClick={() => openDetail(r.class_name)}
+                      onClick={() => void openDetail(r.class_name)}
                       className="w-full px-5 py-4 flex items-center text-left hover:bg-slate-50 transition"
                     >
                       <div className="w-10 text-sm font-semibold text-gray-500">
-                        #{r.rank ?? "-"}
+                        #{Number(r.rank || 0) > 0 ? r.rank : idx + 1}
                       </div>
                       <div className="min-w-0 flex-1">
                         <div className="text-[15px] font-semibold text-gray-900">{r.class_name}</div>
-                        {r.note ? (
-                          <div className="text-xs font-semibold text-amber-700">{r.note}</div>
-                        ) : null}
+                        {r.note ? <div className="text-xs font-semibold text-amber-700">{r.note}</div> : null}
                       </div>
                       <div className="text-lg font-semibold text-gray-900">{r.total_score}</div>
                     </button>
                   ))}
                   {(scoresByGrade?.[g] || []).length === 0 ? (
-                    <div className="px-5 py-6 text-sm text-gray-600">
-                      Chưa có dữ liệu.
-                    </div>
+                    <div className="px-5 py-6 text-sm text-gray-600">Chưa có dữ liệu.</div>
                   ) : null}
                 </div>
               </div>
@@ -407,9 +393,7 @@ export default function AdminMonthSummary() {
             />
             <div className="absolute inset-x-0 bottom-0 mx-auto w-full max-w-md rounded-t-3xl bg-white p-5 shadow-2xl md:left-1/2 md:top-1/2 md:bottom-auto md:inset-x-auto md:-translate-x-1/2 md:-translate-y-1/2 md:max-w-xl md:rounded-3xl">
               <div className="flex items-center gap-2">
-                <div className="text-base font-semibold text-gray-900">
-                  Chi tiết điểm: {detailClass}
-                </div>
+                <div className="text-base font-semibold text-gray-900">Chi tiết điểm: {detailClass}</div>
                 <button
                   className="ml-auto rounded-full bg-gray-100 px-3 py-1 text-xs font-semibold text-gray-700"
                   onClick={() => {
@@ -443,9 +427,7 @@ export default function AdminMonthSummary() {
                       <div className="text-[11px] text-gray-500">Cộng, trừ tháng</div>
                       <div
                         className={`mt-0.5 text-lg font-semibold ${
-                          Number(detail.breakdown?.month_adjust_points || 0) >= 0
-                            ? "text-[#2e77df]"
-                            : "text-red-600"
+                          Number(detail.breakdown?.month_adjust_points || 0) >= 0 ? "text-[#2e77df]" : "text-red-600"
                         }`}
                       >
                         {Number(detail.breakdown?.month_adjust_points || 0)}
@@ -460,9 +442,7 @@ export default function AdminMonthSummary() {
                   </div>
 
                   <div className="rounded-2xl bg-slate-50 p-4">
-                    <div className="text-sm font-semibold text-gray-900">
-                      Điều chỉnh thêm theo tháng
-                    </div>
+                    <div className="text-sm font-semibold text-gray-900">Điều chỉnh thêm theo tháng</div>
                     <div className="mt-3">
                       <div className="text-[11px] text-gray-500">Cộng, trừ tháng (nhập số âm nếu trừ)</div>
                       <input
@@ -485,6 +465,13 @@ export default function AdminMonthSummary() {
                       className="mt-3 w-full rounded-2xl bg-[#2e77df] px-4 py-2.5 text-sm font-semibold text-white shadow-sm disabled:opacity-50"
                     >
                       {closedAt ? "Tháng đã khóa" : savingAdj ? "Đang lưu..." : "Lưu"}
+                    </button>
+                    <button
+                      onClick={() => void deleteAdjustment()}
+                      disabled={savingAdj || !!closedAt}
+                      className="mt-2 w-full rounded-2xl bg-white px-4 py-2.5 text-sm font-semibold text-red-600 shadow-sm ring-1 ring-red-100 disabled:opacity-50"
+                    >
+                      Xóa điều chỉnh
                     </button>
                   </div>
                 </div>

@@ -18,7 +18,7 @@ function isWeekClosed(weekId, cb) {
     [weekId],
     (err, row) => {
       if (err) return cb(err)
-      cb(null, !!row, row?.closed_at || null)
+      cb(null, !!row?.closed_at, row?.closed_at || null)
     },
   )
 }
@@ -108,6 +108,13 @@ function formatDateVN(iso) {
 function cell(sheet, addr) {
   const c = sheet[addr]
   return c ? c.v : null
+}
+
+async function sendExcelTemplate(res, workbook, fileName) {
+  const buffer = await workbook.xlsx.writeBuffer()
+  res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+  res.setHeader("Content-Disposition", `attachment; filename="${fileName}"`)
+  res.send(Buffer.from(buffer))
 }
 
 function parseSoDauBaiBuffer(buf) {
@@ -286,6 +293,71 @@ router.post(
       days: out.days,
       file_all_above_9: out.file_all_above_9,
     })
+  },
+)
+
+router.get(
+  "/admin/timetable/template",
+  requireLogin,
+  requireRole(["admin"]),
+  async (req, res) => {
+    try {
+      const workbook = new ExcelJS.Workbook()
+      const sheet = workbook.addWorksheet("Timetable")
+      sheet.getCell("A1").value = "Template thoi khoa bieu"
+      sheet.getCell("I5").value = "01/09/2026"
+      sheet.getRow(9).values = ["Lop", "Buoi", "Tiet", "Thu 2", "Thu 3", "Thu 4", "Thu 5", "Thu 6", "Thu 7"]
+      sheet.getRow(10).values = ["10A1", "Sang", 1, "Toan", "Van", "Anh", "Ly", "Hoa", "Sinh"]
+      sheet.getRow(11).values = ["10A1", "Sang", 2, "Van", "Toan", "Ly", "Hoa", "Sinh", "Anh"]
+      sheet.getRow(12).values = ["10A1", "Chieu", 1, "Tin", "Su", "Dia", "GDCD", "Cong nghe", "Sinh hoat"]
+      sheet.columns = [
+        { width: 14 },
+        { width: 14 },
+        { width: 10 },
+        { width: 18 },
+        { width: 18 },
+        { width: 18 },
+        { width: 18 },
+        { width: 18 },
+        { width: 18 },
+      ]
+      await sendExcelTemplate(res, workbook, "template_timetable.xlsx")
+    } catch (err) {
+      res.status(500).json({ error: err?.message || "Cannot create template" })
+    }
+  },
+)
+
+router.get(
+  "/admin/so-dau-bai/template",
+  requireLogin,
+  requireRole(["admin"]),
+  async (req, res) => {
+    try {
+      const workbook = new ExcelJS.Workbook()
+      const sheet = workbook.addWorksheet("So dau bai")
+      sheet.getCell("A1").value = "Template so dau bai dien tu"
+      sheet.getCell("K20").value = "Lop: 10A1"
+      sheet.getCell("A25").value = "02/09/2026"
+      sheet.getCell("C25").value = "Sang"
+      sheet.getCell("D25").value = 1
+      sheet.getCell("E25").value = "Toan"
+      sheet.getCell("U25").value = 9.5
+      sheet.getCell("C26").value = "Sang"
+      sheet.getCell("D26").value = 2
+      sheet.getCell("E26").value = "Van"
+      sheet.getCell("U26").value = 10
+      sheet.getCell("C27").value = "Chieu"
+      sheet.getCell("D27").value = 1
+      sheet.getCell("E27").value = "Anh"
+      sheet.getCell("U27").value = 9
+      sheet.getColumn("A").width = 16
+      sheet.getColumn("K").width = 16
+      sheet.getColumn("U").width = 12
+      await sendExcelTemplate(res, workbook, "template_so_dau_bai.xlsx")
+    } catch (err) {
+      res.status(500).json({ error: err?.message || "Cannot create template" })
+    }
   },
 )
 
@@ -1034,6 +1106,10 @@ router.post(
         if (err) return res.status(500).json({ error: err.message })
         if (!week) return res.status(404).json({ error: "Week not found" })
 
+        isWeekClosed(weekId, (lockErr, closed) => {
+          if (lockErr) return res.status(500).json({ error: lockErr.message })
+          if (closed) return res.status(403).json({ error: "Week closed" })
+
         if (!(week.start_date <= date && date <= week.end_date)) {
           return res.status(400).json({ error: "Date out of week" })
         }
@@ -1154,6 +1230,7 @@ router.post(
             finalizeWeeklyBonus()
           },
         )
+        })
       },
     )
   },
@@ -1423,24 +1500,29 @@ router.post(
       return res.status(400).json({ error: "Missing fields" })
     }
 
-    const now = time.now()
-    db.run(
-      `
-        INSERT INTO weekly_bonus
-        (week_id,class_name,points,reason,created_at,updated_at)
-        VALUES(?,?,?,?,?,?)
-        ON CONFLICT(week_id,class_name)
-        DO UPDATE SET
-          points=excluded.points,
-          reason=excluded.reason,
-          updated_at=excluded.updated_at
-      `,
-      [weekId, className, points, reason, now, now],
-      (err) => {
-        if (err) return res.status(500).json({ error: err.message })
-        res.json({ success: true })
-      },
-    )
+    isWeekClosed(weekId, (lockErr, closed) => {
+      if (lockErr) return res.status(500).json({ error: lockErr.message })
+      if (closed) return res.status(403).json({ error: "Week closed" })
+
+      const now = time.now()
+      db.run(
+        `
+          INSERT INTO weekly_bonus
+          (week_id,class_name,points,reason,created_at,updated_at)
+          VALUES(?,?,?,?,?,?)
+          ON CONFLICT(week_id,class_name)
+          DO UPDATE SET
+            points=excluded.points,
+            reason=excluded.reason,
+            updated_at=excluded.updated_at
+        `,
+        [weekId, className, points, reason, now, now],
+        (err) => {
+          if (err) return res.status(500).json({ error: err.message })
+          res.json({ success: true })
+        },
+      )
+    })
   },
 )
 

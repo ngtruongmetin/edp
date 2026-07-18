@@ -140,6 +140,8 @@ export default function AdminSystemSettings() {
   const [modelOptions, setModelOptions] = useState<string[]>([])
   const [temperature, setTemperature] = useState("0")
   const [baseScore, setBaseScore] = useState("100")
+  const [schoolYear, setSchoolYear] = useState("2026-2027")
+  const [useElectronicGradebook, setUseElectronicGradebook] = useState("1")
   const [lastTestFingerprint, setLastTestFingerprint] = useState("")
   const [testPassed, setTestPassed] = useState(false)
 
@@ -193,6 +195,8 @@ export default function AdminSystemSettings() {
       ])
 
       setBaseScore(settingsRes.data.settings.base_score?.value || "100")
+      setSchoolYear(settingsRes.data.settings.school_year?.value || "2026-2027")
+      setUseElectronicGradebook(settingsRes.data.settings.use_electronic_gradebook?.value === "0" ? "0" : "1")
       applyAiConfig(aiRes.data.config)
     } catch (err: any) {
       console.error(err)
@@ -372,10 +376,14 @@ export default function AdminSystemSettings() {
       const res = await api.put<SettingsResponse>("/system-settings", {
         settings: {
           base_score: Number(baseScore),
+          school_year: schoolYear.trim(),
+          use_electronic_gradebook: useElectronicGradebook,
         },
       })
 
       setBaseScore(res.data.settings.base_score?.value || baseScore)
+      setSchoolYear(res.data.settings.school_year?.value || schoolYear)
+      setUseElectronicGradebook(res.data.settings.use_electronic_gradebook?.value === "0" ? "0" : "1")
       setNotice("Đã lưu cấu hình hệ thống.")
       return true
     } catch (err: any) {
@@ -599,6 +607,20 @@ export default function AdminSystemSettings() {
 
           <div className="grid gap-5 lg:grid-cols-2">
             <label className="space-y-2">
+              <span className="text-sm font-semibold text-slate-900">Năm học đang dùng</span>
+              <input
+                type="text"
+                value={schoolYear}
+                onChange={(e) => setSchoolYear(e.target.value)}
+                className="w-full rounded-2xl border border-blue-100 bg-white px-4 py-3 text-sm outline-none focus:border-[#2e77df]"
+                placeholder="2026-2027"
+              />
+              <div className="text-xs text-slate-500">
+                Một database dùng một năm học. Học kỳ, tháng và tuần mới sẽ mặc định thuộc năm học này.
+              </div>
+            </label>
+
+            <label className="space-y-2">
               <span className="text-sm font-semibold text-slate-900">Điểm gốc mỗi lớp</span>
               <input
                 type="number"
@@ -610,6 +632,21 @@ export default function AdminSystemSettings() {
               />
               <div className="text-xs text-slate-500">
                 Là số điểm mặc định của mỗi lớp khi bắt đầu tuần thi đua.
+              </div>
+            </label>
+
+            <label className="space-y-2">
+              <span className="text-sm font-semibold text-slate-900">Áp dụng sổ đầu bài điện tử</span>
+              <select
+                value={useElectronicGradebook}
+                onChange={(e) => setUseElectronicGradebook(e.target.value)}
+                className="w-full rounded-2xl border border-blue-100 bg-white px-4 py-3 text-sm outline-none focus:border-[#2e77df]"
+              >
+                <option value="1">Có</option>
+                <option value="0">Không</option>
+              </select>
+              <div className="text-xs text-slate-500">
+                Nếu chọn Không, tổng kết tuần sẽ không bắt buộc upload đủ Excel sổ đầu bài khối 10, 11, 12.
               </div>
             </label>
           </div>

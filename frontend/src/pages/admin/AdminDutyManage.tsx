@@ -48,6 +48,7 @@ export default function AdminDutyManage() {
   const [uploadGrade, setUploadGrade] = useState("10")
   const [uploadFiles, setUploadFiles] = useState<File[]>([])
   const [uploading, setUploading] = useState(false)
+  const [useElectronicGradebook, setUseElectronicGradebook] = useState(true)
   const [uploadStatus, setUploadStatus] = useState<Record<
     string,
     { upload_count: number; last_uploaded: string | null }
@@ -133,6 +134,9 @@ export default function AdminDutyManage() {
   async function boot() {
     setLoading(true)
     try {
+      const settings = await api.get("/system-settings")
+      setUseElectronicGradebook(settings.data?.settings?.use_electronic_gradebook?.value !== "0")
+
       const w = await api.get("/schedule/admin")
       const weekList: Week[] = w.data || []
       setWeeks(weekList)
@@ -186,14 +190,14 @@ export default function AdminDutyManage() {
   async function load(id: number, d: string, g: string) {
     setLoading(true)
     try {
-      const res = await api.get("/duty/admin/query", {
-        params: {
-          week_id: id,
-          date: d || undefined,
-          grade: g || undefined,
-        },
+      const res = await api.get(`/duty/admin/week/${id}`)
+      const rows: SessionRow[] = res.data.sessions || []
+      const filtered = rows.filter((s) => {
+        if (d && s.date !== d) return false
+        if (g && parseClassName(String(s.red_class || "")).g !== Number(g)) return false
+        return true
       })
-      setSessions(res.data.sessions || [])
+      setSessions(filtered)
     } finally {
       setLoading(false)
     }
@@ -413,6 +417,27 @@ export default function AdminDutyManage() {
       })
   }
 
+  async function downloadSdbTemplate() {
+    try {
+      const res = await api.get("/bonus/admin/so-dau-bai/template", {
+        responseType: "blob",
+      })
+      const blob = new Blob([res.data], {
+        type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      })
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement("a")
+      a.href = url
+      a.download = "template_so_dau_bai.xlsx"
+      document.body.appendChild(a)
+      a.click()
+      a.remove()
+      URL.revokeObjectURL(url)
+    } catch (err: any) {
+      alert(err?.response?.data?.error || "Không tải được file mẫu")
+    }
+  }
+
   async function saveBonusPeriods() {
     if (!detail?.session) return
     const valid = bonusPeriods.filter((p) => Number.isFinite(p.score))
@@ -444,7 +469,7 @@ export default function AdminDutyManage() {
   }
   async function closeWeek() {
     if (!weekId) return
-    if (missingGrades.length > 0) {
+    if (useElectronicGradebook && missingGrades.length > 0) {
       alert(`Chưa upload sổ đầu bài cho khối ${missingGrades.join(", ")}`)
       return
     }
@@ -485,7 +510,7 @@ export default function AdminDutyManage() {
   const missingGrades = ["10", "11", "12"].filter(
     (g) => !(uploadStatus[g]?.upload_count > 0),
   )
-  const canCloseWeek = !!weekId && missingGrades.length === 0
+  const canCloseWeek = !!weekId && (!useElectronicGradebook || missingGrades.length === 0)
 
   function enumerateWeekDays(w: Week | null) {
     if (!w?.start_date || !w?.end_date) return []
@@ -711,7 +736,7 @@ export default function AdminDutyManage() {
             <div className="text-sm font-semibold text-gray-900">
               Upload sổ đầu bài theo khối (file .zip)
             </div>
-            <div className="mt-2 grid grid-cols-1 lg:grid-cols-[140px_1fr_160px] gap-3">
+            <div className="mt-2 grid grid-cols-1 lg:grid-cols-[140px_1fr_160px_160px] gap-3">
               <select
                 value={uploadGrade}
                 onChange={(e) => setUploadGrade(e.target.value)}
@@ -750,6 +775,12 @@ export default function AdminDutyManage() {
                 className="rounded-2xl bg-[#2e77df] px-4 py-2.5 text-sm font-semibold text-white shadow-sm disabled:opacity-50"
               >
                 {uploading ? "Đang tải lên..." : "Tải tệp zip"}
+              </button>
+              <button
+                onClick={() => void downloadSdbTemplate()}
+                className="rounded-2xl bg-white px-4 py-2.5 text-sm font-semibold text-gray-900 shadow-sm ring-1 ring-blue-50"
+              >
+                Tải file mẫu
               </button>
             </div>
 

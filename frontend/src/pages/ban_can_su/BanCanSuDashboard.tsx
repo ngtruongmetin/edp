@@ -6,7 +6,10 @@ import { api } from "../../api/api"
 import { useAuth } from "../../auth/AuthContext"
 import Navbar from "../../components/Navbar"
 import Footer from "../../components/Footer"
+import DutyPeriodSelector, { type DutyPeriodTree } from "../../components/DutyPeriodSelector"
+import DutyPeriodSummaryCard, { type DutyPeriodSummary } from "../../components/DutyPeriodSummaryCard"
 import { formatDutyStatus } from "../../utils/dutyFormat"
+import { getApiErrorMessage } from "../../utils/getApiErrorMessage"
 import { buildDashboardCacheKey, getCachedDashboard, setCachedDashboard } from "../../utils/offlineCache"
 import { usePageTitle } from "../../utils/usePageTitle"
 
@@ -16,6 +19,8 @@ type Week = {
   start_date: string
   end_date: string
   base_points?: number
+  month_key?: string
+  semester_key?: string
 }
 
 type Session = {
@@ -32,10 +37,14 @@ type Session = {
 }
 
 type DashboardSnapshot = {
+  periodTree: DutyPeriodTree | null
   weeks: Week[]
+  semesterKey: string
+  monthKey: string
   weekId: number | null
   week: Week | null
   sessions: Session[]
+  summary: DutyPeriodSummary | null
 }
 
 export default function BanCanSuDashboard() {
@@ -51,10 +60,15 @@ export default function BanCanSuDashboard() {
   const [todayDate, setTodayDate] = useState("")
 
   const [weeks, setWeeks] = useState<Week[]>([])
+  const [periodTree, setPeriodTree] = useState<DutyPeriodTree | null>(null)
+  const [semesterKey, setSemesterKey] = useState("")
+  const [monthKey, setMonthKey] = useState("")
   const [weekId, setWeekId] = useState<number | null>(null)
   const [week, setWeek] = useState<Week | null>(null)
   const [sessions, setSessions] = useState<Session[]>([])
   const [loading, setLoading] = useState(true)
+  const [summary, setSummary] = useState<DutyPeriodSummary | null>(null)
+  const [summaryLoading, setSummaryLoading] = useState(false)
 
   const [detailId, setDetailId] = useState<number | null>(null)
   const [detail, setDetail] = useState<any>(null)
@@ -86,10 +100,14 @@ export default function BanCanSuDashboard() {
           return
         }
 
+        setPeriodTree(cached.periodTree || null)
         setWeeks(cached.weeks || [])
+        setSemesterKey(cached.semesterKey || "")
+        setMonthKey(cached.monthKey || "")
         setWeekId(cached.weekId ?? null)
         setWeek(cached.week || null)
         setSessions(cached.sessions || [])
+        setSummary(cached.summary || null)
       } catch (err) {
         console.error(err)
       } finally {
@@ -108,27 +126,60 @@ export default function BanCanSuDashboard() {
   }, [user?.class_name, isOffline])
 
   useEffect(() => {
-    if (!weekId || isOffline) return
-    loadWeekSessions(weekId)
-  }, [weekId, isOffline])
+    if (isOffline) return
+    if (weekId) {
+      loadWeekSessions(weekId)
+      loadWeekSummary(weekId)
+      return
+    }
+
+    setWeek(null)
+    setSessions([])
+    if (monthKey) {
+      loadPeriodSummary("month", monthKey)
+      return
+    }
+    if (semesterKey) {
+      loadPeriodSummary("semester", semesterKey)
+      return
+    }
+    const yearKey = periodTree?.school_year?.year_key
+    if (yearKey) {
+      loadPeriodSummary("year", yearKey)
+    }
+  }, [weekId, monthKey, semesterKey, periodTree?.school_year?.year_key, isOffline])
 
   useEffect(() => {
-    if (!weeks.length && !week && !sessions.length) return
+    if (!weeks.length && !week && !sessions.length && !summary) return
 
     const cacheKey = buildDashboardCacheKey(authUser)
 
     void setCachedDashboard(cacheKey, {
+      periodTree,
       weeks,
+      semesterKey,
+      monthKey,
       weekId,
       week,
       sessions,
+      summary,
     })
-  }, [authUser, weeks, weekId, week, sessions])
+  }, [authUser, periodTree, weeks, semesterKey, monthKey, weekId, week, sessions, summary])
 
   async function loadWeeks() {
     try {
-      const res = await api.get("/duty/bancansu/weeks")
-      const list: Week[] = res.data.weeks || []
+      const res = await api.get("/duty/bancansu/period-tree")
+      const tree = res.data as DutyPeriodTree
+      const list: Week[] = (tree.semesters || []).flatMap((semester) =>
+        (semester.months || []).flatMap((month) =>
+          (month.weeks || []).map((week) => ({
+            ...week,
+            month_key: month.month_key,
+            semester_key: semester.semester_key,
+          })),
+        ),
+      )
+      setPeriodTree(tree)
       setWeeks(list)
 
       const today = new Date()
@@ -140,11 +191,14 @@ export default function BanCanSuDashboard() {
 
       const current = list.find((w) => w.start_date <= todayIso && todayIso <= w.end_date)
       const defaultWeekId = current?.id ?? list[0]?.id ?? null
+      const defaultWeek = list.find((item) => item.id === defaultWeekId) || null
+      const firstSemester = tree.semesters?.[0] || null
+      setSemesterKey(defaultWeek?.semester_key || firstSemester?.semester_key || "")
+      setMonthKey(defaultWeek?.month_key || "")
       setWeekId(defaultWeekId)
     } catch (err: any) {
       console.error(err)
-      const msg = err?.response?.data?.error || "Không thể tải danh sách tuần"
-      toast.error(msg)
+      toast.error(getApiErrorMessage(err, "Không thể tải cây thời gian"))
     }
   }
 
@@ -167,6 +221,55 @@ export default function BanCanSuDashboard() {
       toast.error(msg)
     } finally {
       setLoading(false)
+    }
+  }
+
+  async function loadWeekSummary(id: number) {
+    try {
+      setSummaryLoading(true)
+      const res = await api.get(`/duty/bancansu/week/${id}/summary`)
+      setSummary(res.data)
+    } catch (err) {
+      toast.error(getApiErrorMessage(err, "Không thể tải tổng kết tuần"))
+      setSummary(null)
+    } finally {
+      setSummaryLoading(false)
+    }
+  }
+
+  async function loadPeriodSummary(type: "month" | "semester" | "year", key: string) {
+    try {
+      setSummaryLoading(true)
+      const res = await api.get(`/duty/bancansu/${type}/${encodeURIComponent(key)}/summary`)
+      setSummary(res.data)
+    } catch (err) {
+      toast.error(getApiErrorMessage(err, "Không thể tải tổng kết"))
+      setSummary(null)
+    } finally {
+      setSummaryLoading(false)
+    }
+  }
+
+  function handleSemesterChange(value: string) {
+    setSemesterKey(value)
+    setMonthKey("")
+    setWeekId(null)
+    setWeek(null)
+    setSessions([])
+  }
+
+  function handleMonthChange(value: string) {
+    setMonthKey(value)
+    setWeekId(null)
+    setWeek(null)
+    setSessions([])
+  }
+
+  function handleWeekChange(value: number | null) {
+    setWeekId(value)
+    if (!value) {
+      setWeek(null)
+      setSessions([])
     }
   }
 
@@ -206,17 +309,16 @@ export default function BanCanSuDashboard() {
   }, [sessions])
 
   const weekScoreStats = useMemo(() => {
-    const signedSessions = sessions.filter((s) => s.status === "signed")
-    const basePoints = Number(week?.base_points || 120)
-    const bonus = signedSessions.reduce((sum, s) => sum + Number(s.bonus_points || 0), 0)
-    const minus = Math.abs(
-      signedSessions.reduce((sum, s) => sum + Number(s.violation_score || 0), 0),
-    )
-    const plus = basePoints + bonus
-    const total = plus - minus
+    const mine = summary?.my_summary
+    return {
+      plus: Number(mine?.plus_points || 0),
+      minus: Number(mine?.minus_points || 0),
+      total: Number(mine?.total_score ?? mine?.score ?? 0),
+    }
+  }, [summary])
 
-    return { plus, minus, total }
-  }, [sessions, week?.base_points])
+  const periodLabel = weekId ? "tuần" : monthKey ? "tháng" : semesterKey ? "học kỳ" : "năm học"
+  const summaryTitle = `Tổng kết ${periodLabel}`
 
   return (
     <div className="min-h-screen flex flex-col bg-slate-50">
@@ -260,98 +362,100 @@ export default function BanCanSuDashboard() {
               </div>
 
               <div className="rounded-2xl bg-white/10 px-3 py-3">
-                <div className="text-xs opacity-80">Tổng điểm tuần</div>
+                <div className="text-xs opacity-80">Tổng điểm {periodLabel}</div>
                 <div className="mt-0.5 text-base font-semibold">
                   {weekScoreStats.total > 0 ? `+${weekScoreStats.total}` : String(weekScoreStats.total)}
                 </div>
               </div>
             </div>
 
-            <div className="mt-3 text-[11px] opacity-80">
-              Phiếu đã ký: {signedCount}/{sessions.length}
-            </div>
+            {weekId ? (
+              <div className="mt-3 text-[11px] opacity-80">
+                Phiếu đã ký: {signedCount}/{sessions.length}
+              </div>
+            ) : null}
           </div>
         </div>
 
-        {week && (
+        <DutyPeriodSelector
+          tree={periodTree}
+          semesterKey={semesterKey}
+          monthKey={monthKey}
+          weekId={weekId}
+          onSemesterChange={handleSemesterChange}
+          onMonthChange={handleMonthChange}
+          onWeekChange={handleWeekChange}
+          formatDate={formatDateVN}
+        />
+
+        {weekId ? (
           <div className="rounded-3xl bg-white p-5 shadow-sm ring-1 ring-blue-50">
-            <div className="text-sm text-gray-600">Chọn tuần</div>
-            <select
-              value={weekId ?? ""}
-              onChange={(e) => setWeekId(Number(e.target.value))}
-              className="mt-2 w-full rounded-2xl border border-blue-100 bg-white px-3 py-2.5 text-sm shadow-sm outline-none focus:border-[#2e77df]"
-            >
-              {weeks.map((w) => (
-                <option key={w.id} value={w.id}>
-                  Tuần {w.week_number} ({formatDateVN(w.start_date)} - {formatDateVN(w.end_date)})
-                </option>
-              ))}
-            </select>
-            <div className="mt-2 text-xs text-gray-500">
-              {formatDateVN(week.start_date)} - {formatDateVN(week.end_date)}
+            <div className="flex items-center gap-3">
+              <div className="text-sm font-semibold text-gray-900">Phiếu trong tuần</div>
+              <div className="ml-auto text-xs text-gray-500">{sessions.length} phiếu</div>
             </div>
-          </div>
-        )}
 
-        <div className="rounded-3xl bg-white p-5 shadow-sm ring-1 ring-blue-50">
-          <div className="flex items-center gap-3">
-            <div className="text-sm font-semibold text-gray-900">Phiếu trong tuần</div>
-            <div className="ml-auto text-xs text-gray-500">{sessions.length} phiếu</div>
-          </div>
-
-          {loading ? (
-            <div className="mt-3 text-sm text-gray-600">Đang tải...</div>
-          ) : sessions.length === 0 ? (
-            <div className="mt-3 text-sm text-gray-600">
-              Chưa có lớp nào trực lớp bạn trong tuần hiện tại.
-            </div>
-          ) : (
-            <div className="mt-3 space-y-2">
-              {sessions.map((s) => (
-                <button
-                  key={s.id}
-                  onClick={() => openDetail(s.id)}
-                  className="w-full rounded-2xl border border-blue-100 bg-white px-4 py-3 text-left shadow-sm hover:bg-slate-50 transition"
-                >
-                  <div className="flex items-start gap-3">
-                    <div className="min-w-0 flex-1">
-                      <div className="text-[15px] font-semibold text-gray-900">
-                        {weekday(s.date)} {formatDateVN(s.date)}: {s.red_class} trực
+            {loading ? (
+              <div className="mt-3 text-sm text-gray-600">Đang tải...</div>
+            ) : sessions.length === 0 ? (
+              <div className="mt-3 text-sm text-gray-600">
+                Chưa có lớp nào trực lớp bạn trong tuần hiện tại.
+              </div>
+            ) : (
+              <div className="mt-3 space-y-2">
+                {sessions.map((s) => (
+                  <button
+                    key={s.id}
+                    onClick={() => openDetail(s.id)}
+                    className="w-full rounded-2xl border border-blue-100 bg-white px-4 py-3 text-left shadow-sm hover:bg-slate-50 transition"
+                  >
+                    <div className="flex items-start gap-3">
+                      <div className="min-w-0 flex-1">
+                        <div className="text-[15px] font-semibold text-gray-900">
+                          {weekday(s.date)} {formatDateVN(s.date)}: {s.red_class} trực
+                        </div>
+                        <div className="mt-0.5 text-xs text-gray-500">
+                          Tổng điểm:{" "}
+                          <span
+                            className={`font-semibold ${Number(s.total_score) >= 0 ? "text-emerald-700" : "text-red-600"}`}
+                          >
+                            {Number(s.total_score) > 0 ? `+${s.total_score}` : String(s.total_score)}
+                          </span>{" "}
+                          | Vi phạm:{" "}
+                          <span className="font-semibold text-gray-700">
+                            {Number(s.violation_score) > 0 ? `+${s.violation_score}` : String(s.violation_score)}
+                          </span>{" "}
+                          | Điểm cộng:{" "}
+                          <span className="font-semibold text-[#2e77df]">
+                            +{s.bonus_points || 0}
+                          </span>
+                        </div>
                       </div>
-                      <div className="mt-0.5 text-xs text-gray-500">
-                        Tổng điểm:{" "}
-                        <span
-                          className={`font-semibold ${Number(s.total_score) >= 0 ? "text-emerald-700" : "text-red-600"}`}
-                        >
-                          {Number(s.total_score) > 0 ? `+${s.total_score}` : String(s.total_score)}
-                        </span>{" "}
-                        | Vi phạm:{" "}
-                        <span className="font-semibold text-gray-700">
-                          {Number(s.violation_score) > 0 ? `+${s.violation_score}` : String(s.violation_score)}
-                        </span>{" "}
-                        | Điểm cộng:{" "}
-                        <span className="font-semibold text-[#2e77df]">
-                          +{s.bonus_points || 0}
-                        </span>
+                      <div className="shrink-0">
+                        {s.status === "signed" ? (
+                          <span className="rounded-full bg-emerald-50 px-2.5 py-1 text-[11px] font-semibold text-emerald-700">
+                            Đã ký
+                          </span>
+                        ) : (
+                          <span className="rounded-full bg-blue-50 px-2.5 py-1 text-[11px] font-semibold text-blue-700">
+                            Nháp
+                          </span>
+                        )}
                       </div>
                     </div>
-                    <div className="shrink-0">
-                      {s.status === "signed" ? (
-                        <span className="rounded-full bg-emerald-50 px-2.5 py-1 text-[11px] font-semibold text-emerald-700">
-                          Đã ký
-                        </span>
-                      ) : (
-                        <span className="rounded-full bg-blue-50 px-2.5 py-1 text-[11px] font-semibold text-blue-700">
-                          Nháp
-                        </span>
-                      )}
-                    </div>
-                  </div>
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        ) : null}
+
+        <DutyPeriodSummaryCard
+          title={summaryTitle}
+          summary={summary}
+          loading={summaryLoading}
+          className={user?.class_name}
+        />
       </div>
 
       <Footer />

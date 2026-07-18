@@ -172,7 +172,7 @@ function isWeekClosed(weekId, cb) {
     [weekId],
     (err, row) => {
       if (err) return cb(err)
-      cb(null, !!row, row?.closed_at || null)
+      cb(null, !!row?.closed_at, row?.closed_at || null)
     },
   )
 }
@@ -418,6 +418,10 @@ function upsertPeriodSummary(table, keyField, key, weekIds, closedAt, cb) {
 }
 
 function loadPeriodSummary(table, keyField, key, cb) {
+  if (table === "month_summaries") return loadMonthSummary(key, cb)
+  if (table === "semester_summaries") return loadSemesterSummary(key, cb)
+  if (table === "year_summaries") return loadYearSummary(key, cb)
+
   db.get(
     `SELECT ${keyField} as period_key, week_ids, closed_at, updated_at FROM ${table} WHERE ${keyField}=? LIMIT 1`,
     [key],
@@ -433,38 +437,405 @@ function loadPeriodSummary(table, keyField, key, cb) {
   )
 }
 
-function loadSemesterSummary(key, cb) {
+async function usesElectronicGradebook() {
+  const raw = await SystemSettingService.get("use_electronic_gradebook", "1")
+  return String(raw || "1") !== "0"
+}
+
+function ensureGradebookUploadsForWeek(weekId, cb) {
+  usesElectronicGradebook()
+    .then((enabled) => {
+      if (!enabled) return cb(null)
+
+      db.all(
+        `
+          SELECT grade, COUNT(*) as upload_count
+          FROM bonus_uploads
+          WHERE week_id=?
+          GROUP BY grade
+        `,
+        [weekId],
+        (err, rows) => {
+          if (err) return cb(err)
+
+          const required = ["10", "11", "12"]
+          const uploaded = new Set((rows || []).map((r) => String(r.grade)))
+          const missing = required.filter((g) => !uploaded.has(g))
+          if (missing.length > 0) {
+            const error = new Error(`Thiếu Sổ đầu bài điện tử cho khối ${missing.join(", ")}`)
+            error.status = 400
+            return cb(error)
+          }
+
+          cb(null)
+      })
+    })
+    .catch((err) => cb(err))
+}
+
+function ensureWeekUnlocked(weekId, cb) {
+  isWeekClosed(weekId, (err, closed) => {
+    if (err) return cb(err)
+    if (closed) {
+      const error = new Error("Week closed")
+      error.status = 403
+      return cb(error)
+    }
+    cb(null)
+  })
+}
+
+function ensureSessionWeekUnlocked(sessionId, cb) {
   db.get(
-    `SELECT semester_key, week_ids, month_keys, closed_at, updated_at FROM semester_summaries WHERE semester_key=? LIMIT 1`,
+    `SELECT id, week_id FROM duty_sessions WHERE id=? LIMIT 1`,
+    [sessionId],
+    (err, session) => {
+      if (err) return cb(err)
+      if (!session) {
+        const error = new Error("Session not found")
+        error.status = 404
+        return cb(error)
+      }
+      ensureWeekUnlocked(session.week_id, (lockErr) => cb(lockErr, session))
+    },
+  )
+}
+
+function ensureAllWeeksClosed(weekIds, cb) {
+  const ids = (weekIds || []).map((id) => Number(id)).filter((id) => Number.isFinite(id) && id > 0)
+  if (!ids.length) return cb(null)
+
+  const placeholders = ids.map(() => "?").join(",")
+  db.all(
+    `
+      SELECT w.id, w.week_number
+      FROM schedule_weeks w
+      LEFT JOIN week_closings wc
+        ON wc.week_id = w.id
+      WHERE w.id IN (${placeholders})
+        AND wc.closed_at IS NULL
+      ORDER BY w.week_number ASC, w.id ASC
+    `,
+    ids,
+    (err, rows) => {
+      if (err) return cb(err)
+      if ((rows || []).length > 0) {
+        const labels = rows.map((r) => r.week_number || r.id).join(", ")
+        const error = new Error(`Con tuan chua khoa: ${labels}`)
+        error.status = 409
+        return cb(error)
+      }
+      cb(null)
+    },
+  )
+}
+
+function ensureAllMonthsClosed(monthKeys, cb) {
+  const keys = (monthKeys || []).map(String).filter(Boolean)
+  if (!keys.length) return cb(null)
+
+  const placeholders = keys.map(() => "?").join(",")
+  db.all(
+    `
+      SELECT m.month_key
+      FROM months m
+      LEFT JOIN month_summaries ms
+        ON ms.month_key = m.month_key
+      WHERE m.month_key IN (${placeholders})
+        AND ms.closed_at IS NULL
+      ORDER BY ${monthOrderSql("m")} ASC, m.id ASC
+    `,
+    keys,
+    (err, rows) => {
+      if (err) return cb(err)
+      if ((rows || []).length > 0) {
+        const labels = rows.map((r) => r.month_key).join(", ")
+        const error = new Error(`Con thang chua khoa: ${labels}`)
+        error.status = 409
+        return cb(error)
+      }
+      cb(null)
+    },
+  )
+}
+
+function ensureAllSemestersClosed(semesterKeys, cb) {
+  const keys = (semesterKeys || []).map(String).filter(Boolean)
+  if (!keys.length) return cb(null)
+
+  const placeholders = keys.map(() => "?").join(",")
+  db.all(
+    `
+      SELECT (y.name || '-HK' || s.semester_number) as semester_key
+      FROM semesters s
+      JOIN school_years y
+        ON y.id = s.school_year_id
+      LEFT JOIN semester_summaries ss
+        ON ss.semester_key = (y.name || '-HK' || s.semester_number)
+      WHERE (y.name || '-HK' || s.semester_number) IN (${placeholders})
+        AND ss.closed_at IS NULL
+      ORDER BY y.name ASC, s.semester_number ASC
+    `,
+    keys,
+    (err, rows) => {
+      if (err) return cb(err)
+      if ((rows || []).length > 0) {
+        const labels = rows.map((r) => r.semester_key).join(", ")
+        const error = new Error(`Con hoc ky chua khoa: ${labels}`)
+        error.status = 409
+        return cb(error)
+      }
+      cb(null)
+    },
+  )
+}
+
+function loadMonthSummary(key, cb) {
+  db.get(
+    `
+      SELECT
+        m.month_key,
+        COALESCE(ms.week_ids, '[]') as legacy_week_ids,
+        ms.closed_at,
+        ms.updated_at
+      FROM months m
+      LEFT JOIN month_summaries ms
+        ON ms.month_key = m.month_key
+      WHERE m.month_key=?
+      LIMIT 1
+    `,
     [key],
     (err, row) => {
       if (err) return cb(err)
-      if (!row) return cb(null, null)
-      cb(null, {
-        semester_key: row.semester_key,
-        week_ids: parseJsonList(row.week_ids),
-        month_keys: parseJsonList(row.month_keys),
-        closed_at: row.closed_at || null,
-        updated_at: row.updated_at || null,
-      })
+      const finish = (fallbackRow) => {
+        loadWeekIdsForMonthKey(key, (weekErr, weekIds) => {
+          if (weekErr) return cb(weekErr)
+          if (!row && !fallbackRow) return cb(null, null)
+          cb(null, {
+            period_key: key,
+            month_key: key,
+            week_ids: weekIds.length ? weekIds : parseJsonList(fallbackRow?.week_ids),
+            closed_at: (row || fallbackRow)?.closed_at || null,
+            updated_at: (row || fallbackRow)?.updated_at || null,
+          })
+        })
+      }
+
+      if (row) return finish(null)
+
+      db.get(
+        `SELECT month_key, week_ids, closed_at, updated_at FROM month_summaries WHERE month_key=? LIMIT 1`,
+        [key],
+        (fallbackErr, fallbackRow) => {
+          if (fallbackErr) return cb(fallbackErr)
+          finish(fallbackRow)
+        },
+      )
+    },
+  )
+}
+
+function loadSemesterSummary(key, cb) {
+  db.get(
+    `
+      SELECT
+        s.id,
+        s.semester_number,
+        s.name,
+        y.name as school_year_name,
+        ss.week_ids as legacy_week_ids,
+        ss.month_keys as legacy_month_keys,
+        ss.closed_at,
+        ss.updated_at
+      FROM semesters s
+      JOIN school_years y
+        ON y.id = s.school_year_id
+      LEFT JOIN semester_summaries ss
+        ON ss.semester_key = (y.name || '-HK' || s.semester_number)
+      WHERE (y.name || '-HK' || s.semester_number)=?
+      LIMIT 1
+    `,
+    [key],
+    (err, row) => {
+      if (err) return cb(err)
+      const finish = (fallbackRow) => {
+        loadMonthKeysForSemesterKey(key, (monthErr, monthKeys) => {
+          if (monthErr) return cb(monthErr)
+          loadWeekIdsForSemesterKey(key, (weekErr, weekIds) => {
+            if (weekErr) return cb(weekErr)
+            if (!row && !fallbackRow) return cb(null, null)
+            cb(null, {
+              period_key: key,
+              semester_key: key,
+              week_ids: weekIds.length ? weekIds : parseJsonList(fallbackRow?.week_ids),
+              month_keys: monthKeys.length ? monthKeys : parseJsonList(fallbackRow?.month_keys),
+              closed_at: (row || fallbackRow)?.closed_at || null,
+              updated_at: (row || fallbackRow)?.updated_at || null,
+            })
+          })
+        })
+      }
+
+      if (row) return finish(null)
+
+      db.get(
+        `SELECT semester_key, week_ids, month_keys, closed_at, updated_at FROM semester_summaries WHERE semester_key=? LIMIT 1`,
+        [key],
+        (fallbackErr, fallbackRow) => {
+          if (fallbackErr) return cb(fallbackErr)
+          finish(fallbackRow)
+        },
+      )
     },
   )
 }
 
 function loadYearSummary(key, cb) {
   db.get(
-    `SELECT year_key, week_ids, semester_keys, closed_at, updated_at FROM year_summaries WHERE year_key=? LIMIT 1`,
+    `
+      SELECT
+        y.name as year_key,
+        ys.week_ids as legacy_week_ids,
+        ys.semester_keys as legacy_semester_keys,
+        ys.closed_at,
+        ys.updated_at
+      FROM school_years y
+      LEFT JOIN year_summaries ys
+        ON ys.year_key = y.name
+      WHERE y.name=?
+      LIMIT 1
+    `,
     [key],
     (err, row) => {
       if (err) return cb(err)
-      if (!row) return cb(null, null)
-      cb(null, {
-        year_key: row.year_key,
-        week_ids: parseJsonList(row.week_ids),
-        semester_keys: parseJsonList(row.semester_keys),
-        closed_at: row.closed_at || null,
-        updated_at: row.updated_at || null,
-      })
+      const finish = (fallbackRow) => {
+        loadSemesterKeysForYearKey(key, (semesterErr, semesterKeys) => {
+          if (semesterErr) return cb(semesterErr)
+          loadWeekIdsForYearKey(key, (weekErr, weekIds) => {
+            if (weekErr) return cb(weekErr)
+            if (!row && !fallbackRow) return cb(null, null)
+            cb(null, {
+              period_key: key,
+              year_key: key,
+              week_ids: weekIds.length ? weekIds : parseJsonList(fallbackRow?.week_ids),
+              semester_keys: semesterKeys.length ? semesterKeys : parseJsonList(fallbackRow?.semester_keys),
+              closed_at: (row || fallbackRow)?.closed_at || null,
+              updated_at: (row || fallbackRow)?.updated_at || null,
+            })
+          })
+        })
+      }
+
+      if (row) return finish(null)
+
+      db.get(
+        `SELECT year_key, week_ids, semester_keys, closed_at, updated_at FROM year_summaries WHERE year_key=? LIMIT 1`,
+        [key],
+        (fallbackErr, fallbackRow) => {
+          if (fallbackErr) return cb(fallbackErr)
+          finish(fallbackRow)
+        },
+      )
+    },
+  )
+}
+
+function loadWeekIdsForMonthKey(monthKey, cb) {
+  db.all(
+    `
+      SELECT w.id
+      FROM schedule_weeks w
+      JOIN months m
+        ON m.id = w.month_id
+      WHERE m.month_key=?
+      ORDER BY w.week_number ASC, w.start_date ASC, w.id ASC
+    `,
+    [monthKey],
+    (err, rows) => {
+      if (err) return cb(err)
+      cb(null, (rows || []).map((r) => Number(r.id)).filter((n) => Number.isFinite(n) && n > 0))
+    },
+  )
+}
+
+function loadMonthKeysForSemesterKey(semesterKey, cb) {
+  db.all(
+    `
+      SELECT m.month_key
+      FROM months m
+      JOIN semesters s
+        ON s.id = m.semester_id
+      JOIN school_years y
+        ON y.id = s.school_year_id
+      WHERE (y.name || '-HK' || s.semester_number)=?
+      ORDER BY ${monthOrderSql("m")} ASC, m.id ASC
+    `,
+    [semesterKey],
+    (err, rows) => {
+      if (err) return cb(err)
+      cb(null, (rows || []).map((r) => String(r.month_key)).filter(Boolean))
+    },
+  )
+}
+
+function loadSemesterKeysForYearKey(yearKey, cb) {
+  db.all(
+    `
+      SELECT (y.name || '-HK' || s.semester_number) as semester_key
+      FROM semesters s
+      JOIN school_years y
+        ON y.id = s.school_year_id
+      WHERE y.name=?
+      ORDER BY s.semester_number ASC
+    `,
+    [yearKey],
+    (err, rows) => {
+      if (err) return cb(err)
+      cb(null, (rows || []).map((r) => String(r.semester_key)).filter(Boolean))
+    },
+  )
+}
+
+function loadWeekIdsForSemesterKey(semesterKey, cb) {
+  db.all(
+    `
+      SELECT w.id
+      FROM schedule_weeks w
+      JOIN months m
+        ON m.id = w.month_id
+      JOIN semesters s
+        ON s.id = m.semester_id
+      JOIN school_years y
+        ON y.id = s.school_year_id
+      WHERE (y.name || '-HK' || s.semester_number)=?
+      ORDER BY ${monthOrderSql("m")} ASC, w.week_number ASC, w.start_date ASC, w.id ASC
+    `,
+    [semesterKey],
+    (err, rows) => {
+      if (err) return cb(err)
+      cb(null, (rows || []).map((r) => Number(r.id)).filter((n) => Number.isFinite(n) && n > 0))
+    },
+  )
+}
+
+function loadWeekIdsForYearKey(yearKey, cb) {
+  db.all(
+    `
+      SELECT w.id
+      FROM schedule_weeks w
+      JOIN months m
+        ON m.id = w.month_id
+      JOIN semesters s
+        ON s.id = m.semester_id
+      JOIN school_years y
+        ON y.id = s.school_year_id
+      WHERE y.name=?
+      ORDER BY s.semester_number ASC, ${monthOrderSql("m")} ASC, w.week_number ASC, w.start_date ASC, w.id ASC
+    `,
+    [yearKey],
+    (err, rows) => {
+      if (err) return cb(err)
+      cb(null, (rows || []).map((r) => Number(r.id)).filter((n) => Number.isFinite(n) && n > 0))
     },
   )
 }
@@ -484,18 +855,35 @@ function loadWeekIdsForMonths(monthKeys, cb) {
   const placeholders = keys.map(() => "?").join(",")
   db.all(
     `
-      SELECT month_key, week_ids
-      FROM month_summaries
-      WHERE month_key IN (${placeholders})
+      SELECT w.id
+      FROM schedule_weeks w
+      JOIN months m
+        ON m.id = w.month_id
+      WHERE m.month_key IN (${placeholders})
+      ORDER BY ${monthOrderSql("m")} ASC, w.week_number ASC, w.start_date ASC, w.id ASC
     `,
     keys,
     (err, rows) => {
       if (err) return cb(err)
-      const weekSet = new Set()
-      ;(rows || []).forEach((r) => {
-        parseJsonList(r.week_ids).forEach((id) => weekSet.add(Number(id)))
-      })
-      cb(null, Array.from(weekSet).filter((n) => Number.isFinite(n) && n > 0))
+      const ids = (rows || []).map((r) => Number(r.id)).filter((n) => Number.isFinite(n) && n > 0)
+      if (ids.length) return cb(null, ids)
+
+      db.all(
+        `
+          SELECT month_key, week_ids
+          FROM month_summaries
+          WHERE month_key IN (${placeholders})
+        `,
+        keys,
+        (fallbackErr, fallbackRows) => {
+          if (fallbackErr) return cb(fallbackErr)
+          const weekSet = new Set()
+          ;(fallbackRows || []).forEach((r) => {
+            parseJsonList(r.week_ids).forEach((id) => weekSet.add(Number(id)))
+          })
+          cb(null, Array.from(weekSet).filter((n) => Number.isFinite(n) && n > 0))
+        },
+      )
     },
   )
 }
@@ -506,18 +894,39 @@ function loadWeekIdsForSemesters(semesterKeys, cb) {
   const placeholders = keys.map(() => "?").join(",")
   db.all(
     `
-      SELECT semester_key, week_ids
-      FROM semester_summaries
-      WHERE semester_key IN (${placeholders})
+      SELECT w.id
+      FROM schedule_weeks w
+      JOIN months m
+        ON m.id = w.month_id
+      JOIN semesters s
+        ON s.id = m.semester_id
+      JOIN school_years y
+        ON y.id = s.school_year_id
+      WHERE (y.name || '-HK' || s.semester_number) IN (${placeholders})
+      ORDER BY y.name ASC, s.semester_number ASC, ${monthOrderSql("m")} ASC, w.week_number ASC, w.id ASC
     `,
     keys,
     (err, rows) => {
       if (err) return cb(err)
-      const weekSet = new Set()
-      ;(rows || []).forEach((r) => {
-        parseJsonList(r.week_ids).forEach((id) => weekSet.add(Number(id)))
-      })
-      cb(null, Array.from(weekSet).filter((n) => Number.isFinite(n) && n > 0))
+      const ids = (rows || []).map((r) => Number(r.id)).filter((n) => Number.isFinite(n) && n > 0)
+      if (ids.length) return cb(null, ids)
+
+      db.all(
+        `
+          SELECT semester_key, week_ids
+          FROM semester_summaries
+          WHERE semester_key IN (${placeholders})
+        `,
+        keys,
+        (fallbackErr, fallbackRows) => {
+          if (fallbackErr) return cb(fallbackErr)
+          const weekSet = new Set()
+          ;(fallbackRows || []).forEach((r) => {
+            parseJsonList(r.week_ids).forEach((id) => weekSet.add(Number(id)))
+          })
+          cb(null, Array.from(weekSet).filter((n) => Number.isFinite(n) && n > 0))
+        },
+      )
     },
   )
 }
@@ -562,6 +971,20 @@ function loadAdjustments(adjTable, keyField, key, cb) {
         })
       })
       cb(null, map)
+    },
+  )
+}
+
+function deleteAdjustment(adjTable, keyField, key, className, cb) {
+  db.run(
+    `
+      DELETE FROM ${adjTable}
+      WHERE ${keyField}=?
+        AND class_name=?
+    `,
+    [key, className],
+    function (err) {
+      cb(err, this?.changes || 0)
     },
   )
 }
@@ -687,10 +1110,49 @@ function toMonthRows(rows) {
 function normalizeMonthKey(input) {
   const s = String(input || "").trim()
   const m1 = s.match(/^(\d{2})\/(\d{4})$/)
-  if (m1) return `${m1[2]}-${m1[1]}`
+  if (m1) {
+    const month = Number(m1[1])
+    if (month < 1 || month > 12) return null
+    return `${m1[1]}/${m1[2]}`
+  }
   const m2 = s.match(/^(\d{4})-(\d{2})$/)
-  if (m2) return `${m2[1]}-${m2[2]}`
+  if (m2) {
+    const month = Number(m2[2])
+    if (month < 1 || month > 12) return null
+    return `${m2[2]}/${m2[1]}`
+  }
   return null
+}
+
+function monthOrderSql(alias = "m") {
+  return `
+    CASE
+      WHEN ${alias}.month_key ~ '^\\d{2}/\\d{4}$' THEN to_date(${alias}.month_key, 'MM/YYYY')
+      WHEN ${alias}.month_key ~ '^\\d{4}-\\d{2}$' THEN to_date(${alias}.month_key, 'YYYY-MM')
+      ELSE NULL
+    END
+  `
+}
+
+function monthPeriodLabel(monthKey) {
+  const normalized = normalizeMonthKey(monthKey)
+  if (normalized) return `Tháng ${normalized}`
+  return `Tháng ${monthKey}`
+}
+
+function romanNumeral(number) {
+  const romanByNumber = {
+    1: "I",
+    2: "II",
+    3: "III",
+    4: "IV",
+    5: "V",
+    6: "VI",
+    7: "VII",
+    8: "VIII",
+    9: "IX",
+  }
+  return romanByNumber[Number(number)] || String(number || "")
 }
 
 function normalizeYearKey(input) {
@@ -702,8 +1164,8 @@ function normalizeYearKey(input) {
 
 function normalizeSemesterKey(input) {
   const s = String(input || "").trim()
-  // Expect formats like "2025-2026-HK1" / "2025-2026-HK2" / "2025-2026_HK1"
-  const m = s.match(/^(\d{4}-\d{4})[-_ ]?HK([12])$/i)
+  // Expect formats like "2025-2026-HK1" / "2025-2026-HK3" / "2025-2026_HK4"
+  const m = s.match(/^(\d{4}-\d{4})[-_ ]?HK([1-9])$/i)
   if (!m) return null
   return `${m[1]}-HK${m[2]}`
 }
@@ -927,21 +1389,364 @@ function exportExcelWorkbookForMonth(res, opts) {
 }
 
 function writeWeeklyScores(weekId, rows, cb) {
-  db.serialize(() => {
-    db.run("DELETE FROM weekly_scores WHERE week_id=?", [weekId])
+  ;(async () => {
+    try {
+      await db.withTransaction(async () => {
+        await db.run("DELETE FROM weekly_scores WHERE week_id=?", [weekId])
+        for (const r of rows || []) {
+          await db.run(
+            `
+              INSERT INTO weekly_scores
+              (week_id,class_name,score,updated_at)
+              VALUES(?,?,?,?)
+            `,
+            [weekId, r.class_name, r.score, time.now()],
+          )
+        }
+      })
+      cb(null)
+    } catch (err) {
+      cb(err)
+    }
+  })()
+}
 
-    const stmt = db.prepare(`
-      INSERT INTO weekly_scores
-      (week_id,class_name,score,updated_at)
-      VALUES(?,?,?,?)
-    `)
+function periodToRowsByGrade(rows) {
+  const grouped = { 10: [], 11: [], 12: [] }
 
-    rows.forEach((r) => {
-      stmt.run([weekId, r.class_name, r.score, time.now()])
+  for (const row of rows || []) {
+    const grade = Number(row.grade || 0)
+    if (!grouped[grade]) grouped[grade] = []
+    grouped[grade].push({
+      ...row,
+      total_score: Number(row.total_score || 0),
+      plus_points: Number(row.plus_points || 0),
+      minus_points: Number(row.minus_points || 0),
     })
+  }
 
-    stmt.finalize((err) => cb(err))
+  Object.keys(grouped).forEach((grade) => {
+    const sorted = grouped[grade].sort((a, b) => {
+      const ds = Number(b.total_score || 0) - Number(a.total_score || 0)
+      if (ds !== 0) return ds
+      const aa = parseClassNatural(a.class_name)
+      const bb = parseClassNatural(b.class_name)
+      if (aa.g !== bb.g) return aa.g - bb.g
+      if (aa.num !== bb.num) return aa.num - bb.num
+      return aa.name.localeCompare(bb.name)
+    })
+    grouped[grade] = annotateNotesAndRanks(sorted)
   })
+
+  return grouped
+}
+
+function writePeriodScores(table, keyField, key, rowsByGrade, cb) {
+  ;(async () => {
+    try {
+      await db.withTransaction(async () => {
+        await db.run(`DELETE FROM ${table} WHERE ${keyField}=?`, [key])
+
+        const grades = Object.keys(rowsByGrade || {})
+          .map((value) => Number(value))
+          .filter((value) => Number.isFinite(value))
+          .sort((a, b) => a - b)
+
+        for (const grade of grades) {
+          for (const row of rowsByGrade[grade] || []) {
+            await db.run(
+              `
+                INSERT INTO ${table}
+                (${keyField}, class_name, grade, plus_points, minus_points, total_score, rank, note, updated_at)
+                VALUES(?,?,?,?,?,?,?,?,?)
+                ON CONFLICT(${keyField}, class_name)
+                DO UPDATE SET
+                  grade=excluded.grade,
+                  plus_points=excluded.plus_points,
+                  minus_points=excluded.minus_points,
+                  total_score=excluded.total_score,
+                  rank=excluded.rank,
+                  note=excluded.note,
+                  updated_at=excluded.updated_at
+              `,
+              [
+                key,
+                row.class_name,
+                Number(row.grade || grade || 0),
+                Number(row.plus_points || 0),
+                Number(row.minus_points || 0),
+                Number(row.total_score || 0),
+                Number(row.rank || 0),
+                String(row.note || ""),
+                time.now(),
+              ],
+            )
+          }
+        }
+      })
+      cb(null)
+    } catch (err) {
+      cb(err)
+    }
+  })()
+}
+
+function loadPeriodScores(table, keyField, key, cb) {
+  db.all(
+    `
+      SELECT
+        ${keyField} as period_key,
+        class_name,
+        grade,
+        plus_points,
+        minus_points,
+        total_score,
+        rank,
+        note,
+        updated_at
+      FROM ${table}
+      WHERE ${keyField}=?
+      ORDER BY grade ASC, rank ASC, total_score DESC, class_name ASC
+    `,
+    [key],
+    (err, rows) => {
+      if (err) return cb(err)
+      cb(null, rows || [])
+    },
+  )
+}
+
+function classGrade(className) {
+  const grade = parseInt(String(className || "").trim(), 10)
+  return Number.isFinite(grade) ? grade : 0
+}
+
+function findClassSummary(scoresByGrade, className) {
+  const normalized = String(className || "").trim().toUpperCase()
+  const grade = classGrade(normalized)
+  const rows = scoresByGrade?.[grade] || []
+  return rows.find((row) => String(row.class_name || "").trim().toUpperCase() === normalized) || null
+}
+
+function buildClassPeriodPayload({ periodType, key, meta, scoresByGrade, className }) {
+  const grade = classGrade(className)
+  const ranking = scoresByGrade?.[grade] || []
+  const mySummary = findClassSummary(scoresByGrade, className)
+
+  return {
+    period_type: periodType,
+    period_key: key,
+    closed_at: meta?.closed_at || null,
+    week_ids: meta?.week_ids || [],
+    month_keys: meta?.month_keys || [],
+    semester_keys: meta?.semester_keys || [],
+    scores_by_grade: scoresByGrade,
+    ranking,
+    my_summary: mySummary,
+    stats: {
+      class_count: ranking.length,
+      week_count: (meta?.week_ids || []).length,
+      month_count: (meta?.month_keys || []).length,
+      semester_count: (meta?.semester_keys || []).length,
+      my_rank: mySummary?.rank || null,
+    },
+  }
+}
+
+function loadComputedPeriodSummary(periodType, key, cb) {
+  const configByType = {
+    month: {
+      keyField: "month_key",
+      scoreTable: "month_scores",
+      adjustmentTable: "month_adjustments",
+      loadSummary: loadMonthSummary,
+      transformRows: toMonthRows,
+    },
+    semester: {
+      keyField: "semester_key",
+      scoreTable: "semester_scores",
+      adjustmentTable: "semester_adjustments",
+      loadSummary: loadSemesterSummary,
+      transformRows: (rows) => rows || [],
+    },
+    year: {
+      keyField: "year_key",
+      scoreTable: "year_scores",
+      adjustmentTable: "year_adjustments",
+      loadSummary: loadYearSummary,
+      transformRows: (rows) => rows || [],
+    },
+  }
+  const config = configByType[periodType]
+  if (!config) return cb(Object.assign(new Error("Invalid period"), { status: 400 }))
+
+  config.loadSummary(key, (metaErr, meta) => {
+    if (metaErr) return cb(metaErr)
+    if (!meta) return cb(Object.assign(new Error("Period not found"), { status: 404 }))
+
+    if (meta.closed_at) {
+      return loadPeriodScores(config.scoreTable, config.keyField, key, (scoreErr, scores) => {
+        if (scoreErr) return cb(scoreErr)
+        cb(null, { meta, scores_by_grade: periodToRowsByGrade(scores || []) })
+      })
+    }
+
+    const weekIds = meta.week_ids || []
+    if (!weekIds.length) {
+      return cb(null, { meta, scores_by_grade: periodToRowsByGrade([]) })
+    }
+
+    loadAdjustments(config.adjustmentTable, config.keyField, key, (adjustErr, adjustments) => {
+      if (adjustErr) return cb(adjustErr)
+      computePeriodFromWeeks(weekIds, adjustments, (computeErr, rawRows) => {
+        if (computeErr) return cb(computeErr)
+        const rows = config.transformRows(rawRows || [])
+        cb(null, { meta, scores_by_grade: periodToRowsByGrade(rows) })
+      })
+    })
+  })
+}
+
+function loadComputedWeekSummary(weekId, cb) {
+  db.get(`SELECT * FROM schedule_weeks WHERE id=? LIMIT 1`, [weekId], (weekErr, week) => {
+    if (weekErr) return cb(weekErr)
+    if (!week) return cb(Object.assign(new Error("Week not found"), { status: 404 }))
+
+    isWeekClosed(weekId, (closedErr, closed, closedAt) => {
+      if (closedErr) return cb(closedErr)
+      weekBreakdowns(weekId, (breakdownErr, rows) => {
+        if (breakdownErr) return cb(breakdownErr)
+        const scoresByGrade = periodToRowsByGrade(rows || [])
+        const scores = []
+        Object.keys(scoresByGrade).forEach((grade) => {
+          ;(scoresByGrade[grade] || []).forEach((row) => {
+            scores.push({
+              class_name: row.class_name,
+              score: Number(row.total_score || 0),
+              rank: row.rank,
+              updated_at: null,
+            })
+          })
+        })
+        cb(null, {
+          week,
+          closed_at: closed ? closedAt || null : null,
+          scores_by_grade: scoresByGrade,
+          scores: closed ? scores : [],
+        })
+      })
+    })
+  })
+}
+
+async function loadCurrentPeriodTree() {
+  const configuredYear =
+    normalizeYearKey(await SystemSettingService.get("school_year", "2026-2027")) || "2026-2027"
+
+  const schoolYear =
+    (await db.get(
+      `
+        SELECT id, name as year_key, start_year, end_year
+        FROM school_years
+        WHERE name=?
+        LIMIT 1
+      `,
+      [configuredYear],
+    )) || { id: null, year_key: configuredYear }
+
+  const semesters = await db.all(
+    `
+      SELECT
+        s.id,
+        s.school_year_id,
+        s.semester_number,
+        s.name,
+        (y.name || '-HK' || s.semester_number) as semester_key,
+        ss.closed_at
+      FROM semesters s
+      JOIN school_years y
+        ON y.id = s.school_year_id
+      LEFT JOIN semester_summaries ss
+        ON ss.semester_key = (y.name || '-HK' || s.semester_number)
+      WHERE y.name=?
+      ORDER BY s.semester_number ASC, s.id ASC
+    `,
+    [configuredYear],
+  )
+
+  const months = await db.all(
+    `
+      SELECT
+        m.id,
+        m.semester_id,
+        m.month_number,
+        m.month_key,
+        m.name,
+        (y.name || '-HK' || s.semester_number) as semester_key,
+        ms.closed_at
+      FROM months m
+      JOIN semesters s
+        ON s.id = m.semester_id
+      JOIN school_years y
+        ON y.id = s.school_year_id
+      LEFT JOIN month_summaries ms
+        ON ms.month_key = m.month_key
+      WHERE y.name=?
+      ORDER BY s.semester_number ASC, ${monthOrderSql("m")} ASC, m.id ASC
+    `,
+    [configuredYear],
+  )
+
+  const weeks = await db.all(
+    `
+      SELECT
+        w.id,
+        w.week_number,
+        w.start_date,
+        w.end_date,
+        w.month_id,
+        m.month_key,
+        (y.name || '-HK' || s.semester_number) as semester_key,
+        wc.closed_at
+      FROM schedule_weeks w
+      JOIN months m
+        ON m.id = w.month_id
+      JOIN semesters s
+        ON s.id = m.semester_id
+      JOIN school_years y
+        ON y.id = s.school_year_id
+      LEFT JOIN week_closings wc
+        ON wc.week_id = w.id
+      WHERE y.name=?
+      ORDER BY s.semester_number ASC, ${monthOrderSql("m")} ASC, w.week_number ASC, w.start_date ASC, w.id ASC
+    `,
+    [configuredYear],
+  )
+
+  const weeksByMonth = new Map()
+  ;(weeks || []).forEach((week) => {
+    const key = String(week.month_key)
+    if (!weeksByMonth.has(key)) weeksByMonth.set(key, [])
+    weeksByMonth.get(key).push(week)
+  })
+
+  const monthsBySemester = new Map()
+  ;(months || []).forEach((month) => {
+    const key = String(month.semester_key)
+    if (!monthsBySemester.has(key)) monthsBySemester.set(key, [])
+    monthsBySemester.get(key).push({
+      ...month,
+      weeks: weeksByMonth.get(String(month.month_key)) || [],
+    })
+  })
+
+  return {
+    school_year: schoolYear,
+    semesters: (semesters || []).map((semester) => ({
+      ...semester,
+      months: monthsBySemester.get(String(semester.semester_key)) || [],
+    })),
+  }
 }
 
 function computeViolationHash(sessionId, cb) {
@@ -1661,12 +2466,14 @@ router.post(
     const n = String(note || "").trim()
 
     db.get(
-      `SELECT id FROM duty_sessions WHERE id=? LIMIT 1`,
+      `SELECT id, week_id FROM duty_sessions WHERE id=? LIMIT 1`,
       [session_id],
       (err, session) => {
         if (err) return res.status(500).json({ error: err.message })
         if (!session) return res.status(404).json({ error: "Session not found" })
 
+        ensureWeekUnlocked(session.week_id, (lockErr) => {
+          if (lockErr) return res.status(lockErr.status || 500).json({ error: lockErr.message })
         db.run(
           `
             INSERT INTO duty_violations
@@ -1684,6 +2491,7 @@ router.post(
             res.json({ success: true, id: this.lastID })
           },
         )
+        })
       },
     )
   },
@@ -1704,8 +2512,10 @@ router.put(
 
     db.get(
       `
-        SELECT v.id, v.session_id
+        SELECT v.id, v.session_id, s.week_id
         FROM duty_violations v
+        JOIN duty_sessions s
+          ON s.id = v.session_id
         WHERE v.id=?
         LIMIT 1
       `,
@@ -1714,6 +2524,8 @@ router.put(
         if (err) return res.status(500).json({ error: err.message })
         if (!row) return res.status(404).json({ error: "Violation not found" })
 
+        ensureWeekUnlocked(row.week_id, (lockErr) => {
+          if (lockErr) return res.status(lockErr.status || 500).json({ error: lockErr.message })
         db.run(
           `
             UPDATE duty_violations
@@ -1731,6 +2543,7 @@ router.put(
             res.json({ success: true })
           },
         )
+        })
       },
     )
   },
@@ -1747,8 +2560,10 @@ router.delete(
     const id = req.params.id
     db.get(
       `
-        SELECT v.id, v.session_id
+        SELECT v.id, v.session_id, s.week_id
         FROM duty_violations v
+        JOIN duty_sessions s
+          ON s.id = v.session_id
         WHERE v.id=?
         LIMIT 1
       `,
@@ -1757,6 +2572,8 @@ router.delete(
         if (err) return res.status(500).json({ error: err.message })
         if (!row) return res.status(404).json({ error: "Violation not found" })
 
+        ensureWeekUnlocked(row.week_id, (lockErr) => {
+          if (lockErr) return res.status(lockErr.status || 500).json({ error: lockErr.message })
         db.run(
           `DELETE FROM duty_violations WHERE id=?`,
           [id],
@@ -1770,6 +2587,7 @@ router.delete(
             res.json({ success: true })
           },
         )
+        })
       },
     )
   },
@@ -1988,6 +2806,369 @@ router.post(
   },
 )
 
+router.get(
+  "/admin/week/:id",
+  requireLogin,
+  requireRole(["admin"]),
+  (req, res) => {
+    const weekId = Number(req.params.id)
+    if (!weekId) return res.status(400).json({ error: "Invalid week" })
+
+    db.get(`SELECT * FROM schedule_weeks WHERE id=? LIMIT 1`, [weekId], (err, week) => {
+      if (err) return res.status(500).json({ error: err.message })
+      if (!week) return res.status(404).json({ error: "Week not found" })
+
+      aggregateSessions("WHERE s.week_id=?", [weekId], (sessionErr, sessions) => {
+        if (sessionErr) return res.status(500).json({ error: sessionErr.message })
+        withBaseScore((baseErr, baseScore) => {
+          if (baseErr) return res.status(500).json({ error: baseErr.message })
+          res.json({ week, sessions: sessions || [], base_points: baseScore })
+        })
+      })
+    })
+  },
+)
+
+router.get(
+  "/admin/session/:id",
+  requireLogin,
+  requireRole(["admin"]),
+  (req, res) => {
+    const sessionId = Number(req.params.id)
+    if (!sessionId) return res.status(400).json({ error: "Invalid session" })
+
+    db.get(
+      `
+        SELECT
+          s.*,
+          w.week_number,
+          w.start_date,
+          w.end_date,
+          COALESCE(b.points, 0) as bonus_points,
+          b.min_score as bonus_min_score,
+          b.source as bonus_source,
+          ds.photo_path as signature_photo_path,
+          ds.signed_at as signature_signed_at
+        FROM duty_sessions s
+        JOIN schedule_weeks w
+          ON w.id = s.week_id
+        LEFT JOIN daily_bonus b
+          ON b.week_id = s.week_id
+         AND b.date = s.date
+         AND b.class_name = s.duty_class
+        ${latestSignatureJoin("ds")}
+        WHERE s.id=?
+        LIMIT 1
+      `,
+      [sessionId],
+      (err, session) => {
+        if (err) return res.status(500).json({ error: err.message })
+        if (!session) return res.status(404).json({ error: "Session not found" })
+
+        db.all(
+          `
+            SELECT v.id, v.rule_id, v.quantity, v.note,
+                   r.category, r.name, r.score_delta
+            FROM duty_violations v
+            LEFT JOIN rules r
+              ON r.id = v.rule_id
+            WHERE v.session_id=?
+            ORDER BY v.id DESC
+          `,
+          [sessionId],
+          (violationErr, violations) => {
+            if (violationErr) return res.status(500).json({ error: violationErr.message })
+
+            db.all(
+              `
+                SELECT id, action, created_at
+                FROM duty_revision_logs
+                WHERE session_id=?
+                ORDER BY id DESC
+              `,
+              [sessionId],
+              (revisionErr, revisions) => {
+                if (revisionErr) return res.status(500).json({ error: revisionErr.message })
+
+                db.all(
+                  `
+                    SELECT id, photo_path, signed_at
+                    FROM duty_signatures
+                    WHERE session_id=?
+                    ORDER BY id DESC
+                  `,
+                  [sessionId],
+                  (signatureErr, signatures) => {
+                    if (signatureErr) return res.status(500).json({ error: signatureErr.message })
+                    res.json({
+                      session,
+                      week: {
+                        id: session.week_id,
+                        week_number: session.week_number,
+                        start_date: session.start_date,
+                        end_date: session.end_date,
+                      },
+                      violations: violations || [],
+                      revisions: revisions || [],
+                      signatures: signatures || [],
+                    })
+                  },
+                )
+              },
+            )
+          },
+        )
+      },
+    )
+  },
+)
+
+router.get(
+  "/admin/week/:id/stats",
+  requireLogin,
+  requireRole(["admin"]),
+  (req, res) => {
+    const weekId = Number(req.params.id)
+    if (!weekId) return res.status(400).json({ error: "Invalid week" })
+
+    weekSessionCounts(weekId, (err, stats) => {
+      if (err) return res.status(500).json({ error: err.message })
+      res.json(stats)
+    })
+  },
+)
+
+router.get(
+  "/admin/week/:id/summary",
+  requireLogin,
+  requireRole(["admin"]),
+  (req, res) => {
+    const weekId = Number(req.params.id)
+    if (!weekId) return res.status(400).json({ error: "Invalid week" })
+
+    db.get(`SELECT * FROM schedule_weeks WHERE id=? LIMIT 1`, [weekId], (err, week) => {
+      if (err) return res.status(500).json({ error: err.message })
+      if (!week) return res.status(404).json({ error: "Week not found" })
+
+      isWeekClosed(weekId, (closedErr, closed, closedAt) => {
+        if (closedErr) return res.status(500).json({ error: closedErr.message })
+        if (closed) {
+          return db.all(
+            `
+              SELECT class_name, score, updated_at
+              FROM weekly_scores
+              WHERE week_id=?
+              ORDER BY score DESC, class_name ASC
+            `,
+            [weekId],
+            (scoreErr, scores) => {
+              if (scoreErr) return res.status(500).json({ error: scoreErr.message })
+              res.json({ week, closed_at: closedAt || null, scores: scores || [] })
+            },
+          )
+        }
+
+        computeWeekScores(weekId, (scoreErr, scores) => {
+          if (scoreErr) return res.status(500).json({ error: scoreErr.message })
+          res.json({ week, closed_at: null, scores: scores || [] })
+        })
+      })
+    })
+  },
+)
+
+router.post(
+  "/admin/week/:id/close",
+  requireLogin,
+  requireRole(["admin"]),
+  (req, res) => {
+    const weekId = Number(req.params.id)
+    if (!weekId) return res.status(400).json({ error: "Invalid week" })
+
+    isWeekClosed(weekId, (err, closed) => {
+      if (err) return res.status(500).json({ error: err.message })
+      if (closed) return res.status(409).json({ error: "Week already closed" })
+
+      ensureGradebookUploadsForWeek(weekId, (gradebookErr) => {
+        if (gradebookErr) {
+          return res.status(gradebookErr.status || 500).json({ error: gradebookErr.message })
+        }
+
+        computeWeekScores(weekId, (scoreErr, scores) => {
+          if (scoreErr) return res.status(500).json({ error: scoreErr.message })
+          writeWeeklyScores(weekId, scores || [], (writeErr) => {
+            if (writeErr) return res.status(500).json({ error: writeErr.message })
+            const closedAt = time.now()
+            db.run(
+              `
+                INSERT INTO week_closings (week_id, closed_at)
+                VALUES(?,?)
+                ON CONFLICT(week_id)
+                DO UPDATE SET closed_at=excluded.closed_at
+              `,
+              [weekId, closedAt],
+              (closeErr) => {
+                if (closeErr) return res.status(500).json({ error: closeErr.message })
+                res.json({ success: true, week_id: weekId, closed_at: closedAt })
+              },
+            )
+          })
+        })
+      })
+    })
+  },
+)
+
+router.post(
+  "/admin/week/:id/reopen",
+  requireLogin,
+  requireRole(["admin"]),
+  (req, res) => {
+    const weekId = Number(req.params.id)
+    if (!weekId) return res.status(400).json({ error: "Invalid week" })
+
+    db.run(
+      `UPDATE week_closings SET closed_at=NULL WHERE week_id=?`,
+      [weekId],
+      function (err) {
+        if (err) return res.status(500).json({ error: err.message })
+        res.json({ success: true, reopened: this.changes })
+      },
+    )
+  },
+)
+
+router.get(
+  "/admin/week/:id/class/:className/breakdown",
+  requireLogin,
+  requireRole(["admin"]),
+  (req, res) => {
+    const weekId = Number(req.params.id)
+    const className = String(req.params.className || "").trim().toUpperCase()
+    if (!weekId || !className) return res.status(400).json({ error: "Invalid request" })
+
+    weekBreakdowns(weekId, (err, rows) => {
+      if (err) return res.status(500).json({ error: err.message })
+      const rankedRows = annotateNotesAndRanks(
+        (rows || []).sort((a, b) => Number(b.total_score || 0) - Number(a.total_score || 0)),
+      )
+      const row = rankedRows.find((item) => String(item.class_name || "").toUpperCase() === className)
+      if (!row) return res.status(404).json({ error: "Class not found" })
+
+      db.all(
+        `
+          SELECT
+            s.id,
+            s.date,
+            s.status,
+            COALESCE(b.points, 0) as bonus_points
+          FROM duty_sessions s
+          LEFT JOIN daily_bonus b
+            ON b.week_id = s.week_id
+           AND b.date = s.date
+           AND b.class_name = s.duty_class
+          WHERE s.week_id=?
+            AND s.duty_class=?
+          ORDER BY s.date ASC, s.id ASC
+        `,
+        [weekId, className],
+        (dayErr, days) => {
+          if (dayErr) return res.status(500).json({ error: dayErr.message })
+          const sessionIds = (days || []).map((day) => Number(day.id)).filter(Boolean)
+          if (!sessionIds.length) {
+            return res.json({ week_id: weekId, class_name: className, breakdown: row, days: [] })
+          }
+
+          const placeholders = sessionIds.map(() => "?").join(",")
+          db.all(
+            `
+              SELECT v.session_id, v.id, v.rule_id, v.quantity, v.note,
+                     r.category, r.name, r.score_delta
+              FROM duty_violations v
+              LEFT JOIN rules r
+                ON r.id = v.rule_id
+              WHERE v.session_id IN (${placeholders})
+              ORDER BY v.id ASC
+            `,
+            sessionIds,
+            (violationErr, violations) => {
+              if (violationErr) return res.status(500).json({ error: violationErr.message })
+              const bySession = new Map()
+              for (const violation of violations || []) {
+                const key = Number(violation.session_id)
+                if (!bySession.has(key)) bySession.set(key, [])
+                bySession.get(key).push(violation)
+              }
+              res.json({
+                week_id: weekId,
+                class_name: className,
+                breakdown: row,
+                days: (days || []).map((day) => ({
+                  ...day,
+                  violations: bySession.get(Number(day.id)) || [],
+                })),
+              })
+            },
+          )
+        },
+      )
+    })
+  },
+)
+
+router.get(
+  "/admin/week/:id/export",
+  requireLogin,
+  requireRole(["admin"]),
+  async (req, res) => {
+    const weekId = Number(req.params.id)
+    if (!weekId) return res.status(400).json({ error: "Invalid week" })
+
+    try {
+      const week = await db.get(`SELECT * FROM schedule_weeks WHERE id=? LIMIT 1`, [weekId])
+      if (!week) return res.status(404).json({ error: "Week not found" })
+
+      const scores = await db.all(
+        `
+          SELECT class_name, score, updated_at
+          FROM weekly_scores
+          WHERE week_id=?
+          ORDER BY score DESC, class_name ASC
+        `,
+        [weekId],
+      )
+      const rows = scores?.length
+        ? scores
+        : await new Promise((resolve, reject) => {
+            computeWeekScores(weekId, (err, computedRows) => (err ? reject(err) : resolve(computedRows || [])))
+          })
+
+      const workbook = new ExcelJS.Workbook()
+      const ws = workbook.addWorksheet("Weekly Scores")
+      ws.columns = [
+        { header: "Lớp", key: "class_name", width: 18 },
+        { header: "Tổng điểm", key: "score", width: 14 },
+        { header: "Cập nhật", key: "updated_at", width: 28 },
+      ]
+      for (const row of rows || []) {
+        ws.addRow({
+          class_name: row.class_name,
+          score: Number(row.score || 0),
+          updated_at: row.updated_at || "",
+        })
+      }
+      ws.getRow(1).font = { bold: true }
+
+      const buffer = await workbook.xlsx.writeBuffer()
+      res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+      res.setHeader("Content-Disposition", `attachment; filename="ket_qua_thi_dua_tuan_${week.week_number || weekId}.xlsx"`)
+      res.send(Buffer.from(buffer))
+    } catch (err) {
+      res.status(500).json({ error: err?.message || "Cannot export week scores" })
+    }
+  },
+)
+
 /*
 ADMIN: sign a duty session (no PIN), re-auth by admin password
 body: { admin_password }
@@ -2072,921 +3253,13 @@ router.post(
                   )
                 })
               })
-            },
-          )
-        })
-      },
-    )
-  },
-)
-
-/*
-ADMIN: duty sessions by day
-*/
-router.get(
-  "/admin/day",
-  requireLogin,
-  requireRole(["admin"]),
-  (req,res)=>{
-
-    const date = (req.query.date || time.today()).toString()
-
-    aggregateSessions(
-      "WHERE s.date=?",
-      [date],
-      (err,rows)=>{
-        if(err) return res.status(500).json({error:err.message})
-        res.json({date, sessions: rows})
-      }
-    )
-
-  }
-)
-
-/*
-ADMIN: duty sessions by week_id
-*/
-router.get(
-  "/admin/week/:weekId",
-  requireLogin,
-  requireRole(["admin"]),
-  (req,res)=>{
-
-    const weekId = req.params.weekId
-
-    aggregateSessions(
-      "WHERE s.week_id=?",
-      [weekId],
-      (err,rows)=>{
-        if(err) return res.status(500).json({error:err.message})
-        res.json({week_id: Number(weekId), sessions: rows})
-      }
-    )
-
-  }
-)
-
-/*
-ADMIN: weekly trends by grade (for dashboard line chart)
-query: ?grade=10|11|12
-*/
-router.get(
-  "/admin/weekly-trends",
-  requireLogin,
-  requireRole(["admin"]),
-  (req, res) => {
-    const grade = Number(req.query.grade || 10)
-    if (![10, 11, 12].includes(grade)) {
-      return res.status(400).json({ error: "Invalid grade" })
-    }
-
-    db.all(
-      `
-        SELECT id, week_number, start_date, end_date
-        FROM schedule_weeks
-        ORDER BY week_number ASC
-      `,
-      [],
-      (err, weeks) => {
-        if (err) return res.status(500).json({ error: err.message })
-
-        db.all(
-          `
-            SELECT name
-            FROM classes
-            WHERE grade=?
-            ORDER BY name ASC
-          `,
-          [grade],
-          (err2, classes) => {
-            if (err2) return res.status(500).json({ error: err2.message })
-
-            const classNames = classes.map((c) => c.name)
-            if (classNames.length === 0) {
-              return res.json({ weeks, classes: [] })
-            }
-
-            db.all(
-              `
-                SELECT week_id, class_name, score
-                FROM weekly_scores
-                WHERE class_name IN (${classNames.map(() => "?").join(",")})
-              `,
-              classNames,
-              (err3, rows) => {
-                if (err3) return res.status(500).json({ error: err3.message })
-
-                const byClass = new Map()
-                classNames.forEach((n) => byClass.set(n, new Map()))
-                rows.forEach((r) => {
-                  if (!byClass.has(r.class_name)) byClass.set(r.class_name, new Map())
-                  byClass.get(r.class_name).set(r.week_id, Number(r.score || 0))
-                })
-
-                const out = classNames.map((name) => ({
-                  class_name: name,
-                  scores: weeks.map((w) => {
-                    const v = byClass.get(name)?.get(w.id)
-                    return typeof v === "number" ? v : null
-                  }),
-                }))
-
-                res.json({ weeks, classes: out })
-              },
-            )
-          },
-        )
-      },
-    )
-  },
-)
-
-/*
-ADMIN: query sessions (week + optional date + optional duty_class)
-*/
-router.get(
-"/admin/query",
-requireLogin,
-requireRole(["admin"]),
-(req,res)=>{
-
-  const weekId = Number(req.query.week_id)
-  const date = req.query.date ? req.query.date.toString() : null
-  const className = req.query.class_name ? req.query.class_name.toString() : null
-  const grade = req.query.grade ? String(req.query.grade) : null
-
-  if(!weekId){
-    return res.status(400).json({error:"Missing week_id"})
-  }
-
-  const params = [weekId]
-  let where = "WHERE s.week_id=?"
-
-  if(date){
-    where += " AND s.date=?"
-    params.push(date)
-  }
-
-  if(className){
-    where += " AND s.duty_class=?"
-    params.push(className)
-  }
-
-  if(grade){
-    where += " AND s.duty_class LIKE ?"
-    params.push(`${grade}A%`)
-  }
-
-  aggregateSessions(where, params, (err, rows)=>{
-    if(err) return res.status(500).json({error:err.message})
-    res.json({week_id: weekId, date, class_name: className, sessions: rows})
-  })
-
-  }
-)
-
-/*
-ADMIN: duty session detail
-*/
-router.get(
-  "/admin/session/:id",
-  requireLogin,
-  requireRole(["admin"]),
-  (req,res)=>{
-
-    const id = req.params.id
-
-    db.get(
-      `
-        SELECT
-          s.*,
-          COALESCE(b.points, 0) as bonus_points,
-          b.min_score as bonus_min_score,
-          b.all_above_9 as bonus_all_above_9,
-          b.source as bonus_source,
-          b.periods_json as bonus_periods_json,
-          ds.photo_path as signature_photo_path,
-          ds.signed_at as signature_signed_at
-        FROM duty_sessions s
-        LEFT JOIN daily_bonus b
-          ON b.week_id = s.week_id
-         AND b.date = s.date
-         AND b.class_name = s.duty_class
-        ${latestSignatureJoin("ds")}
-        WHERE s.id=?
-        LIMIT 1
-      `,
-      [id],
-      (err,session)=>{
-
-        if(err) return res.status(500).json({error:err.message})
-        if(!session) return res.status(404).json({error:"Session not found"})
-
-        db.all(
-          `
-            SELECT v.id,v.rule_id,v.quantity,v.note,
-                   r.category,r.name,r.score_delta
-            FROM duty_violations v
-            LEFT JOIN rules r
-              ON r.id=v.rule_id
-            WHERE v.session_id=?
-            ORDER BY v.id DESC
-          `,
-          [id],
-          (err,violations)=>{
-
-            if(err) return res.status(500).json({error:err.message})
-
-            db.all(
-              `
-                SELECT id, action, created_at
-                FROM duty_revision_logs
-                WHERE session_id=?
-                ORDER BY id DESC
-              `,
-              [id],
-              (err, revisions)=>{
-
-                if(err) return res.status(500).json({error:err.message})
-
-                db.all(
-                  `
-                    SELECT id, photo_path, signed_at
-                    FROM duty_signatures
-                    WHERE session_id=?
-                    ORDER BY id DESC
-                  `,
-                  [id],
-                  (err, signatures)=>{
-
-                    if(err) return res.status(500).json({error:err.message})
-
-                    res.json({
-                      session: {
-                        ...session,
-                        status_label: dutyStatusLabel(session.status),
-                      },
-                      violations,
-                      revisions: (revisions || []).map((r) => ({
-                        ...r,
-                        action_label: revisionActionLabel(r.action),
-                      })),
-                      signatures
-                    })
-
-                  }
-                )
-
-              }
-            )
-
-          }
-        )
-
-      }
-    )
-
-  }
-)
-
-/*
-ADMIN: close week + compute weekly_scores
-*/
-router.post(
-  "/admin/week/:weekId/close",
-  requireLogin,
-  requireRole(["admin"]),
-  (req,res)=>{
-
-    const weekId = Number(req.params.weekId)
-    if(!weekId) return res.status(400).json({error:"Invalid week"})
-
-    isWeekClosed(weekId, (err, closed)=>{
-      if(err) return res.status(500).json({error:err.message})
-      if(closed) return res.status(409).json({error:"Week already closed"})
-
-      db.all(
-        `
-          SELECT grade, COUNT(*) as upload_count
-          FROM bonus_uploads
-          WHERE week_id=?
-          GROUP BY grade
-        `,
-        [weekId],
-        (err2, rows) => {
-          if (err2) return res.status(500).json({ error: err2.message })
-
-          const required = ["10", "11", "12"]
-          const uploaded = new Set((rows || []).map((r) => String(r.grade)))
-          const missing = required.filter((g) => !uploaded.has(g))
-
-          if (missing.length > 0) {
-            return res.status(400).json({
-              error: `Chưa upload sổ đầu bài cho khối ${missing.join(", ")}`,
-            })
-          }
-
-      weekSessionCounts(weekId, (err, counts) => {
-        if (err) return res.status(500).json({ error: err.message })
-
-        computeWeekScores(weekId, (err, rows) => {
-        if (err) return res.status(500).json({ error: err.message })
-
-        writeWeeklyScores(weekId, rows, (err) => {
-          if (err) return res.status(500).json({ error: err.message })
-
-          const closedAt = time.now()
-          db.run(
-            `
-              INSERT INTO week_closings
-              (week_id, closed_at)
-              VALUES(?,?)
-              ON CONFLICT (week_id) DO UPDATE
-              SET closed_at = EXCLUDED.closed_at
-            `,
-            [weekId, closedAt],
-            (err) => {
-              if (err) return res.status(500).json({ error: err.message })
-              res.json({
-                success: true,
-                week_id: weekId,
-                closed_at: closedAt,
-                counts,
-                rows,
-              })
-            },
-          )
-        })
-      })
-      })
-        },
-      )
-
-    })
-
-  }
-)
-
-/*
-ADMIN: reopen week (unlock editing)
-*/
-router.post(
-  "/admin/week/:weekId/reopen",
-  requireLogin,
-  requireRole(["admin"]),
-  (req, res) => {
-    const weekId = Number(req.params.weekId)
-    if (!weekId) return res.status(400).json({ error: "Invalid week" })
-
-    db.run(
-      "DELETE FROM week_closings WHERE week_id=?",
-      [weekId],
-      function (err) {
-        if (err) return res.status(500).json({ error: err.message })
-        res.json({ success: true, reopened: this.changes })
-      },
-    )
-  },
-)
-
-/*
-ADMIN: week summary
-*/
-router.get(
-  "/admin/week/:weekId/summary",
-  requireLogin,
-  requireRole(["admin"]),
-  (req,res)=>{
-
-    const weekId = Number(req.params.weekId)
-    if(!weekId) return res.status(400).json({error:"Invalid week"})
-
-    db.get(
-      `SELECT * FROM schedule_weeks WHERE id=? LIMIT 1`,
-      [weekId],
-      (err, week)=>{
-        if(err) return res.status(500).json({error:err.message})
-        if(!week) return res.status(404).json({error:"Week not found"})
-
-        db.get(
-          `SELECT closed_at FROM week_closings WHERE week_id=? LIMIT 1`,
-          [weekId],
-          (err, closed)=>{
-            if(err) return res.status(500).json({error:err.message})
-
-            if (closed?.closed_at) {
-              db.all(
-                `
-                  SELECT class_name, score, updated_at
-                  FROM weekly_scores
-                  WHERE week_id=?
-                  ORDER BY score DESC
-                `,
-                [weekId],
-                (err, scores)=>{
-                  if(err) return res.status(500).json({error:err.message})
-                  res.json({
-                    week,
-                    closed_at: closed?.closed_at || null,
-                    scores
-                  })
-                }
-              )
-              return
-            }
-
-            computeWeekScores(weekId, (err2, rows) => {
-              if (err2) return res.status(500).json({ error: err2.message })
-              const scores = (rows || []).map((r) => ({
-                class_name: r.class_name,
-                score: r.score,
-                updated_at: null,
-              }))
-              res.json({
-                week,
-                closed_at: null,
-                scores,
-              })
-            })
-
-          }
-        )
-
-      }
-    )
-
-  }
-)
-
-/*
-ADMIN: breakdown for a class in a week (base + bonus + violations)
-*/
-router.get(
-  "/admin/week/:weekId/class/:className/breakdown",
-  requireLogin,
-  requireRole(["admin"]),
-  (req, res) => {
-    const weekId = Number(req.params.weekId)
-    const className = String(req.params.className || "").trim().toUpperCase()
-    if (!weekId || !className) return res.status(400).json({ error: "Invalid request" })
-
-    db.get(
-      `SELECT * FROM schedule_weeks WHERE id=? LIMIT 1`,
-      [weekId],
-      (err, week) => {
-        if (err) return res.status(500).json({ error: err.message })
-        if (!week) return res.status(404).json({ error: "Week not found" })
-
-        weekBreakdowns(weekId, (err, rows) => {
-          if (err) return res.status(500).json({ error: err.message })
-          const row = (rows || []).find((r) => String(r.class_name).toUpperCase() === className)
-          if (!row) return res.status(404).json({ error: "Class not found" })
-          db.all(
-            `
-              SELECT
-                s.id,
-                s.date,
-                s.red_class,
-                s.status,
-                COALESCE(b.points, 0) as bonus_points,
-                b.min_score,
-                b.all_above_9,
-                b.source,
-                b.periods_json
-              FROM duty_sessions s
-              LEFT JOIN daily_bonus b
-                ON b.week_id = s.week_id
-               AND b.date = s.date
-               AND b.class_name = s.duty_class
-              WHERE s.week_id=?
-                AND s.duty_class=?
-              ORDER BY s.date ASC
-            `,
-            [weekId, className],
-            (err2, sessions) => {
-              if (err2) return res.status(500).json({ error: err2.message })
-
-              db.all(
-                `
-                  SELECT
-                    s.date,
-                    r.name,
-                    r.category,
-                    r.score_delta,
-                    v.quantity,
-                    v.note
-                  FROM duty_violations v
-                  JOIN duty_sessions s
-                    ON s.id = v.session_id
-                  LEFT JOIN rules r
-                    ON r.id = v.rule_id
-                  WHERE s.week_id=?
-                    AND s.duty_class=?
-                  ORDER BY s.date ASC, v.id ASC
-                `,
-                [weekId, className],
-                (err3, vioRows) => {
-                  if (err3) return res.status(500).json({ error: err3.message })
-
-                  db.get(
-                    `
-                      SELECT points, reason
-                      FROM weekly_bonus
-                      WHERE week_id=? AND class_name=?
-                      LIMIT 1
-                    `,
-                    [weekId, className],
-                    (err4, weeklyBonus) => {
-                      if (err4) return res.status(500).json({ error: err4.message })
-
-                      const byDate = new Map()
-                      ;(sessions || []).forEach((s) => {
-                        let periods = []
-                        try {
-                          periods = JSON.parse(String(s.periods_json || "[]"))
-                        } catch {}
-                        byDate.set(s.date, {
-                          date: s.date,
-                          red_class: s.red_class,
-                          status: s.status,
-                          bonus_points: Number(s.bonus_points || 0),
-                          min_score: s.min_score,
-                          all_above_9: s.all_above_9,
-                          source: s.source || null,
-                          periods,
-                          violations: [],
-                        })
-                      })
-                      ;(vioRows || []).forEach((v) => {
-                        const item = byDate.get(v.date) || {
-                          date: v.date,
-                          red_class: null,
-                          status: null,
-                          bonus_points: 0,
-                          min_score: null,
-                          all_above_9: null,
-                          source: null,
-                          periods: [],
-                          violations: [],
-                        }
-                        item.violations.push({
-                          name: v.name,
-                          category: v.category,
-                          score_delta: v.score_delta,
-                          quantity: v.quantity,
-                          note: v.note,
-                        })
-                        byDate.set(v.date, item)
-                      })
-
-                      const days = Array.from(byDate.values()).sort((a, b) =>
-                        String(a.date).localeCompare(String(b.date)),
-                      )
-
-                      withBaseScore((baseErr, baseScore) => {
-                        if (baseErr) return res.status(500).json({ error: baseErr.message })
-                        res.json({
-                          week,
-                          base_points: baseScore,
-                          breakdown: row,
-                          days,
-                          weekly_bonus: weeklyBonus || null,
-                        })
-                      })
-                    },
-                  )
-                },
-              )
-            },
-          )
-        })
-      },
-    )
-  },
-)
-
-/*
-ADMIN: export weekly ranking to Excel workbook (3 sheets: grades 10/11/12)
-*/
-router.get(
-  "/admin/week/:weekId/export",
-  requireLogin,
-  requireRole(["admin"]),
-  (req, res) => {
-    const weekId = Number(req.params.weekId)
-    if (!weekId) return res.status(400).json({ error: "Invalid week" })
-
-    db.get(
-      `SELECT * FROM schedule_weeks WHERE id=? LIMIT 1`,
-      [weekId],
-      (err, week) => {
-        if (err) return res.status(500).json({ error: err.message })
-        if (!week) return res.status(404).json({ error: "Week not found" })
-
-        weekBreakdowns(weekId, (err, rows) => {
-          if (err) return res.status(500).json({ error: err.message })
-
-          const byGrade = { 10: [], 11: [], 12: [] }
-          ;(rows || []).forEach((r) => {
-            const g = Number(r.grade)
-            if (g === 10 || g === 11 || g === 12) byGrade[g].push(r)
-          })
-
-          function formatDDMM(iso) {
-            if (!iso) return ""
-            const parts = String(iso).split("-")
-            if (parts.length !== 3) return ""
-            return `${parts[2]}/${parts[1]}`
-          }
-
-          function assignCompetitionRanks(list) {
-            let prevScore = null
-            let prevRank = 0
-            return list.map((r, idx) => {
-              const s = Number(r.total_score || 0)
-              let rank
-              if (prevScore != null && s === prevScore) rank = prevRank
-              else rank = idx + 1
-              prevScore = s
-              prevRank = rank
-              return { ...r, rank }
-            })
-          }
-
-          function annotateNotes(list) {
-            const rankCounts = new Map()
-            list.forEach((r) => {
-              const rk = Number(r.rank || 0)
-              if (!rk) return
-              rankCounts.set(rk, (rankCounts.get(rk) || 0) + 1)
-            })
-
-            const lastRank = list.reduce(
-              (m, r) => Math.max(m, Number(r.rank || 0)),
-              0,
-            )
-
-            function label(base, rk) {
-              const c = rankCounts.get(rk) || 0
-              if (c > 1) return `ĐỒNG ${base}`
-              return base
-            }
-
-            return list.map((r) => {
-              const rk = Number(r.rank || 0)
-              let note = ""
-              if (rk === 1) note = label("HẠNG NHẤT", rk)
-              else if (rk === 2) note = label("HẠNG NHÌ", rk)
-              else if (rk === 3) note = label("HẠNG BA", rk)
-              else if (rk === lastRank) note = label("HẠNG CHÓT", rk)
-              return { ...r, note }
-            })
-          }
-
-          const workbook = new ExcelJS.Workbook()
-
-          function parseClass(name) {
-            const g = parseInt(String(name || ""), 10) || 0
-            const aPos = String(name || "").indexOf("A")
-            const num =
-              aPos >= 0 ? parseInt(String(name || "").slice(aPos + 1), 10) || 0 : 0
-            return { g, num, name: String(name || "") }
-          }
-
-          ;([10, 11, 12]).forEach((g) => {
-            const list0 = (byGrade[g] || []).slice()
-
-            // Rankings/notes are based on score, but the sheet rows are ordered by class name.
-            const rankedByScore = annotateNotes(
-              assignCompetitionRanks(
-                list0.slice().sort((a, b) => Number(b.total_score) - Number(a.total_score)),
-              ),
-            )
-
-            const rankMap = new Map()
-            const noteMap = new Map()
-            rankedByScore.forEach((r) => {
-              rankMap.set(String(r.class_name), Number(r.rank || 0))
-              noteMap.set(String(r.class_name), String(r.note || ""))
-            })
-
-            const ordered = list0.slice().sort((a, b) => {
-              const aa = parseClass(a.class_name)
-              const bb = parseClass(b.class_name)
-              if (aa.g !== bb.g) return aa.g - bb.g
-              if (aa.num !== bb.num) return aa.num - bb.num
-              return aa.name.localeCompare(bb.name)
-            })
-
-            const ws = workbook.addWorksheet(`Khoi ${g}`)
-
-            const baseFont = { name: "Times New Roman", size: 12 }
-
-            ws.columns = [
-              { header: "Lớp", key: "class_name", width: 10 },
-              { header: "Điểm cộng", key: "plus_points", width: 14 },
-              { header: "Điểm trừ", key: "minus_points", width: 14 },
-              { header: "Tổng điểm", key: "total_score", width: 14 },
-              { header: "Xếp hạng", key: "rank", width: 10 },
-              { header: "Ghi chú", key: "note", width: 20 },
-            ]
-
-            const title = `KẾT QUẢ THI ĐUA CỜ ĐỎ KHỐI ${g}`
-            const line2 = `Tuần ${week.week_number}: Từ ngày ${formatDDMM(
-              week.start_date,
-            )} đến ngày ${formatDDMM(week.end_date)}`
-
-            ws.mergeCells("A1:F2")
-            ws.getCell("A1").value = title
-            ws.getCell("A1").font = { ...baseFont, bold: true }
-            ws.getCell("A1").alignment = { horizontal: "center", vertical: "middle" }
-            ws.getCell("A1").fill = {
-              type: "pattern",
-              pattern: "solid",
-              fgColor: { argb: "FFFFA500" },
-            }
-
-            ws.mergeCells("A3:F3")
-            ws.getCell("A3").value = line2
-            ws.getCell("A3").font = { ...baseFont, bold: true }
-            ws.getCell("A3").alignment = { horizontal: "center", vertical: "middle" }
-            ws.getCell("A3").fill = {
-              type: "pattern",
-              pattern: "solid",
-              fgColor: { argb: "FF91D14E" },
-            }
-
-            // Header row at 4
-            const headerRow = ws.getRow(4)
-            headerRow.values = ["Lớp", "Điểm cộng", "Điểm trừ", "Tổng điểm", "Xếp hạng", "Ghi chú"]
-            headerRow.font = { ...baseFont, bold: true }
-            headerRow.alignment = { horizontal: "center", vertical: "middle" }
-            headerRow.height = 18
-
-            // Data rows from row 5
-            let rowIndex = 5
-            ordered.forEach((r) => {
-              const cls = String(r.class_name)
-              const row = ws.getRow(rowIndex++)
-              row.getCell(1).value = cls
-              row.getCell(2).value = Number(r.plus_points || 0)
-              row.getCell(3).value = Number(r.minus_points || 0)
-              row.getCell(4).value = Number(r.total_score || 0)
-              row.getCell(5).value = Number(rankMap.get(cls) || 0)
-              const note = String(noteMap.get(cls) || "")
-              row.getCell(6).value = note
-              if (note) row.getCell(6).font = { ...baseFont, bold: true }
-              const noteUpper = note.toUpperCase()
-              let fill = null
-              if (noteUpper.includes("HẠNG NHẤT")) {
-                fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFFF0000" } }
-              } else if (noteUpper.includes("HẠNG NHÌ")) {
-                fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF0170C1" } }
-              } else if (noteUpper.includes("HẠNG BA")) {
-                fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF0FAFED" } }
-              } else if (noteUpper.includes("HẠNG CHÓT")) {
-                fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFFFFF00" } }
-              }
-              if (fill) {
-                for (let c = 1; c <= 6; c += 1) {
-                  const cell = row.getCell(c)
-                  cell.fill = fill
-                  cell.font = { ...baseFont, bold: true }
-                }
-              }
-              row.height = 16
-            })
-
-            // Default styling: Times New Roman 12, centered, with light borders.
-            ws.eachRow({ includeEmpty: false }, (row) => {
-              row.eachCell((cell) => {
-                if (!cell.font) cell.font = { ...baseFont }
-                if (!cell.alignment)
-                  cell.alignment = { horizontal: "center", vertical: "middle", wrapText: true }
-                cell.border = {
-                  top: { style: "thin", color: { argb: "FF000000" } },
-                  left: { style: "thin", color: { argb: "FF000000" } },
-                  bottom: { style: "thin", color: { argb: "FF000000" } },
-                  right: { style: "thin", color: { argb: "FF000000" } },
-                }
-              })
             })
           })
-
-          workbook.xlsx
-            .writeBuffer()
-            .then((buf) => {
-              res.setHeader(
-                "Content-Type",
-                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-              )
-              res.setHeader(
-                "Content-Disposition",
-                `attachment; filename="ket_qua_thi_dua_tuan_${week.week_number}.xlsx"`,
-              )
-              res.send(Buffer.from(buf))
-            })
-            .catch((err) => {
-              res.status(500).json({ error: err?.message || "Export failed" })
-            })
         })
       },
     )
-  },
-)
-
 /*
-ADMIN: week stats (draft/signed counts)
-*/
-router.get(
-  "/admin/week/:weekId/stats",
-  requireLogin,
-  requireRole(["admin"]),
-  (req, res) => {
-    const weekId = Number(req.params.weekId)
-    if (!weekId) return res.status(400).json({ error: "Invalid week" })
-
-    weekSessionCounts(weekId, (err, counts) => {
-      if (err) return res.status(500).json({ error: err.message })
-
-      isWeekClosed(weekId, (err, closed, closedAt) => {
-        if (err) return res.status(500).json({ error: err.message })
-        res.json({
-          week_id: weekId,
-          closed,
-          closed_at: closedAt,
-          ...counts,
-        })
-      })
-    })
-  },
-)
-
-function periodToRowsByGrade(rows) {
-  const byGrade = { 10: [], 11: [], 12: [] }
-  ;(rows || []).forEach((r) => {
-    const g = Number(r.grade)
-    if (g === 10 || g === 11 || g === 12) byGrade[g].push(r)
-  })
-  ;([10, 11, 12]).forEach((g) => {
-    const sorted = (byGrade[g] || []).slice().sort((a, b) => {
-      const ds = Number(b.total_score) - Number(a.total_score)
-      if (ds !== 0) return ds
-      const aa = parseClassNatural(a.class_name)
-      const bb = parseClassNatural(b.class_name)
-      if (aa.num !== bb.num) return aa.num - bb.num
-      return aa.name.localeCompare(bb.name)
-    })
-    byGrade[g] = annotateNotesAndRanks(sorted)
-  })
-  return byGrade
-}
-
-function writePeriodScores(scoreTable, keyField, key, rowsByGrade, cb) {
-  const now = time.now()
-  db.serialize(() => {
-    db.run(`DELETE FROM ${scoreTable} WHERE ${keyField}=?`, [key])
-    const stmt = db.prepare(
-      `
-        INSERT INTO ${scoreTable}
-        (${keyField}, class_name, grade, plus_points, minus_points, total_score, rank, note, updated_at)
-        VALUES(?,?,?,?,?,?,?,?,?)
-      `,
-    )
-    ;([10, 11, 12]).forEach((g) => {
-      ;(rowsByGrade[g] || []).forEach((r) => {
-        stmt.run([
-          key,
-          r.class_name,
-          Number(r.grade || g),
-          Number(r.plus_points || 0),
-          Number(r.minus_points || 0),
-          Number(r.total_score || 0),
-          Number(r.rank || 0),
-          String(r.note || ""),
-          now,
-        ])
-      })
-    })
-    stmt.finalize((err) => cb(err))
-  })
-}
-
-function loadPeriodScores(scoreTable, keyField, key, cb) {
-  db.all(
-    `
-      SELECT class_name, grade, plus_points, minus_points, total_score, rank, note, updated_at
-      FROM ${scoreTable}
-      WHERE ${keyField}=?
-      ORDER BY grade ASC, rank ASC, class_name ASC
-    `,
-    [key],
-    cb,
-  )
-}
-
-/*
-ADMIN: list months (saved)
+ADMIN: month preview/adjust/close/reopen/summary/breakdown/export
 */
 router.get(
   "/admin/month/list",
@@ -2995,120 +3268,109 @@ router.get(
   (req, res) => {
     db.all(
       `
-        SELECT month_key, week_ids, closed_at, updated_at
-        FROM month_summaries
-        ORDER BY month_key DESC
+        SELECT
+          m.id,
+          m.semester_id,
+          m.month_number,
+          m.month_key,
+          m.name,
+          s.name as semester_name,
+          s.semester_number,
+          y.name as school_year_name,
+          ms.closed_at,
+          ms.updated_at,
+          COALESCE(
+            json_agg(w.id ORDER BY w.week_number ASC, w.start_date ASC, w.id ASC)
+              FILTER (WHERE w.id IS NOT NULL),
+            '[]'
+          )::text as week_ids
+        FROM months m
+        JOIN semesters s
+          ON s.id = m.semester_id
+        JOIN school_years y
+          ON y.id = s.school_year_id
+        LEFT JOIN schedule_weeks w
+          ON w.month_id = m.id
+        LEFT JOIN month_summaries ms
+          ON ms.month_key = m.month_key
+        GROUP BY
+          m.id,
+          m.semester_id,
+          m.month_number,
+          m.month_key,
+          m.name,
+          s.name,
+          s.semester_number,
+          y.name,
+          ms.closed_at,
+          ms.updated_at
+        ORDER BY ${monthOrderSql("m")} ASC, m.id ASC
       `,
       [],
       (err, rows) => {
         if (err) return res.status(500).json({ error: err.message })
-        const out = (rows || []).map((r) => ({
-          month_key: r.month_key,
-          week_ids: parseJsonList(r.week_ids),
-          closed_at: r.closed_at || null,
-          updated_at: r.updated_at || null,
-        }))
-        res.json({ months: out })
+        res.json({
+          months: (rows || []).map((row) => ({
+            ...row,
+            week_ids: parseJsonList(row.week_ids),
+            closed_at: row.closed_at || null,
+          })),
+        })
       },
     )
   },
 )
 
-/*
-ADMIN: save month (link weeks)
-body: { month_key, week_ids }
-*/
-router.post(
-  "/admin/month/save",
-  requireLogin,
-  requireRole(["admin"]),
-  (req, res) => {
-    const monthKey = normalizeMonthKey(req.body.month_key)
-    const weekIds = parseWeekIds(req.body.week_ids)
-    if (!monthKey) return res.status(400).json({ error: "Invalid month_key" })
-    if (!weekIds.length) return res.status(400).json({ error: "Missing week_ids" })
-
-    isPeriodClosed("month_summaries", "month_key", monthKey, (err, closed) => {
-      if (err) return res.status(500).json({ error: err.message })
-      if (closed) return res.status(409).json({ error: "Month closed" })
-      upsertPeriodSummary("month_summaries", "month_key", monthKey, weekIds, null, (err2) => {
-        if (err2) return res.status(500).json({ error: err2.message })
-        res.json({ success: true, month_key: monthKey, week_ids: weekIds })
-      })
-    })
-  },
-)
-
-/*
-ADMIN: month preview (compute without locking)
-body: { month_key: 'MM/YYYY' or 'YYYY-MM', week_ids: number[] }
-*/
 router.post(
   "/admin/month/preview",
   requireLogin,
   requireRole(["admin"]),
   (req, res) => {
     const monthKey = normalizeMonthKey(req.body.month_key)
-    const weekIds = parseWeekIds(req.body.week_ids)
     if (!monthKey) return res.status(400).json({ error: "Invalid month_key" })
 
     isPeriodClosed("month_summaries", "month_key", monthKey, (err, closed, closedAt) => {
       if (err) return res.status(500).json({ error: err.message })
-
-      // If locked, serve stored snapshot.
       if (closed) {
-        loadPeriodScores("month_scores", "month_key", monthKey, (err, scores) => {
-          if (err) return res.status(500).json({ error: err.message })
-          const byGrade = { 10: [], 11: [], 12: [] }
-          ;(scores || []).forEach((r) => {
-            const g = Number(r.grade)
-            if (g === 10 || g === 11 || g === 12) byGrade[g].push(r)
-          })
+        return loadPeriodScores("month_scores", "month_key", monthKey, (scoreErr, scores) => {
+          if (scoreErr) return res.status(500).json({ error: scoreErr.message })
           res.json({
             month_key: monthKey,
-            week_ids: weekIds,
+            week_ids: [],
             closed_at: closedAt,
-            scores_by_grade: byGrade,
+            scores_by_grade: periodToRowsByGrade(scores || []),
           })
         })
-        return
       }
 
-      const ensureWeeks = (ids) => {
-        if (!ids.length) return res.status(400).json({ error: "Missing week_ids" })
-        // Persist selection (unlocked) so detail/export can reuse it.
-        upsertPeriodSummary("month_summaries", "month_key", monthKey, ids, null, (err2) => {
-          if (err2) return res.status(500).json({ error: err2.message })
+      loadWeekIdsForMonthKey(monthKey, (weekErr, weekIds) => {
+        if (weekErr) return res.status(500).json({ error: weekErr.message })
+        if (!weekIds.length) return res.status(400).json({ error: "No weeks in month" })
 
-          loadAdjustments("month_adjustments", "month_key", monthKey, (err3, adjMap) => {
-            if (err3) return res.status(500).json({ error: err3.message })
-            computePeriodFromWeeks(ids, adjMap, (err4, rawRows) => {
-              if (err4) return res.status(500).json({ error: err4.message })
+        const now = time.now()
+        upsertPeriodSummary("month_summaries", "month_key", monthKey, weekIds, null, (summaryErr) => {
+          if (summaryErr) return res.status(500).json({ error: summaryErr.message })
+
+          loadAdjustments("month_adjustments", "month_key", monthKey, (adjErr, adjMap) => {
+            if (adjErr) return res.status(500).json({ error: adjErr.message })
+            computePeriodFromWeeks(weekIds, adjMap, (computeErr, rawRows) => {
+              if (computeErr) return res.status(500).json({ error: computeErr.message })
               const rows = toMonthRows(rawRows)
               res.json({
                 month_key: monthKey,
-                week_ids: ids,
+                week_ids: weekIds,
                 closed_at: null,
+                updated_at: now,
                 scores_by_grade: periodToRowsByGrade(rows),
               })
             })
           })
         })
-      }
-
-      if (weekIds.length) return ensureWeeks(weekIds)
-
-      loadPeriodSummary("month_summaries", "month_key", monthKey, (err2, meta) => {
-        if (err2) return res.status(500).json({ error: err2.message })
-        return ensureWeeks(meta?.week_ids || [])
       })
     })
   },
 )
 
-/*
-ADMIN: save month adjustment (not tied to any week)
-*/
 router.post(
   "/admin/month/adjustment",
   requireLogin,
@@ -3129,11 +3391,11 @@ router.post(
         "month_key",
         monthKey,
         className,
-        plusPoints,
-        minusPoints,
+        Number.isFinite(plusPoints) ? plusPoints : 0,
+        Number.isFinite(minusPoints) ? minusPoints : 0,
         reason,
-        (err) => {
-          if (err) return res.status(500).json({ error: err.message })
+        (adjustErr) => {
+          if (adjustErr) return res.status(500).json({ error: adjustErr.message })
           res.json({ success: true })
         },
       )
@@ -3141,11 +3403,26 @@ router.post(
   },
 )
 
-/*
-ADMIN: upload month adjustments from Excel
-body: { month_key, file_data(base64), file_name? }
-Excel format: from row 3, col A = class_name, col B = delta points (+/-)
-*/
+router.delete(
+  "/admin/month/adjustment",
+  requireLogin,
+  requireRole(["admin"]),
+  (req, res) => {
+    const monthKey = normalizeMonthKey(req.body.month_key || req.query.month_key)
+    const className = String(req.body.class_name || req.query.class_name || "").trim().toUpperCase()
+    if (!monthKey || !className) return res.status(400).json({ error: "Missing fields" })
+
+    isPeriodClosed("month_summaries", "month_key", monthKey, (err, closed) => {
+      if (err) return res.status(500).json({ error: err.message })
+      if (closed) return res.status(403).json({ error: "Month closed" })
+      deleteAdjustment("month_adjustments", "month_key", monthKey, className, (deleteErr, deleted) => {
+        if (deleteErr) return res.status(500).json({ error: deleteErr.message })
+        res.json({ success: true, deleted })
+      })
+    })
+  },
+)
+
 router.post(
   "/admin/month/adjustment/upload",
   requireLogin,
@@ -3160,40 +3437,32 @@ router.post(
       if (err) return res.status(500).json({ error: err.message })
       if (closed) return res.status(403).json({ error: "Month closed" })
 
-      let buf
+      let workbook
       try {
-        buf = Buffer.from(fileData, "base64")
-      } catch {
-        return res.status(400).json({ error: "Invalid file_data" })
+        workbook = xlsx.read(Buffer.from(fileData, "base64"), { type: "buffer" })
+      } catch (readErr) {
+        return res.status(400).json({ error: readErr?.message || "Cannot read Excel file" })
       }
 
-      let wb
-      try {
-        wb = xlsx.read(buf, { type: "buffer" })
-      } catch (e) {
-        return res.status(400).json({ error: e?.message || "Cannot read Excel file" })
-      }
-
-      const firstSheetName = wb.SheetNames?.[0]
+      const firstSheetName = workbook.SheetNames?.[0]
       if (!firstSheetName) return res.status(400).json({ error: "Excel has no sheet" })
-      const ws = wb.Sheets[firstSheetName]
+      const ws = workbook.Sheets[firstSheetName]
       if (!ws || !ws["!ref"]) return res.status(400).json({ error: "Excel sheet is empty" })
 
       const range = xlsx.utils.decode_range(ws["!ref"])
       const rows = []
-      for (let R = 2; R <= range.e.r; R += 1) {
-        const classCell = ws[xlsx.utils.encode_cell({ c: 0, r: R })]
-        const deltaCell = ws[xlsx.utils.encode_cell({ c: 1, r: R })]
-
+      for (let rowIndex = 2; rowIndex <= range.e.r; rowIndex += 1) {
+        const classCell = ws[xlsx.utils.encode_cell({ c: 0, r: rowIndex })]
+        const deltaCell = ws[xlsx.utils.encode_cell({ c: 1, r: rowIndex })]
+        const reasonCell = ws[xlsx.utils.encode_cell({ c: 2, r: rowIndex })]
         const className = String(classCell?.v || "").trim().toUpperCase()
-        if (!className) continue
         const delta = Number(deltaCell?.v || 0)
-        if (!Number.isFinite(delta)) continue
-
+        if (!className || !Number.isFinite(delta)) continue
         rows.push({
           class_name: className,
           plus_points: delta > 0 ? delta : 0,
           minus_points: delta < 0 ? -delta : 0,
+          reason: String(reasonCell?.v || `Nhập từ Excel: ${fileName}`).trim(),
         })
       }
 
@@ -3201,56 +3470,71 @@ router.post(
         return res.status(400).json({ error: "No valid data rows from row 3 (A=class, B=points)" })
       }
 
-      const now = time.now()
-      db.serialize(() => {
-        db.run("BEGIN", (errBegin) => {
-          if (errBegin) return res.status(500).json({ error: errBegin.message })
-
-          const stmt = db.prepare(
-            `
-              INSERT INTO month_adjustments
-              (month_key, class_name, plus_points, minus_points, reason, created_at, updated_at)
-              VALUES(?,?,?,?,?,?,?)
-              ON CONFLICT(month_key, class_name)
-              DO UPDATE SET
-                plus_points=excluded.plus_points,
-                minus_points=excluded.minus_points,
-                reason=excluded.reason,
-                updated_at=excluded.updated_at
-            `,
-          )
-
-          rows.forEach((r) => {
-            stmt.run([
-              monthKey,
-              r.class_name,
-              r.plus_points,
-              r.minus_points,
-              `Nhập từ Excel: ${fileName}`,
-              now,
-              now,
-            ])
-          })
-
-          stmt.finalize((errStmt) => {
-            if (errStmt) {
-              return db.run("ROLLBACK", () => res.status(500).json({ error: errStmt.message }))
+      ;(async () => {
+        try {
+          const now = time.now()
+          await db.withTransaction(async () => {
+            for (const row of rows) {
+              await db.run(
+                `
+                  INSERT INTO month_adjustments
+                  (month_key, class_name, plus_points, minus_points, reason, created_at, updated_at)
+                  VALUES(?,?,?,?,?,?,?)
+                  ON CONFLICT(month_key, class_name)
+                  DO UPDATE SET
+                    plus_points=excluded.plus_points,
+                    minus_points=excluded.minus_points,
+                    reason=excluded.reason,
+                    updated_at=excluded.updated_at
+                `,
+                [
+                  monthKey,
+                  row.class_name,
+                  row.plus_points,
+                  row.minus_points,
+                  row.reason,
+                  now,
+                  now,
+                ],
+              )
             }
-            db.run("COMMIT", (errCommit) => {
-              if (errCommit) return res.status(500).json({ error: errCommit.message })
-              res.json({ success: true, imported: rows.length })
-            })
           })
-        })
-      })
+          res.json({ success: true, imported: rows.length })
+        } catch (importErr) {
+          res.status(500).json({ error: importErr.message })
+        }
+      })()
     })
   },
 )
 
-/*
-ADMIN: close month (lock + store snapshot scores)
-body: { month_key, week_ids }
-*/
+router.get(
+  "/admin/month/adjustment/template",
+  requireLogin,
+  requireRole(["admin"]),
+  async (req, res) => {
+    try {
+      const workbook = new ExcelJS.Workbook()
+      const ws = workbook.addWorksheet("Month Adjustments")
+      ws.columns = [
+        { header: "Lớp", key: "class_name", width: 18 },
+        { header: "Điểm cộng/trừ", key: "delta", width: 18 },
+        { header: "Lý do", key: "reason", width: 36 },
+      ]
+      ws.addRow({ class_name: "10A1", delta: 10, reason: "Điểm cộng phong trào tháng" })
+      ws.addRow({ class_name: "11A1", delta: -5, reason: "Điểm trừ vi phạm cấp tháng" })
+      ws.getRow(1).font = { bold: true }
+
+      const buffer = await workbook.xlsx.writeBuffer()
+      res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+      res.setHeader("Content-Disposition", 'attachment; filename="template_month_adjustments.xlsx"')
+      res.send(Buffer.from(buffer))
+    } catch (err) {
+      res.status(500).json({ error: err?.message || "Cannot create template" })
+    }
+  },
+)
+
 router.post(
   "/admin/month/close",
   requireLogin,
@@ -3266,7 +3550,15 @@ router.post(
 
       const ensureWeeks = (ids) => {
         if (!ids.length) return res.status(400).json({ error: "Missing week_ids" })
-        loadAdjustments("month_adjustments", "month_key", monthKey, (err2, adjMap) => {
+        ensureAllWeeksClosed(ids, (lockErr) => {
+          if (lockErr) {
+            const message =
+              lockErr.message && String(lockErr.message).includes("Con tuan chua khoa")
+                ? "Tất cả các tuần trong tháng phải được tổng kết trước."
+                : lockErr.message
+            return res.status(lockErr.status || 500).json({ error: message })
+          }
+          loadAdjustments("month_adjustments", "month_key", monthKey, (err2, adjMap) => {
           if (err2) return res.status(500).json({ error: err2.message })
           computePeriodFromWeeks(ids, adjMap, (err3, rawRows) => {
             if (err3) return res.status(500).json({ error: err3.message })
@@ -3293,6 +3585,7 @@ router.post(
               )
             })
           })
+        })
         })
       }
 
@@ -3448,9 +3741,9 @@ router.get(
           const rows = toMonthRows(rawRows)
           const byGrade = periodToRowsByGrade(rows)
           exportExcelWorkbookForMonth(res, {
-            fileName: `ket_qua_thi_dua_thang_${monthKey}.xlsx`,
+            fileName: `ket_qua_thi_dua_thang_${monthKey.replace(/[\\/]/g, "-")}.xlsx`,
             periodTitleByGrade: (g) => `KẾT QUẢ THI ĐUA CỜ ĐỎ KHỐI ${g}`,
-            periodLine2: `Tháng ${monthKey.slice(5, 7)}/${monthKey.slice(0, 4)}`,
+            periodLine2: monthPeriodLabel(monthKey),
             rowsByGrade: byGrade,
           })
         })
@@ -3470,14 +3763,52 @@ router.get(
   (req, res) => {
     db.all(
       `
-        SELECT semester_key, week_ids, month_keys, closed_at, updated_at
-        FROM semester_summaries
-        ORDER BY semester_key DESC
+        SELECT
+          s.id,
+          s.school_year_id,
+          y.name as school_year_name,
+          s.semester_number,
+          s.name,
+          (y.name || '-HK' || s.semester_number) as semester_key,
+          ss.closed_at,
+          ss.updated_at,
+          COALESCE(
+            json_agg(DISTINCT m.month_key) FILTER (WHERE m.month_key IS NOT NULL),
+            '[]'
+          )::text as month_keys,
+          COALESCE(
+            json_agg(w.id ORDER BY w.week_number ASC, w.start_date ASC, w.id ASC)
+              FILTER (WHERE w.id IS NOT NULL),
+            '[]'
+          )::text as week_ids
+        FROM semesters s
+        JOIN school_years y
+          ON y.id = s.school_year_id
+        LEFT JOIN semester_summaries ss
+          ON ss.semester_key = (y.name || '-HK' || s.semester_number)
+        LEFT JOIN months m
+          ON m.semester_id = s.id
+        LEFT JOIN schedule_weeks w
+          ON w.month_id = m.id
+        GROUP BY
+          s.id,
+          s.school_year_id,
+          y.name,
+          s.semester_number,
+          s.name,
+          ss.closed_at,
+          ss.updated_at
+        ORDER BY y.name DESC, s.semester_number ASC
       `,
       [],
       (err, rows) => {
         if (err) return res.status(500).json({ error: err.message })
         const out = (rows || []).map((r) => ({
+          id: r.id,
+          school_year_id: r.school_year_id,
+          school_year_name: r.school_year_name,
+          semester_number: r.semester_number,
+          name: r.name,
           semester_key: r.semester_key,
           week_ids: parseJsonList(r.week_ids),
           month_keys: parseJsonList(r.month_keys),
@@ -3644,6 +3975,26 @@ router.post(
   },
 )
 
+router.delete(
+  "/admin/semester/adjustment",
+  requireLogin,
+  requireRole(["admin"]),
+  (req, res) => {
+    const semesterKey = normalizeSemesterKey(req.body.semester_key || req.query.semester_key)
+    const className = String(req.body.class_name || req.query.class_name || "").trim().toUpperCase()
+    if (!semesterKey || !className) return res.status(400).json({ error: "Missing fields" })
+
+    isPeriodClosed("semester_summaries", "semester_key", semesterKey, (err, closed) => {
+      if (err) return res.status(500).json({ error: err.message })
+      if (closed) return res.status(403).json({ error: "Semester closed" })
+      deleteAdjustment("semester_adjustments", "semester_key", semesterKey, className, (deleteErr, deleted) => {
+        if (deleteErr) return res.status(500).json({ error: deleteErr.message })
+        res.json({ success: true, deleted })
+      })
+    })
+  },
+)
+
 router.post(
   "/admin/semester/close",
   requireLogin,
@@ -3658,7 +4009,23 @@ router.post(
 
       const ensureWeeks = (ids, monthKeys) => {
         if (!ids.length) return res.status(400).json({ error: "Missing week_ids" })
-        loadAdjustments("semester_adjustments", "semester_key", semesterKey, (err2, adjMap) => {
+        ensureAllMonthsClosed(monthKeys || [], (monthLockErr) => {
+          if (monthLockErr) {
+            const message =
+              monthLockErr.message && String(monthLockErr.message).includes("Con thang chua khoa")
+                ? "Tất cả các tháng trong học kỳ phải được tổng kết trước."
+                : monthLockErr.message
+            return res.status(monthLockErr.status || 500).json({ error: message })
+          }
+          ensureAllWeeksClosed(ids, (weekLockErr) => {
+            if (weekLockErr) {
+              const message =
+                weekLockErr.message && String(weekLockErr.message).includes("Con tuan chua khoa")
+                  ? "Tất cả các tuần trong học kỳ phải được tổng kết trước."
+                  : weekLockErr.message
+              return res.status(weekLockErr.status || 500).json({ error: message })
+            }
+            loadAdjustments("semester_adjustments", "semester_key", semesterKey, (err2, adjMap) => {
           if (err2) return res.status(500).json({ error: err2.message })
           computePeriodFromWeeks(ids, adjMap, (err3, rows) => {
             if (err3) return res.status(500).json({ error: err3.message })
@@ -3690,6 +4057,8 @@ router.post(
                 },
               )
             })
+          })
+        })
           })
         })
       }
@@ -3773,7 +4142,8 @@ router.get(
         computePeriodFromWeeks(weekIds, adjMap, (err, rows) => {
           if (err) return res.status(500).json({ error: err.message })
           const byGrade = periodToRowsByGrade(rows)
-          const hk = semesterKey.toUpperCase().endsWith("HK1") ? "I" : "II"
+          const hkNumber = semesterKey.match(/HK([1-9])$/i)?.[1] || ""
+          const hk = romanNumeral(Number(hkNumber))
           exportExcelWorkbookForPeriod(res, {
             fileName: `ket_qua_thi_dua_${semesterKey}.xlsx`,
             periodTitleByGrade: (g) => `KẾT QUẢ THI ĐUA CỜ ĐỎ KHỐI ${g}`,
@@ -3797,15 +4167,43 @@ router.get(
   (req, res) => {
     db.all(
       `
-        SELECT year_key, week_ids, semester_keys, closed_at, updated_at
-        FROM year_summaries
-        ORDER BY year_key DESC
+        SELECT
+          y.id,
+          y.name as year_key,
+          y.start_year,
+          y.end_year,
+          ys.closed_at,
+          ys.updated_at,
+          COALESCE(
+            json_agg(DISTINCT (y.name || '-HK' || s.semester_number))
+              FILTER (WHERE s.id IS NOT NULL),
+            '[]'
+          )::text as semester_keys,
+          COALESCE(
+            json_agg(w.id ORDER BY s.semester_number ASC, ${monthOrderSql("m")} ASC, w.week_number ASC, w.id ASC)
+              FILTER (WHERE w.id IS NOT NULL),
+            '[]'
+          )::text as week_ids
+        FROM school_years y
+        LEFT JOIN year_summaries ys
+          ON ys.year_key = y.name
+        LEFT JOIN semesters s
+          ON s.school_year_id = y.id
+        LEFT JOIN months m
+          ON m.semester_id = s.id
+        LEFT JOIN schedule_weeks w
+          ON w.month_id = m.id
+        GROUP BY y.id, y.name, y.start_year, y.end_year, ys.closed_at, ys.updated_at
+        ORDER BY y.start_year DESC
       `,
       [],
       (err, rows) => {
         if (err) return res.status(500).json({ error: err.message })
         const out = (rows || []).map((r) => ({
+          id: r.id,
           year_key: r.year_key,
+          start_year: r.start_year,
+          end_year: r.end_year,
           week_ids: parseJsonList(r.week_ids),
           semester_keys: parseJsonList(r.semester_keys),
           closed_at: r.closed_at || null,
@@ -3962,6 +4360,26 @@ router.post(
   },
 )
 
+router.delete(
+  "/admin/year/adjustment",
+  requireLogin,
+  requireRole(["admin"]),
+  (req, res) => {
+    const yearKey = normalizeYearKey(req.body.year_key || req.query.year_key)
+    const className = String(req.body.class_name || req.query.class_name || "").trim().toUpperCase()
+    if (!yearKey || !className) return res.status(400).json({ error: "Missing fields" })
+
+    isPeriodClosed("year_summaries", "year_key", yearKey, (err, closed) => {
+      if (err) return res.status(500).json({ error: err.message })
+      if (closed) return res.status(403).json({ error: "Year closed" })
+      deleteAdjustment("year_adjustments", "year_key", yearKey, className, (deleteErr, deleted) => {
+        if (deleteErr) return res.status(500).json({ error: deleteErr.message })
+        res.json({ success: true, deleted })
+      })
+    })
+  },
+)
+
 router.post(
   "/admin/year/close",
   requireLogin,
@@ -3976,32 +4394,53 @@ router.post(
 
       const ensureWeeks = (ids, semesterKeys) => {
         if (!ids.length) return res.status(400).json({ error: "Missing week_ids" })
-        loadAdjustments("year_adjustments", "year_key", yearKey, (err2, adjMap) => {
-          if (err2) return res.status(500).json({ error: err2.message })
-          computePeriodFromWeeks(ids, adjMap, (err3, rows) => {
-            if (err3) return res.status(500).json({ error: err3.message })
-            const rowsByGrade = periodToRowsByGrade(rows)
-            writePeriodScores("year_scores", "year_key", yearKey, rowsByGrade, (err4) => {
-              if (err4) return res.status(500).json({ error: err4.message })
-              const closedAt = time.now()
-              db.run(
-                `
-                  INSERT INTO year_summaries
-                  (year_key, week_ids, semester_keys, closed_at, created_at, updated_at)
-                  VALUES(?,?,?,?,?,?)
-                  ON CONFLICT(year_key)
-                  DO UPDATE SET
-                    week_ids=excluded.week_ids,
-                    semester_keys=excluded.semester_keys,
-                    closed_at=excluded.closed_at,
-                    updated_at=excluded.updated_at
-                `,
-                [yearKey, JSON.stringify(ids), JSON.stringify(semesterKeys || []), closedAt, closedAt, closedAt],
-                (err5) => {
-                  if (err5) return res.status(500).json({ error: err5.message })
-                  res.json({ success: true, year_key: yearKey, closed_at: closedAt, week_ids: ids })
-                },
-              )
+
+        ensureAllSemestersClosed(semesterKeys || [], (semesterLockErr) => {
+          if (semesterLockErr) {
+            const message =
+              semesterLockErr.message && String(semesterLockErr.message).includes("Con hoc ky chua khoa")
+                ? "Không thể tổng kết năm học khi vẫn còn học kỳ chưa khóa."
+                : semesterLockErr.message
+            return res.status(semesterLockErr.status || 500).json({ error: message })
+          }
+
+          ensureAllWeeksClosed(ids, (weekLockErr) => {
+            if (weekLockErr) {
+              const message =
+                weekLockErr.message && String(weekLockErr.message).includes("Con tuan chua khoa")
+                  ? "Tất cả các tuần trong năm học phải được tổng kết trước."
+                  : weekLockErr.message
+              return res.status(weekLockErr.status || 500).json({ error: message })
+            }
+
+            loadAdjustments("year_adjustments", "year_key", yearKey, (err2, adjMap) => {
+              if (err2) return res.status(500).json({ error: err2.message })
+              computePeriodFromWeeks(ids, adjMap, (err3, rows) => {
+                if (err3) return res.status(500).json({ error: err3.message })
+                const rowsByGrade = periodToRowsByGrade(rows)
+                writePeriodScores("year_scores", "year_key", yearKey, rowsByGrade, (err4) => {
+                  if (err4) return res.status(500).json({ error: err4.message })
+                  const closedAt = time.now()
+                  db.run(
+                    `
+                      INSERT INTO year_summaries
+                      (year_key, week_ids, semester_keys, closed_at, created_at, updated_at)
+                      VALUES(?,?,?,?,?,?)
+                      ON CONFLICT(year_key)
+                      DO UPDATE SET
+                        week_ids=excluded.week_ids,
+                        semester_keys=excluded.semester_keys,
+                        closed_at=excluded.closed_at,
+                        updated_at=excluded.updated_at
+                    `,
+                    [yearKey, JSON.stringify(ids), JSON.stringify(semesterKeys || []), closedAt, closedAt, closedAt],
+                    (err5) => {
+                      if (err5) return res.status(500).json({ error: err5.message })
+                      res.json({ success: true, year_key: yearKey, closed_at: closedAt, week_ids: ids })
+                    },
+                  )
+                })
+              })
             })
           })
         })
@@ -4109,23 +4548,147 @@ router.delete(
 
     const id = req.params.id
 
-    // FKs are enforced and configured with ON DELETE CASCADE, so deleting the session
-    // will delete violations/signatures/logs/daily_bonus automatically.
-    db.run(
-      "DELETE FROM duty_sessions WHERE id=?",
-      [id],
-      function(err){
+    ensureSessionWeekUnlocked(id, (lockErr) => {
+      if (lockErr) return res.status(lockErr.status || 500).json({ error: lockErr.message })
 
-        if(err){
-          return res.status(500).json({error:err.message})
+      // FKs are enforced and configured with ON DELETE CASCADE, so deleting the session
+      // will delete violations/signatures/logs/daily_bonus automatically.
+      db.run(
+        "DELETE FROM duty_sessions WHERE id=?",
+        [id],
+        function(err){
+
+          if(err){
+            return res.status(500).json({error:err.message})
+          }
+
+          res.json({success:true,deleted:this.changes})
+
         }
-
-        res.json({success:true,deleted:this.changes})
-
-      }
-    )
+      )
+    })
 
   }
+)
+
+function sendClassPeriodTree(req, res) {
+  ;(async () => {
+    try {
+      const tree = await loadCurrentPeriodTree()
+      res.json(tree)
+    } catch (err) {
+      res.status(500).json({ error: err.message })
+    }
+  })()
+}
+
+function sendClassPeriodSummary(periodType, getKey) {
+  return (req, res) => {
+    const className = req.session.user?.class_name
+    const key = getKey(req)
+    if (!className) return res.status(400).json({ error: "Missing class" })
+    if (!key) return res.status(400).json({ error: "Invalid period" })
+
+    loadComputedPeriodSummary(periodType, key, (err, result) => {
+      if (err) return res.status(err.status || 500).json({ error: err.message })
+      res.json(
+        buildClassPeriodPayload({
+          periodType,
+          key,
+          meta: result.meta,
+          scoresByGrade: result.scores_by_grade,
+          className,
+        }),
+      )
+    })
+  }
+}
+
+function sendClassWeekSummary(req, res) {
+  const weekId = Number(req.params.weekId)
+  const className = req.session.user?.class_name
+  if (!weekId) return res.status(400).json({ error: "Invalid week" })
+  if (!className) return res.status(400).json({ error: "Missing class" })
+
+  loadComputedWeekSummary(weekId, (err, result) => {
+    if (err) return res.status(err.status || 500).json({ error: err.message })
+    const payload = buildClassPeriodPayload({
+      periodType: "week",
+      key: String(weekId),
+      meta: { closed_at: result.closed_at, week_ids: [weekId] },
+      scoresByGrade: result.scores_by_grade,
+      className,
+    })
+    res.json({
+      week: result.week,
+      closed_at: result.closed_at,
+      scores: result.scores || [],
+      ...payload,
+    })
+  })
+}
+
+router.get(
+  "/bancansu/period-tree",
+  requireLogin,
+  requireRole(["bancansu"]),
+  sendClassPeriodTree,
+)
+
+router.get(
+  "/bancansu/week/:weekId/summary",
+  requireLogin,
+  requireRole(["bancansu"]),
+  sendClassWeekSummary,
+)
+
+router.get(
+  "/bancansu/month/:monthKey/summary",
+  requireLogin,
+  requireRole(["bancansu"]),
+  sendClassPeriodSummary("month", (req) => normalizeMonthKey(req.params.monthKey)),
+)
+
+router.get(
+  "/bancansu/semester/:semesterKey/summary",
+  requireLogin,
+  requireRole(["bancansu"]),
+  sendClassPeriodSummary("semester", (req) => normalizeSemesterKey(req.params.semesterKey)),
+)
+
+router.get(
+  "/bancansu/year/:yearKey/summary",
+  requireLogin,
+  requireRole(["bancansu"]),
+  sendClassPeriodSummary("year", (req) => normalizeYearKey(req.params.yearKey)),
+)
+
+router.get(
+  "/gvcn/period-tree",
+  requireLogin,
+  requireRole(["gvcn"]),
+  sendClassPeriodTree,
+)
+
+router.get(
+  "/gvcn/month/:monthKey/summary",
+  requireLogin,
+  requireRole(["gvcn"]),
+  sendClassPeriodSummary("month", (req) => normalizeMonthKey(req.params.monthKey)),
+)
+
+router.get(
+  "/gvcn/semester/:semesterKey/summary",
+  requireLogin,
+  requireRole(["gvcn"]),
+  sendClassPeriodSummary("semester", (req) => normalizeSemesterKey(req.params.semesterKey)),
+)
+
+router.get(
+  "/gvcn/year/:yearKey/summary",
+  requireLogin,
+  requireRole(["gvcn"]),
+  sendClassPeriodSummary("year", (req) => normalizeYearKey(req.params.yearKey)),
 )
 
 /*
@@ -4159,8 +4722,7 @@ router.get(
             if (baseErr) return res.status(500).json({ error: baseErr.message })
             res.json({ week, sessions: rows || [], base_points: baseScore })
           })
-        },
-      )
+      })
     })
   },
 )
@@ -4480,38 +5042,28 @@ router.get(
   requireRole(["gvcn"]),
   (req, res) => {
     const weekId = Number(req.params.weekId)
+    const className = req.session.user?.class_name
     if (!weekId) return res.status(400).json({ error: "Invalid week" })
+    if (!className) return res.status(400).json({ error: "Missing class" })
 
-    db.get(
-      `SELECT * FROM schedule_weeks WHERE id=? LIMIT 1`,
-      [weekId],
-      (err, week) => {
-        if (err) return res.status(500).json({ error: err.message })
-        if (!week) return res.status(404).json({ error: "Week not found" })
-
-        isWeekClosed(weekId, (err, closed, closedAt) => {
-          if (err) return res.status(500).json({ error: err.message })
-          if (!closed) {
-            return res.json({ week, closed_at: null, scores: [] })
-          }
-
-          db.all(
-            `
-              SELECT class_name, score, updated_at
-              FROM weekly_scores
-              WHERE week_id=?
-              ORDER BY score DESC
-            `,
-            [weekId],
-            (err, scores) => {
-              if (err) return res.status(500).json({ error: err.message })
-              res.json({ week, closed_at: closedAt || null, scores: scores || [] })
-            },
-          )
-        })
-      },
-    )
+    loadComputedWeekSummary(weekId, (err, result) => {
+      if (err) return res.status(err.status || 500).json({ error: err.message })
+      const payload = buildClassPeriodPayload({
+        periodType: "week",
+        key: String(weekId),
+        meta: { closed_at: result.closed_at, week_ids: [weekId] },
+        scoresByGrade: result.scores_by_grade,
+        className,
+      })
+      res.json({
+        week: result.week,
+        closed_at: result.closed_at,
+        scores: result.scores || [],
+        ...payload,
+      })
+    })
   },
 )
 
 module.exports = router
+
