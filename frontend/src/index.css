@@ -43,6 +43,18 @@ body {
   body {
     padding-bottom: var(--edp-mobile-nav-space);
   }
+
+  .edp-assistant-shell {
+    padding-bottom: 0 !important;
+  }
+
+  body:has(.edp-assistant-shell) {
+    padding-bottom: 0;
+  }
+
+  footer {
+    display: none;
+  }
 }
 
 .edp-mobile-shell {

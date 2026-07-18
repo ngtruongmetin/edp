@@ -1062,11 +1062,11 @@ export default function CodoDutyAssistant() {
     : classes
 
   return (
-    <div className="edp-mobile-shell flex flex-col bg-[radial-gradient(circle_at_top,#eef5ff_0%,#f8fbff_36%,#f3f6fb_100%)]">
+    <div className="edp-mobile-shell edp-assistant-shell flex min-h-[100dvh] flex-col overflow-hidden bg-[radial-gradient(circle_at_top,#eef5ff_0%,#f8fbff_36%,#f3f6fb_100%)]">
       <Navbar />
 
-      <div className="mx-auto flex w-full max-w-md flex-1 flex-col">
-        <header className="sticky top-0 z-30 px-4 pb-3 pt-3 md:top-16">
+      <div className="mx-auto flex min-h-0 w-full max-w-md flex-1 flex-col overflow-hidden">
+        <header className="fixed left-1/2 top-0 z-30 w-full max-w-md -translate-x-1/2 px-4 pb-3 pt-3 md:top-16">
           <div className="edp-glass-panel edp-spring-in flex min-h-[76px] items-center gap-3 rounded-[28px] px-3 py-3">
             <button
               type="button"
@@ -1081,23 +1081,17 @@ export default function CodoDutyAssistant() {
               <div className="text-[17px] font-semibold tracking-tight text-slate-900">
                 AI Assistant
               </div>
-              <div className="mt-0.5 truncate text-[13px] text-slate-500">
-                Ca trực hôm nay
-              </div>
-              <div className="mt-1 flex items-center gap-2 text-xs text-slate-500">
-                <span className="rounded-full bg-white/60 px-2.5 py-1 font-medium text-slate-700">
-                  {meta.dutyClass || "--"}
-                </span>
-                <span>•</span>
-                <span>Tuần {meta.weekNumber ?? "--"}</span>
-                <span>•</span>
-                <span>{meta.dateDisplay}</span>
-              </div>
             </div>
           </div>
         </header>
 
-        <main className="flex-1 overflow-y-auto px-4 pb-32 pt-1">
+        <main
+          className="min-h-0 flex-1 overflow-y-auto px-4 pt-28 md:pt-32 lg:pt-32"
+          style={{
+            paddingBottom:
+              "calc(7.5rem + var(--edp-mobile-nav-space, 0px) + env(safe-area-inset-bottom) + var(--edp-keyboard-offset, 0px))",
+          }}
+        >
           <div className="space-y-4">
             {isBooting ? (
               <div className="edp-fade-up flex justify-start">
@@ -1203,10 +1197,11 @@ export default function CodoDutyAssistant() {
         </main>
 
         <div
-          className="sticky bottom-0 z-40 px-4 pb-4 pt-3"
+          className="fixed inset-x-0 z-40 mx-auto w-full max-w-md px-4 pb-4 pt-3"
           style={{
+            bottom: "var(--edp-mobile-nav-space, 0px)",
             paddingBottom:
-              "calc(1rem + env(safe-area-inset-bottom) + var(--edp-mobile-nav-space, 0px) + var(--edp-keyboard-offset, 0px))",
+              "calc(1rem + env(safe-area-inset-bottom) + var(--edp-keyboard-offset, 0px))",
           }}
         >
           <div className="edp-glass-panel edp-spring-in rounded-[30px] p-3 shadow-[0_18px_38px_rgba(15,23,42,0.10)]">
@@ -1242,9 +1237,9 @@ export default function CodoDutyAssistant() {
                 <SendIcon />
               </button>
             </div>
+          </div>
         </div>
       </div>
-    </div>
 
       <CodoDutySignSheet
         open={showSignSheet && !!session}
