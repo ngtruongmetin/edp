@@ -227,10 +227,10 @@ export default function AdminDutyManage() {
 
   async function adminSignSession(id: number) {
     if (!adminSignPassword.trim()) {
-      alert("Vui lòng nhập mật khẩu admin")
+      alert("Vui lòng nhập mật khẩu quản trị")
       return
     }
-    if (!confirm("Ký phiếu này bằng quyền Admin?")) return
+    if (!confirm("Ký phiếu này bằng quyền quản trị?")) return
 
     setAdminSigning(true)
     try {
@@ -243,7 +243,7 @@ export default function AdminDutyManage() {
     } catch (err: any) {
       const msg =
         err?.response?.data?.error === "Invalid password"
-          ? "Mật khẩu admin không đúng"
+          ? "Mật khẩu quản trị không đúng"
           : err?.response?.data?.error || "Không thể ký"
       alert(msg)
     } finally {
@@ -633,7 +633,7 @@ export default function AdminDutyManage() {
       <div className="flex-1 max-w-6xl mx-auto w-full px-4 pt-6 pb-10 space-y-5">
         <div className="text-sm text-gray-500 flex items-center gap-2">
           <Link to="/admin/dashboard" className="hover:text-[#2e77df]">
-            Dashboard
+            Bảng điều khiển
           </Link>
           <span>/</span>
           <span className="font-medium text-gray-700">Quản lý phiếu trực</span>
@@ -749,7 +749,7 @@ export default function AdminDutyManage() {
                 disabled={uploading || !weekId}
                 className="rounded-2xl bg-[#2e77df] px-4 py-2.5 text-sm font-semibold text-white shadow-sm disabled:opacity-50"
               >
-                {uploading ? "Đang upload..." : "Upload zip"}
+                {uploading ? "Đang tải lên..." : "Tải tệp zip"}
               </button>
             </div>
 
@@ -885,7 +885,7 @@ export default function AdminDutyManage() {
                 type="password"
                 value={adminSignPassword}
                 onChange={(e) => setAdminSignPassword(e.target.value)}
-                placeholder="Mật khẩu admin"
+                placeholder="Mật khẩu quản trị"
                 className="h-8 rounded-full border border-blue-100 px-3 text-xs outline-none focus:border-[#2e77df]"
               />
               <button
@@ -1125,14 +1125,14 @@ export default function AdminDutyManage() {
                     {detail.session.status !== "signed" ? (
                       <div className="mt-3 rounded-2xl bg-white p-3 ring-1 ring-blue-100">
                         <div className="text-xs font-semibold text-gray-700">
-                          Ký phụ (Admin)
+                          Ký phụ (Quản trị)
                         </div>
                         <div className="mt-2 flex gap-2">
                           <input
                             type="password"
                             value={adminSignPassword}
                             onChange={(e) => setAdminSignPassword(e.target.value)}
-                            placeholder="Mật khẩu admin"
+                            placeholder="Mật khẩu quản trị"
                             className="flex-1 rounded-xl border border-blue-100 px-3 py-2 text-sm outline-none focus:border-[#2e77df]"
                           />
                           <button
@@ -1144,7 +1144,7 @@ export default function AdminDutyManage() {
                           </button>
                         </div>
                         <div className="mt-1 text-[11px] text-gray-500">
-                          Không cần PIN. Hệ thống sẽ ghi lại lịch sử: Ký (Admin).
+                          Không cần PIN. Hệ thống sẽ ghi lại lịch sử: Ký (quản trị).
                         </div>
                       </div>
                     ) : null}
@@ -1196,7 +1196,7 @@ export default function AdminDutyManage() {
                   <div className="rounded-2xl bg-white p-4 ring-1 ring-blue-50">
                     <div className="flex items-center gap-2">
                       <div className="text-sm font-semibold text-gray-900">
-                        Sổ đầu bài (Admin)
+                        Sổ đầu bài (Quản trị)
                       </div>
                       <div className="ml-auto text-xs text-gray-500">
                         Tổng:{" "}

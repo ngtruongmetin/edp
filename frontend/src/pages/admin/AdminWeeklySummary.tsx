@@ -167,7 +167,7 @@ export default function AdminWeeklySummary() {
       <div className="flex-1 max-w-4xl mx-auto w-full px-4 pt-6 pb-10 space-y-5">
         <div className="text-sm text-gray-500 flex items-center gap-2">
           <Link to="/admin/dashboard" className="hover:text-[#2e77df]">
-            Dashboard
+            Bảng điều khiển
           </Link>
           <span>/</span>
           <span className="font-medium text-gray-700">Tổng kết tuần</span>

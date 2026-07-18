@@ -103,7 +103,7 @@ export default function AdminTimetable() {
       <div className="flex-1 max-w-6xl mx-auto w-full px-4 pt-6 pb-10 space-y-5">
         <div className="text-sm text-gray-500 flex items-center gap-2">
           <Link to="/admin/dashboard" className="hover:text-[#2e77df]">
-            Dashboard
+            Bảng điều khiển
           </Link>
           <span>/</span>
           <span className="font-medium text-gray-700">Thời khóa biểu</span>
@@ -135,7 +135,7 @@ export default function AdminTimetable() {
               disabled={uploading}
               className="rounded-2xl bg-[#2e77df] px-4 py-2.5 text-sm font-semibold text-white shadow-sm disabled:opacity-50"
             >
-              {uploading ? "Đang upload..." : "Upload TKB"}
+              {uploading ? "Đang tải lên..." : "Tải TKB"}
             </button>
           </div>
         </div>

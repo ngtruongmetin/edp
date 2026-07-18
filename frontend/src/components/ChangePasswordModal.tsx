@@ -1,6 +1,7 @@
 import { useState } from "react"
 import { api } from "../api/api"
 import toast from "react-hot-toast"
+import ModalShell from "./ModalShell"
 
 type Props = {
   role: "bancansu" | "co_do" | "admin" | "gvcn"
@@ -128,8 +129,7 @@ export default function ChangePasswordModal({ role, onSuccess, canClose = true }
   }
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center">
-      <div className="bg-white rounded-3xl p-6 max-w-md w-full mx-4 shadow-2xl">
+    <ModalShell className="max-w-md p-6">
         {/* CHOOSE MODE - Only for settings (canClose=true) */}
         {mode === "choose" && (
           <>
@@ -342,7 +342,6 @@ export default function ChangePasswordModal({ role, onSuccess, canClose = true }
             )}
           </>
         )}
-      </div>
-    </div>
+    </ModalShell>
   )
 }

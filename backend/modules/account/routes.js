@@ -30,6 +30,45 @@ router.post("/change-password", requireLogin, (req, res) => {
 
   const role = req.session.user?.role
   const classId = req.session.user?.class_id
+  const username = req.session.user?.username
+
+  if (role === "admin") {
+    if (!username) {
+      return res.status(401).json({ error: "Khong co thong tin tai khoan" })
+    }
+
+    db.get(
+      `SELECT password FROM admins WHERE username=? LIMIT 1`,
+      [username],
+      (err, row) => {
+        if (err) return res.status(500).json({ error: err.message })
+        if (!row) return res.status(404).json({ error: "Admin not found" })
+
+        bcrypt.compare(old_password, row.password, (compareErr, isMatch) => {
+          if (compareErr) return res.status(500).json({ error: compareErr.message })
+
+          if (!isMatch) {
+            return res.status(401).json({ error: "Mat khau cu khong dung" })
+          }
+
+          bcrypt.hash(new_password, 10, (hashErr, hash) => {
+            if (hashErr) return res.status(500).json({ error: hashErr.message })
+
+            db.run(
+              `UPDATE admins SET password=? WHERE username=?`,
+              [hash, username],
+              (updateErr) => {
+                if (updateErr) return res.status(500).json({ error: updateErr.message })
+                res.json({ success: true, message: "Da cap nhat mat khau" })
+              },
+            )
+          })
+        })
+      },
+    )
+
+    return
+  }
 
   if (!role || !classId) {
     return res.status(401).json({ error: "Không có thông tin role" })

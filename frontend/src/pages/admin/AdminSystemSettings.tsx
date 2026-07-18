@@ -419,7 +419,7 @@ export default function AdminSystemSettings() {
       <div className="flex-1 max-w-6xl mx-auto w-full px-4 sm:px-6 py-8 space-y-6">
         <div className="text-sm text-gray-500 flex items-center gap-2">
           <Link to="/admin/dashboard" className="hover:text-[#2e77df]">
-            Dashboard
+            Bảng điều khiển
           </Link>
           <span>/</span>
           <span className="font-medium text-gray-700">Cấu hình hệ thống</span>
@@ -429,7 +429,7 @@ export default function AdminSystemSettings() {
           <div className="px-8 py-7 flex flex-col gap-4 lg:flex-row lg:items-center">
             <div className="min-w-0">
               <div className="text-xs uppercase tracking-[0.2em] text-white/70">
-                Admin
+                Quản trị
               </div>
               <h1 className="mt-2 text-3xl font-semibold">Cấu hình hệ thống</h1>
               <p className="mt-2 text-sm text-white/80">
