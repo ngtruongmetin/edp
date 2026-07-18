@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react"
+import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react"
 import { useNavigate, useParams } from "react-router-dom"
 
 import { api } from "../../api/api"
@@ -194,7 +194,7 @@ function OverflowMarquee({ text }: { text: string }) {
   const textRef = useRef<HTMLSpanElement | null>(null)
   const [isOverflowing, setIsOverflowing] = useState(false)
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const container = containerRef.current
     const textElement = textRef.current
 
@@ -203,10 +203,27 @@ function OverflowMarquee({ text }: { text: string }) {
     }
 
     const measure = () => {
-      setIsOverflowing(textElement.scrollWidth > container.clientWidth)
+      const clientWidth = container.clientWidth
+      const scrollWidth = textElement.scrollWidth
+      const renderedWidth = textElement.getBoundingClientRect().width
+      const contentWidth = Math.ceil(Math.max(scrollWidth, renderedWidth))
+      const nextIsOverflowing = clientWidth > 0 && contentWidth > clientWidth
+
+      if (import.meta.env.DEV) {
+        console.debug("OverflowMarquee measure", {
+          text,
+          clientWidth,
+          scrollWidth,
+          renderedWidth,
+          isOverflowing: nextIsOverflowing,
+        })
+      }
+
+      setIsOverflowing(nextIsOverflowing)
     }
 
     measure()
+    const animationFrameId = window.requestAnimationFrame(measure)
 
     const resizeObserver =
       typeof ResizeObserver !== "undefined"
@@ -218,10 +235,11 @@ function OverflowMarquee({ text }: { text: string }) {
     window.addEventListener("resize", measure)
 
     return () => {
+      window.cancelAnimationFrame(animationFrameId)
       resizeObserver?.disconnect()
       window.removeEventListener("resize", measure)
     }
-  }, [text])
+  }, [isOverflowing, text])
 
   if (!isOverflowing) {
     return (
