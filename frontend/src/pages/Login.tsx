@@ -18,6 +18,11 @@ const roleOptions = [
   { value: "co_do", label: "Cờ đỏ" },
 ]
 
+type ClassOption = {
+  id: number
+  name: string
+}
+
 export default function Login() {
   usePageTitle("EDP | Đăng nhập")
   useKeyboardInsets()
@@ -25,44 +30,19 @@ export default function Login() {
   const { user, loading, refresh, isOffline } = useAuth()
 
   const [role, setRole] = useState("co_do")
-  const [classes, setClasses] = useState<any[]>([])
+  const [classes, setClasses] = useState<ClassOption[]>([])
   const [className, setClassName] = useState("")
   const [username, setUsername] = useState("")
   const [password, setPassword] = useState("")
   const [showPassword, setShowPassword] = useState(false)
   const [submitting, setSubmitting] = useState(false)
 
-  const usernameRef = useRef<HTMLInputElement>(null)
-  const classInputRef = useRef<HTMLInputElement>(null)
   const passwordRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
     if (loading || user) return
     loadClasses()
   }, [loading, user])
-
-  useEffect(() => {
-    if (loading || user) return
-
-    const timer = window.setTimeout(() => {
-      const target =
-        role === "admin"
-          ? usernameRef.current
-          : classInputRef.current || passwordRef.current
-
-      target?.focus()
-    }, 0)
-
-    return () => window.clearTimeout(timer)
-  }, [loading, user, role])
-
-  useEffect(() => {
-    if (role !== "admin" && className) {
-      window.setTimeout(() => {
-        passwordRef.current?.focus()
-      }, 0)
-    }
-  }, [role, className])
 
   if (!loading && user) {
     return <Navigate to={getDashboardPath(user.role)} replace />
@@ -84,14 +64,6 @@ export default function Login() {
     setPassword("")
     setShowPassword(false)
 
-    window.setTimeout(() => {
-      const target =
-        nextRole === "admin"
-          ? usernameRef.current
-          : classInputRef.current || passwordRef.current
-
-      target?.focus()
-    }, 0)
   }
 
   const submit = async (e?: React.FormEvent) => {
@@ -194,7 +166,6 @@ export default function Login() {
                     Tên người dùng
                   </label>
                   <input
-                    ref={usernameRef}
                     className="edp-input w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-slate-900 shadow-sm outline-none transition placeholder:text-slate-400 focus:border-[#2e77df] focus:ring-2 focus:ring-blue-100"
                     placeholder="Tên đăng nhập"
                     value={username}
@@ -257,7 +228,6 @@ export default function Login() {
                     classes={classes}
                     value={className}
                     onChange={setClassName}
-                    inputRef={classInputRef}
                   />
                 </div>
 

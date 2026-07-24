@@ -1,4 +1,7 @@
-import { useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
+
+import SelectorBackdrop from "./SelectorBackdrop"
+import { useDismissibleSelector } from "../utils/useDismissibleSelector"
 
 export type RuleType = {
   id: number
@@ -20,11 +23,12 @@ export default function RuleSelector({
   onChange,
   placeholder = "Chọn lỗi vi phạm",
 }: Props) {
-  const rootRef = useRef<HTMLDivElement>(null)
   const [query, setQuery] = useState("")
   const [open, setOpen] = useState(false)
   const [index, setIndex] = useState(0)
 
+  const close = useCallback(() => setOpen(false), [])
+  const rootRef = useDismissibleSelector(open, close)
   const listRef = useRef<HTMLDivElement>(null)
 
   const selected = value != null ? rules.find((r) => r.id === value) : null
@@ -48,29 +52,10 @@ export default function RuleSelector({
     item.scrollIntoView({ block: "nearest" })
   }, [index])
 
-  useEffect(() => {
-    if (!open) return
-
-    function onOutside(e: MouseEvent | TouchEvent) {
-      const root = rootRef.current
-      const target = e.target as Node | null
-      if (!root || !target) return
-      if (!root.contains(target)) setOpen(false)
-    }
-
-    document.addEventListener("mousedown", onOutside)
-    document.addEventListener("touchstart", onOutside)
-
-    return () => {
-      document.removeEventListener("mousedown", onOutside)
-      document.removeEventListener("touchstart", onOutside)
-    }
-  }, [open])
-
   function pick(r: RuleType) {
     onChange(r.id)
     setQuery("")
-    setOpen(false)
+    close()
   }
 
   function handleKey(e: React.KeyboardEvent) {
@@ -94,19 +79,21 @@ export default function RuleSelector({
 
     if (e.key === "Escape") {
       e.preventDefault()
-      setOpen(false)
+      close()
     }
   }
 
   const display = selected ? selected.name : ""
 
   return (
-    <div ref={rootRef} className="relative">
+    <div ref={rootRef} className={`relative ${open ? "z-50" : ""}`}>
+      {open && <SelectorBackdrop onClose={close} />}
       <input
         className="edp-input w-full rounded-2xl border border-blue-100 bg-white px-4 py-3 text-slate-900 shadow-sm outline-none focus:border-[#2e77df] focus:ring-2 focus:ring-blue-200"
         placeholder={placeholder}
         value={display || query}
-        onFocus={(e) => {
+        onClick={(e) => {
+          setIndex(0)
           setOpen(true)
           e.currentTarget.scrollIntoView({ block: "center", behavior: "smooth" })
         }}
@@ -115,6 +102,7 @@ export default function RuleSelector({
           setQuery(e.target.value)
           setIndex(0)
           onChange(null)
+          setOpen(true)
         }}
       />
 

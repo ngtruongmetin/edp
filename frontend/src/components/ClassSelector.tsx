@@ -1,4 +1,7 @@
-import { useState, useRef, useEffect } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
+
+import SelectorBackdrop from "./SelectorBackdrop"
+import { useDismissibleSelector } from "../utils/useDismissibleSelector"
 
 type ClassType = {
   id: number
@@ -9,14 +12,15 @@ type Props = {
   classes: ClassType[]
   value: string
   onChange: (v: string) => void
-  inputRef?: React.Ref<HTMLInputElement>
 }
 
-export default function ClassSelector({ classes, value, onChange, inputRef }: Props) {
+export default function ClassSelector({ classes, value, onChange }: Props) {
   const [query, setQuery] = useState("")
   const [open, setOpen] = useState(false)
   const [index, setIndex] = useState(0)
 
+  const close = useCallback(() => setOpen(false), [])
+  const rootRef = useDismissibleSelector(open, close)
   const listRef = useRef<HTMLDivElement>(null)
 
   const filtered = classes.filter((c) =>
@@ -56,24 +60,25 @@ export default function ClassSelector({ classes, value, onChange, inputRef }: Pr
       if (c) {
         onChange(c.name)
         setQuery("")
-        setOpen(false)
+        close()
       }
     }
 
     if (e.key === "Escape") {
       e.preventDefault()
-      setOpen(false)
+      close()
     }
   }
 
   return (
-    <div className="relative">
+    <div ref={rootRef} className={`relative ${open ? "z-50" : ""}`}>
+      {open && <SelectorBackdrop onClose={close} />}
       <input
-        ref={inputRef}
         className="edp-input w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-slate-900 shadow-sm outline-none transition placeholder:text-slate-400 focus:border-[#2e77df] focus:ring-2 focus:ring-blue-100"
         placeholder="Tìm hoặc chọn lớp"
         value={value || query}
-        onFocus={(e) => {
+        onClick={(e) => {
+          setIndex(0)
           setOpen(true)
           e.currentTarget.scrollIntoView({ block: "center", behavior: "smooth" })
         }}
@@ -82,6 +87,7 @@ export default function ClassSelector({ classes, value, onChange, inputRef }: Pr
           setQuery(e.target.value)
           setIndex(0)
           onChange("")
+          setOpen(true)
         }}
       />
 
@@ -107,7 +113,7 @@ export default function ClassSelector({ classes, value, onChange, inputRef }: Pr
                   onClick={() => {
                     onChange(c.name)
                     setQuery("")
-                    setOpen(false)
+                    close()
                   }}
                 >
                   <div className="text-[15px] font-medium text-slate-900">{c.name}</div>
