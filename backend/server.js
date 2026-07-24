@@ -73,6 +73,7 @@ app.use(
 
 app.use("/api/auth", require("./modules/auth/routes"))
 app.use("/api/account", require("./modules/account/routes"))
+app.use("/api/passkeys", require("./modules/passkeys/routes"))
 app.use("/api/rules", require("./modules/rules/routes"))
 app.use("/api/classes", require("./modules/classes/routes"))
 app.use("/api/schedule", require("./modules/schedule/routes"))

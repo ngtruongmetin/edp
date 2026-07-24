@@ -53,10 +53,6 @@ export default function GvcnDashboard() {
   const { user: authUser, isOffline } = useAuth()
   const context = useOutletContext<any>()
   const user = context?.user
-  const setShowChangePassword = context?.setShowChangePassword as
-    | ((open: boolean) => void)
-    | undefined
-
   const [time, setTime] = useState("")
   const [todayDate, setTodayDate] = useState("")
 
@@ -329,14 +325,8 @@ export default function GvcnDashboard() {
       <div className="flex-1 max-w-md mx-auto w-full px-4 pt-5 pb-10 space-y-5">
         <div className="rounded-3xl bg-gradient-to-br from-[#2e77df] via-[#2b6fd0] to-[#1f5fc0] text-white shadow-lg">
           <div className="px-6 pt-6 pb-5">
-            <div className="flex items-center justify-between gap-3">
+            <div className="flex items-center gap-3">
               <div className="text-sm opacity-90">Xin chào thầy/cô</div>
-              <button
-                onClick={() => setShowChangePassword?.(true)}
-                className="rounded-xl bg-white/20 px-4 py-2 text-sm font-semibold hover:bg-white/30 transition"
-              >
-                Cài đặt
-              </button>
             </div>
 
             <div className="mt-1 text-2xl font-semibold tracking-tight">

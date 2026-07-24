@@ -44,6 +44,15 @@ function LogoutIcon() {
   )
 }
 
+function SettingsIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" className="h-5 w-5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <circle cx="12" cy="12" r="3" />
+      <path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.06.06-2.12 2.12-.06-.06a1.7 1.7 0 0 0-1.88-.34 1.7 1.7 0 0 0-1.03 1.56V20.3h-3v-.08A1.7 1.7 0 0 0 10.68 18.66a1.7 1.7 0 0 0-1.88.34l-.06.06-2.12-2.12.06-.06A1.7 1.7 0 0 0 7.02 15a1.7 1.7 0 0 0-1.56-1.03h-.08v-3h.08A1.7 1.7 0 0 0 7.02 9.94a1.7 1.7 0 0 0-.34-1.88l-.06-.06 2.12-2.12.06.06a1.7 1.7 0 0 0 1.88.34 1.7 1.7 0 0 0 1.03-1.56V4.64h3v.08a1.7 1.7 0 0 0 1.03 1.56 1.7 1.7 0 0 0 1.88-.34l.06-.06L19.8 8l-.06.06a1.7 1.7 0 0 0-.34 1.88 1.7 1.7 0 0 0 1.56 1.03h.08v3h-.08A1.7 1.7 0 0 0 19.4 15Z" />
+    </svg>
+  )
+}
+
 export default function Navbar() {
   const { user, loading, logout, isOffline } = useAuth()
   const navigate = useNavigate()
@@ -108,6 +117,21 @@ export default function Navbar() {
               </NavLink>
             )}
 
+            {!loading && user && (
+              <NavLink
+                to="/account/settings"
+                className={({ isActive }) =>
+                  `rounded-full px-4 py-2 transition ${
+                    isActive
+                      ? "bg-[#2e77df] text-white shadow-sm"
+                      : "text-slate-600 hover:bg-blue-50 hover:text-[#2e77df]"
+                  }`
+                }
+              >
+                Cài đặt
+              </NavLink>
+            )}
+
             <NavLink
               to="/schedule"
               className={({ isActive }) =>
@@ -155,7 +179,7 @@ export default function Navbar() {
         }}
         aria-label="Điều hướng chính"
       >
-        <div className="mx-auto grid max-w-6xl grid-cols-3 gap-1 px-3 pt-2">
+        <div className={`mx-auto grid max-w-6xl gap-1 px-3 pt-2 ${user ? "grid-cols-4" : "grid-cols-3"}`}>
           <NavLink
             to={dashboardPath}
             className={({ isActive }) =>
@@ -187,6 +211,22 @@ export default function Navbar() {
             </span>
             Lịch trực
           </NavLink>
+
+          {user && (
+            <NavLink
+              to="/account/settings"
+              className={({ isActive }) =>
+                `flex min-h-14 flex-col items-center justify-center rounded-2xl px-2 py-2 text-[11px] font-semibold transition active:scale-[0.98] ${
+                  isActive
+                    ? "bg-[#eff6ff] text-[#2e77df]"
+                    : "text-slate-500 hover:bg-slate-50 hover:text-slate-900"
+                }`
+              }
+            >
+              <span className="mb-1 flex h-6 w-6 items-center justify-center"><SettingsIcon /></span>
+              Cài đặt
+            </NavLink>
+          )}
 
           {user ? (
             <button

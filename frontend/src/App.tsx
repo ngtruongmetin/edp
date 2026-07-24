@@ -5,6 +5,8 @@ import Login from "./pages/Login"
 import NotFound from "./pages/NotFound"
 import OpenInBrowser from "./pages/OpenInBrowser"
 import Schedule from "./pages/Schedule"
+import Passkeys from "./pages/Passkeys"
+import AccountSettings from "./pages/AccountSettings"
 
 import AdminLayout from "./pages/admin/AdminLayout"
 import AdminDashboard from "./pages/admin/AdminDashboard"
@@ -32,6 +34,7 @@ import GvcnDashboard from "./pages/gvcn/GvcnDashboard"
 
 import { useAuth } from "./auth/AuthContext"
 import { Toaster } from "react-hot-toast"
+import PasskeyEnrollmentBanner from "./components/PasskeyEnrollmentBanner"
 
 export default function App(){
   const { user, loading } = useAuth()
@@ -64,6 +67,8 @@ export default function App(){
         <Route path="/login" element={<Login/>}/>
         <Route path="/open-in-browser" element={<OpenInBrowser/>}/>
         <Route path="/schedule" element={<Schedule/>}/>
+        <Route path="/account/settings" element={<AccountSettings/>}/>
+        <Route path="/account/passkeys" element={<Passkeys/>}/>
 
         {/* admin */}
         <Route path="/admin" element={<AdminLayout/>}>
@@ -107,6 +112,8 @@ export default function App(){
         <Route path="*" element={<NotFound/>}/>
 
       </Routes>
+
+      {user && <PasskeyEnrollmentBanner />}
 
     </BrowserRouter>
 

@@ -2,8 +2,6 @@ import { useEffect, useState } from "react"
 import { useNavigate } from "react-router-dom"
 
 import { api } from "../../api/api"
-import { useAuth } from "../../auth/AuthContext"
-import ChangePasswordModal from "../../components/ChangePasswordModal"
 import Footer from "../../components/Footer"
 import Navbar from "../../components/Navbar"
 import { usePageTitle } from "../../utils/usePageTitle"
@@ -32,12 +30,10 @@ const shortcutItems = [
 export default function AdminDashboard() {
   usePageTitle("EDP | Bảng điều khiển quản trị")
 
-  const { user } = useAuth()
   const navigate = useNavigate()
 
   const [classes, setClasses] = useState<ClassType[]>([])
   const [loading, setLoading] = useState(true)
-  const [showChangePassword, setShowChangePassword] = useState(false)
 
   useEffect(() => {
     void loadClasses()
@@ -122,28 +118,6 @@ export default function AdminDashboard() {
           <div className="space-y-6">
             <section className="edp-glass-panel rounded-[32px] p-5 sm:p-6">
               <div className="text-xs font-semibold uppercase tracking-[0.22em] text-[#2e77df]/70">
-                Tài khoản
-              </div>
-              <h2 className="mt-3 text-xl font-semibold text-slate-900">Đổi mật khẩu quản trị</h2>
-              <p className="mt-2 text-sm leading-6 text-slate-500">
-                Cập nhật mật khẩu đăng nhập của tài khoản quản trị hiện tại mà không ảnh hưởng session đang hoạt động.
-              </p>
-
-              <div className="mt-5 rounded-[24px] border border-white/70 bg-white/78 p-4 shadow-[0_16px_30px_rgba(15,23,42,0.05)]">
-                <div className="text-xs text-slate-500">Đăng nhập hiện tại</div>
-                <div className="mt-2 text-base font-semibold text-slate-900">{user?.username || "admin"}</div>
-                <button
-                  type="button"
-                  onClick={() => setShowChangePassword(true)}
-                  className="mt-4 inline-flex min-h-11 items-center justify-center rounded-[18px] bg-[#2e77df] px-4 text-sm font-semibold text-white shadow-[0_12px_24px_rgba(46,119,223,0.22)] transition duration-200 active:scale-[0.98]"
-                >
-                  Đổi mật khẩu
-                </button>
-              </div>
-            </section>
-
-            <section className="edp-glass-panel rounded-[32px] p-5 sm:p-6">
-              <div className="text-xs font-semibold uppercase tracking-[0.22em] text-[#2e77df]/70">
                 Gợi ý
               </div>
               <div className="mt-3 space-y-3 text-sm leading-6 text-slate-600">
@@ -157,13 +131,6 @@ export default function AdminDashboard() {
 
       <Footer />
 
-      {showChangePassword && (
-        <ChangePasswordModal
-          role="admin"
-          canClose
-          onSuccess={() => setShowChangePassword(false)}
-        />
-      )}
     </div>
   )
 }

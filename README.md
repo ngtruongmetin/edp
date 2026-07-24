@@ -24,6 +24,18 @@ DB_TIMEZONE=Asia/Ho_Chi_Minh
 `DATABASE_URL` is optional. If provided, backend uses it instead of the individual `DB_*` variables.
 `DB_TIMEZONE` defaults PostgreSQL sessions to GMT+7 (`Asia/Ho_Chi_Minh`).
 
+## Cấu hình Passkey
+
+Passkey sử dụng WebAuthn và cần origin công khai an toàn. Trong môi trường production, thiết lập các giá trị này trong `.env` theo origin và domain công khai của frontend trước khi khởi động Docker:
+
+```env
+WEBAUTHN_ORIGIN=https://edp.example.edu
+WEBAUTHN_RP_ID=edp.example.edu
+WEBAUTHN_RP_NAME=EduDiscipline Platform
+```
+
+`WEBAUTHN_ORIGIN` phải khớp chính xác origin của trình duyệt. HTTPS là bắt buộc ngoài localhost. EDP chỉ lưu khóa công khai và bộ đếm của WebAuthn; dữ liệu sinh trắc học và mã PIN luôn ở trên thiết bị của người dùng.
+
 ## Local backend
 
 ```bash

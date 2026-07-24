@@ -431,7 +431,7 @@ function loadPeriodSummary(table, keyField, key, cb) {
       let weekIds = []
       try {
         weekIds = JSON.parse(String(row.week_ids || "[]"))
-      } catch {}
+      } catch { }
       cb(null, { period_key: row.period_key, week_ids: weekIds, closed_at: row.closed_at || null, updated_at: row.updated_at || null })
     },
   )
@@ -468,7 +468,7 @@ function ensureGradebookUploadsForWeek(weekId, cb) {
           }
 
           cb(null)
-      })
+        })
     })
     .catch((err) => cb(err))
 }
@@ -878,9 +878,9 @@ function loadWeekIdsForMonths(monthKeys, cb) {
         (fallbackErr, fallbackRows) => {
           if (fallbackErr) return cb(fallbackErr)
           const weekSet = new Set()
-          ;(fallbackRows || []).forEach((r) => {
-            parseJsonList(r.week_ids).forEach((id) => weekSet.add(Number(id)))
-          })
+            ; (fallbackRows || []).forEach((r) => {
+              parseJsonList(r.week_ids).forEach((id) => weekSet.add(Number(id)))
+            })
           cb(null, Array.from(weekSet).filter((n) => Number.isFinite(n) && n > 0))
         },
       )
@@ -921,9 +921,9 @@ function loadWeekIdsForSemesters(semesterKeys, cb) {
         (fallbackErr, fallbackRows) => {
           if (fallbackErr) return cb(fallbackErr)
           const weekSet = new Set()
-          ;(fallbackRows || []).forEach((r) => {
-            parseJsonList(r.week_ids).forEach((id) => weekSet.add(Number(id)))
-          })
+            ; (fallbackRows || []).forEach((r) => {
+              parseJsonList(r.week_ids).forEach((id) => weekSet.add(Number(id)))
+            })
           cb(null, Array.from(weekSet).filter((n) => Number.isFinite(n) && n > 0))
         },
       )
@@ -961,15 +961,15 @@ function loadAdjustments(adjTable, keyField, key, cb) {
     (err, rows) => {
       if (err) return cb(err)
       const map = new Map()
-      ;(rows || []).forEach((r) => {
-        map.set(String(r.class_name), {
-          class_name: String(r.class_name),
-          plus_points: Number(r.plus_points || 0),
-          minus_points: Number(r.minus_points || 0),
-          reason: String(r.reason || ""),
-          updated_at: r.updated_at || null,
+        ; (rows || []).forEach((r) => {
+          map.set(String(r.class_name), {
+            class_name: String(r.class_name),
+            plus_points: Number(r.plus_points || 0),
+            minus_points: Number(r.minus_points || 0),
+            reason: String(r.reason || ""),
+            updated_at: r.updated_at || null,
+          })
         })
-      })
       cb(null, map)
     },
   )
@@ -1033,7 +1033,7 @@ function computePeriodFromWeeks(weekIds, adjustmentsMap, cb) {
   const acc = new Map()
 
   function mergeRows(rows) {
-    ;(rows || []).forEach((r) => {
+    ; (rows || []).forEach((r) => {
       const key = String(r.class_name)
       const cur =
         acc.get(key) || {
@@ -1183,76 +1183,76 @@ function exportExcelWorkbookForPeriod(res, opts) {
   const workbook = new ExcelJS.Workbook()
   const baseFont = { name: "Times New Roman", size: 12 }
 
-  ;([10, 11, 12]).forEach((g) => {
-    const list = (rowsByGrade[g] || []).slice()
+    ; ([10, 11, 12]).forEach((g) => {
+      const list = (rowsByGrade[g] || []).slice()
 
-    // Order rows by class name (10A1..), but keep rank/note computed by score.
-    list.sort((a, b) => {
-      const aa = parseClassNatural(a.class_name)
-      const bb = parseClassNatural(b.class_name)
-      if (aa.g !== bb.g) return aa.g - bb.g
-      if (aa.num !== bb.num) return aa.num - bb.num
-      return aa.name.localeCompare(bb.name)
-    })
+      // Order rows by class name (10A1..), but keep rank/note computed by score.
+      list.sort((a, b) => {
+        const aa = parseClassNatural(a.class_name)
+        const bb = parseClassNatural(b.class_name)
+        if (aa.g !== bb.g) return aa.g - bb.g
+        if (aa.num !== bb.num) return aa.num - bb.num
+        return aa.name.localeCompare(bb.name)
+      })
 
-    const ws = workbook.addWorksheet(`Khoi ${g}`)
+      const ws = workbook.addWorksheet(`Khoi ${g}`)
 
-    ws.columns = [
-      { header: "Lớp", key: "class_name", width: 10 },
-      { header: "Điểm cộng", key: "plus_points", width: 14 },
-      { header: "Điểm trừ", key: "minus_points", width: 14 },
-      { header: "Tổng điểm", key: "total_score", width: 14 },
-      { header: "Xếp hạng", key: "rank", width: 10 },
-      { header: "Ghi chú", key: "note", width: 20 },
-    ]
+      ws.columns = [
+        { header: "Lớp", key: "class_name", width: 10 },
+        { header: "Điểm cộng", key: "plus_points", width: 14 },
+        { header: "Điểm trừ", key: "minus_points", width: 14 },
+        { header: "Tổng điểm", key: "total_score", width: 14 },
+        { header: "Xếp hạng", key: "rank", width: 10 },
+        { header: "Ghi chú", key: "note", width: 20 },
+      ]
 
-    const title = String(periodTitleByGrade(g))
-    const line2 = String(periodLine2)
+      const title = String(periodTitleByGrade(g))
+      const line2 = String(periodLine2)
 
-    ws.mergeCells("A1:F2")
-    ws.getCell("A1").value = title
-    ws.getCell("A1").font = { ...baseFont, bold: true }
-    ws.getCell("A1").alignment = { horizontal: "center", vertical: "middle" }
+      ws.mergeCells("A1:F2")
+      ws.getCell("A1").value = title
+      ws.getCell("A1").font = { ...baseFont, bold: true }
+      ws.getCell("A1").alignment = { horizontal: "center", vertical: "middle" }
 
-    ws.mergeCells("A3:F3")
-    ws.getCell("A3").value = line2
-    ws.getCell("A3").font = { ...baseFont, bold: true }
-    ws.getCell("A3").alignment = { horizontal: "center", vertical: "middle" }
+      ws.mergeCells("A3:F3")
+      ws.getCell("A3").value = line2
+      ws.getCell("A3").font = { ...baseFont, bold: true }
+      ws.getCell("A3").alignment = { horizontal: "center", vertical: "middle" }
 
-    const headerRow = ws.getRow(4)
-    headerRow.values = ["Lớp", "Điểm cộng", "Điểm trừ", "Tổng điểm", "Xếp hạng", "Ghi chú"]
-    headerRow.font = { ...baseFont, bold: true }
-    headerRow.alignment = { horizontal: "center", vertical: "middle" }
-    headerRow.height = 18
+      const headerRow = ws.getRow(4)
+      headerRow.values = ["Lớp", "Điểm cộng", "Điểm trừ", "Tổng điểm", "Xếp hạng", "Ghi chú"]
+      headerRow.font = { ...baseFont, bold: true }
+      headerRow.alignment = { horizontal: "center", vertical: "middle" }
+      headerRow.height = 18
 
-    let rowIndex = 5
-    list.forEach((r) => {
-      const row = ws.getRow(rowIndex++)
-      row.getCell(1).value = String(r.class_name)
-      row.getCell(2).value = Number(r.plus_points || 0)
-      row.getCell(3).value = Number(r.minus_points || 0)
-      row.getCell(4).value = Number(r.total_score || 0)
-      row.getCell(5).value = Number(r.rank || 0)
-      const note = String(r.note || "")
-      row.getCell(6).value = note
-      if (note) row.getCell(6).font = { ...baseFont, bold: true }
-      row.height = 16
-    })
+      let rowIndex = 5
+      list.forEach((r) => {
+        const row = ws.getRow(rowIndex++)
+        row.getCell(1).value = String(r.class_name)
+        row.getCell(2).value = Number(r.plus_points || 0)
+        row.getCell(3).value = Number(r.minus_points || 0)
+        row.getCell(4).value = Number(r.total_score || 0)
+        row.getCell(5).value = Number(r.rank || 0)
+        const note = String(r.note || "")
+        row.getCell(6).value = note
+        if (note) row.getCell(6).font = { ...baseFont, bold: true }
+        row.height = 16
+      })
 
-    ws.eachRow({ includeEmpty: false }, (row) => {
-      row.eachCell((cell) => {
-        if (!cell.font) cell.font = { ...baseFont }
-        if (!cell.alignment)
-          cell.alignment = { horizontal: "center", vertical: "middle", wrapText: true }
-        cell.border = {
-          top: { style: "thin", color: { argb: "FFD9E2F3" } },
-          left: { style: "thin", color: { argb: "FFD9E2F3" } },
-          bottom: { style: "thin", color: { argb: "FFD9E2F3" } },
-          right: { style: "thin", color: { argb: "FFD9E2F3" } },
-        }
+      ws.eachRow({ includeEmpty: false }, (row) => {
+        row.eachCell((cell) => {
+          if (!cell.font) cell.font = { ...baseFont }
+          if (!cell.alignment)
+            cell.alignment = { horizontal: "center", vertical: "middle", wrapText: true }
+          cell.border = {
+            top: { style: "thin", color: { argb: "FFD9E2F3" } },
+            left: { style: "thin", color: { argb: "FFD9E2F3" } },
+            bottom: { style: "thin", color: { argb: "FFD9E2F3" } },
+            right: { style: "thin", color: { argb: "FFD9E2F3" } },
+          }
+        })
       })
     })
-  })
 
   workbook.xlsx
     .writeBuffer()
@@ -1274,104 +1274,104 @@ function exportExcelWorkbookForMonth(res, opts) {
   const workbook = new ExcelJS.Workbook()
   const baseFont = { name: "Times New Roman", size: 12 }
 
-  ;([10, 11, 12]).forEach((g) => {
-    const list = (rowsByGrade[g] || []).slice()
+    ; ([10, 11, 12]).forEach((g) => {
+      const list = (rowsByGrade[g] || []).slice()
 
-    list.sort((a, b) => {
-      const aa = parseClassNatural(a.class_name)
-      const bb = parseClassNatural(b.class_name)
-      if (aa.g !== bb.g) return aa.g - bb.g
-      if (aa.num !== bb.num) return aa.num - bb.num
-      return aa.name.localeCompare(bb.name)
-    })
+      list.sort((a, b) => {
+        const aa = parseClassNatural(a.class_name)
+        const bb = parseClassNatural(b.class_name)
+        if (aa.g !== bb.g) return aa.g - bb.g
+        if (aa.num !== bb.num) return aa.num - bb.num
+        return aa.name.localeCompare(bb.name)
+      })
 
-    const ws = workbook.addWorksheet(`Khoi ${g}`)
-    ws.columns = [
-      { header: "Lớp", key: "class_name", width: 10 },
-      { header: "Tổng tuần", key: "week_total", width: 14 },
-      { header: "Cộng, trừ tháng", key: "month_adjust_points", width: 16 },
-      { header: "Tổng điểm", key: "total_score", width: 14 },
-      { header: "Xếp hạng", key: "rank", width: 10 },
-      { header: "Ghi chú", key: "note", width: 20 },
-    ]
+      const ws = workbook.addWorksheet(`Khoi ${g}`)
+      ws.columns = [
+        { header: "Lớp", key: "class_name", width: 10 },
+        { header: "Tổng tuần", key: "week_total", width: 14 },
+        { header: "Cộng, trừ tháng", key: "month_adjust_points", width: 16 },
+        { header: "Tổng điểm", key: "total_score", width: 14 },
+        { header: "Xếp hạng", key: "rank", width: 10 },
+        { header: "Ghi chú", key: "note", width: 20 },
+      ]
 
-    const title = String(periodTitleByGrade(g))
-    const line2 = String(periodLine2)
+      const title = String(periodTitleByGrade(g))
+      const line2 = String(periodLine2)
 
-    ws.mergeCells("A1:F2")
-    ws.getCell("A1").value = title
-    ws.getCell("A1").font = { ...baseFont, bold: true }
-    ws.getCell("A1").alignment = { horizontal: "center", vertical: "middle" }
-    ws.getCell("A1").fill = {
-      type: "pattern",
-      pattern: "solid",
-      fgColor: { argb: "FFFFA500" },
-    }
-
-    ws.mergeCells("A3:F3")
-    ws.getCell("A3").value = line2
-    ws.getCell("A3").font = { ...baseFont, bold: true }
-    ws.getCell("A3").alignment = { horizontal: "center", vertical: "middle" }
-    ws.getCell("A3").fill = {
-      type: "pattern",
-      pattern: "solid",
-      fgColor: { argb: "FF91D14E" },
-    }
-
-    const headerRow = ws.getRow(4)
-    headerRow.values = ["Lớp", "Tổng tuần", "Cộng, trừ tháng", "Tổng điểm", "Xếp hạng", "Ghi chú"]
-    headerRow.font = { ...baseFont, bold: true }
-    headerRow.alignment = { horizontal: "center", vertical: "middle" }
-    headerRow.height = 18
-
-    let rowIndex = 5
-    list.forEach((r) => {
-      const row = ws.getRow(rowIndex++)
-      row.getCell(1).value = String(r.class_name)
-      row.getCell(2).value = Number(r.week_total || 0)
-      row.getCell(3).value = Number(r.month_adjust_points || 0)
-      row.getCell(4).value = Number(r.total_score || 0)
-      row.getCell(5).value = Number(r.rank || 0)
-      const note = String(r.note || "").toUpperCase()
-      row.getCell(6).value = note
-      if (note) row.getCell(6).font = { ...baseFont, bold: true }
-
-      const noteUpper = note
-      let fill = null
-      if (noteUpper.includes("HẠNG NHẤT")) {
-        fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFFF0000" } }
-      } else if (noteUpper.includes("HẠNG NHÌ")) {
-        fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF0170C1" } }
-      } else if (noteUpper.includes("HẠNG BA")) {
-        fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF0FAFED" } }
-      } else if (noteUpper.includes("HẠNG CHÓT")) {
-        fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFFFFF00" } }
+      ws.mergeCells("A1:F2")
+      ws.getCell("A1").value = title
+      ws.getCell("A1").font = { ...baseFont, bold: true }
+      ws.getCell("A1").alignment = { horizontal: "center", vertical: "middle" }
+      ws.getCell("A1").fill = {
+        type: "pattern",
+        pattern: "solid",
+        fgColor: { argb: "FFFFA500" },
       }
-      if (fill) {
-        for (let c = 1; c <= 6; c += 1) {
-          const cell = row.getCell(c)
-          cell.fill = fill
-          cell.font = { ...baseFont, bold: true }
-        }
-      }
-      row.height = 16
-    })
 
-    ws.eachRow({ includeEmpty: false }, (row) => {
-      row.eachCell((cell) => {
-        if (!cell.font) cell.font = { ...baseFont }
-        if (!cell.alignment) {
-          cell.alignment = { horizontal: "center", vertical: "middle", wrapText: true }
+      ws.mergeCells("A3:F3")
+      ws.getCell("A3").value = line2
+      ws.getCell("A3").font = { ...baseFont, bold: true }
+      ws.getCell("A3").alignment = { horizontal: "center", vertical: "middle" }
+      ws.getCell("A3").fill = {
+        type: "pattern",
+        pattern: "solid",
+        fgColor: { argb: "FF91D14E" },
+      }
+
+      const headerRow = ws.getRow(4)
+      headerRow.values = ["Lớp", "Tổng tuần", "Cộng, trừ tháng", "Tổng điểm", "Xếp hạng", "Ghi chú"]
+      headerRow.font = { ...baseFont, bold: true }
+      headerRow.alignment = { horizontal: "center", vertical: "middle" }
+      headerRow.height = 18
+
+      let rowIndex = 5
+      list.forEach((r) => {
+        const row = ws.getRow(rowIndex++)
+        row.getCell(1).value = String(r.class_name)
+        row.getCell(2).value = Number(r.week_total || 0)
+        row.getCell(3).value = Number(r.month_adjust_points || 0)
+        row.getCell(4).value = Number(r.total_score || 0)
+        row.getCell(5).value = Number(r.rank || 0)
+        const note = String(r.note || "").toUpperCase()
+        row.getCell(6).value = note
+        if (note) row.getCell(6).font = { ...baseFont, bold: true }
+
+        const noteUpper = note
+        let fill = null
+        if (noteUpper.includes("HẠNG NHẤT")) {
+          fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFFF0000" } }
+        } else if (noteUpper.includes("HẠNG NHÌ")) {
+          fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF0170C1" } }
+        } else if (noteUpper.includes("HẠNG BA")) {
+          fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF0FAFED" } }
+        } else if (noteUpper.includes("HẠNG CHÓT")) {
+          fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFFFFF00" } }
         }
-        cell.border = {
-          top: { style: "thin" },
-          left: { style: "thin" },
-          bottom: { style: "thin" },
-          right: { style: "thin" },
+        if (fill) {
+          for (let c = 1; c <= 6; c += 1) {
+            const cell = row.getCell(c)
+            cell.fill = fill
+            cell.font = { ...baseFont, bold: true }
+          }
         }
+        row.height = 16
+      })
+
+      ws.eachRow({ includeEmpty: false }, (row) => {
+        row.eachCell((cell) => {
+          if (!cell.font) cell.font = { ...baseFont }
+          if (!cell.alignment) {
+            cell.alignment = { horizontal: "center", vertical: "middle", wrapText: true }
+          }
+          cell.border = {
+            top: { style: "thin" },
+            left: { style: "thin" },
+            bottom: { style: "thin" },
+            right: { style: "thin" },
+          }
+        })
       })
     })
-  })
 
   workbook.xlsx
     .writeBuffer()
@@ -1389,7 +1389,7 @@ function exportExcelWorkbookForMonth(res, opts) {
 }
 
 function writeWeeklyScores(weekId, rows, cb) {
-  ;(async () => {
+  ; (async () => {
     try {
       await db.withTransaction(async () => {
         await db.run("DELETE FROM weekly_scores WHERE week_id=?", [weekId])
@@ -1442,7 +1442,7 @@ function periodToRowsByGrade(rows) {
 }
 
 function writePeriodScores(table, keyField, key, rowsByGrade, cb) {
-  ;(async () => {
+  ; (async () => {
     try {
       await db.withTransaction(async () => {
         await db.run(`DELETE FROM ${table} WHERE ${keyField}=?`, [key])
@@ -1619,7 +1619,7 @@ function loadComputedWeekSummary(weekId, cb) {
         const scoresByGrade = periodToRowsByGrade(rows || [])
         const scores = []
         Object.keys(scoresByGrade).forEach((grade) => {
-          ;(scoresByGrade[grade] || []).forEach((row) => {
+          ; (scoresByGrade[grade] || []).forEach((row) => {
             scores.push({
               class_name: row.class_name,
               score: Number(row.total_score || 0),
@@ -1724,21 +1724,21 @@ async function loadCurrentPeriodTree() {
   )
 
   const weeksByMonth = new Map()
-  ;(weeks || []).forEach((week) => {
-    const key = String(week.month_key)
-    if (!weeksByMonth.has(key)) weeksByMonth.set(key, [])
-    weeksByMonth.get(key).push(week)
-  })
+    ; (weeks || []).forEach((week) => {
+      const key = String(week.month_key)
+      if (!weeksByMonth.has(key)) weeksByMonth.set(key, [])
+      weeksByMonth.get(key).push(week)
+    })
 
   const monthsBySemester = new Map()
-  ;(months || []).forEach((month) => {
-    const key = String(month.semester_key)
-    if (!monthsBySemester.has(key)) monthsBySemester.set(key, [])
-    monthsBySemester.get(key).push({
-      ...month,
-      weeks: weeksByMonth.get(String(month.month_key)) || [],
+    ; (months || []).forEach((month) => {
+      const key = String(month.semester_key)
+      if (!monthsBySemester.has(key)) monthsBySemester.set(key, [])
+      monthsBySemester.get(key).push({
+        ...month,
+        weeks: weeksByMonth.get(String(month.month_key)) || [],
+      })
     })
-  })
 
   return {
     school_year: schoolYear,
@@ -1861,7 +1861,7 @@ function syncSignedStatusAfterChange(sessionId, action, cb) {
   )
 }
 
-function aggregateSessions(whereSql, params, cb){
+function aggregateSessions(whereSql, params, cb) {
 
   db.all(
     `
@@ -1912,28 +1912,28 @@ function aggregateSessions(whereSql, params, cb){
 GET CURRENT DUTY SESSION
 */
 router.get(
-"/current",
-requireLogin,
-requireRole(["co_do"]),
-(req,res)=>{
+  "/current",
+  requireLogin,
+  requireRole(["co_do"]),
+  (req, res) => {
 
-  const today = time.today()
-  const redClass = req.session.user?.class_name
+    const today = time.today()
+    const redClass = req.session.user?.class_name
 
-  getWeekForDate(today, (err, week) => {
+    getWeekForDate(today, (err, week) => {
 
-    if (err) return res.status(500).json({ error: err.message })
-    if (!week) return res.json({})
-
-    isWeekClosed(week.id, (err, closed) => {
       if (err) return res.status(500).json({ error: err.message })
-      // Auto-create today's sessions for all assignments (non-Sunday) when the new day starts.
-      if (!closed && !isSunday(today)) {
-        ensureDailySessionsForDate({ weekId: week.id, date: today }, () => {})
-      }
-    })
+      if (!week) return res.json({})
 
-    db.get(`
+      isWeekClosed(week.id, (err, closed) => {
+        if (err) return res.status(500).json({ error: err.message })
+        // Auto-create today's sessions for all assignments (non-Sunday) when the new day starts.
+        if (!closed && !isSunday(today)) {
+          ensureDailySessionsForDate({ weekId: week.id, date: today }, () => { })
+        }
+      })
+
+      db.get(`
       SELECT
         s.*,
         COALESCE(b.points, 0) as bonus_points,
@@ -1953,16 +1953,16 @@ requireRole(["co_do"]),
       ORDER BY s.id DESC
       LIMIT 1
     `,
-    [today, redClass, week.id],
-    (err,session)=>{
+        [today, redClass, week.id],
+        (err, session) => {
 
-      if(err) return res.status(500).json({error:err.message})
+          if (err) return res.status(500).json({ error: err.message })
 
-      if(!session){
-        return res.json({})
-      }
+          if (!session) {
+            return res.json({})
+          }
 
-      db.all(`
+          db.all(`
         SELECT v.id,v.rule_id,v.quantity,v.note,
                r.name,r.score_delta
         FROM duty_violations v
@@ -1971,64 +1971,64 @@ requireRole(["co_do"]),
         WHERE v.session_id=?
         ORDER BY v.id DESC
       `,
-      [session.id],
-      (err,violations)=>{
+            [session.id],
+            (err, violations) => {
 
-        res.json({
-          session,
-          violations
+              res.json({
+                session,
+                violations
+              })
+
+            })
+
         })
-
-      })
 
     })
 
   })
-
-})
 
 
 /*
 CREATE DUTY SESSION
 */
 router.post(
-"/create",
-requireLogin,
-requireRole(["co_do"]),
-(req,res)=>{
+  "/create",
+  requireLogin,
+  requireRole(["co_do"]),
+  (req, res) => {
 
-  const today = time.today()
-  const redClass = req.session.user?.class_name
-  if(!redClass) return res.status(400).json({error:"Missing class"})
+    const today = time.today()
+    const redClass = req.session.user?.class_name
+    if (!redClass) return res.status(400).json({ error: "Missing class" })
 
-  getWeekForDate(today, (err, week) => {
-    if (err) return res.status(500).json({ error: err.message })
-    if (!week) return res.status(400).json({ error: "No active week" })
-
-    isWeekClosed(week.id, (err, closed) => {
+    getWeekForDate(today, (err, week) => {
       if (err) return res.status(500).json({ error: err.message })
-      if (closed) return res.status(403).json({ error: "Week closed" })
+      if (!week) return res.status(400).json({ error: "No active week" })
 
-      // Enforce schedule assignment for this week.
-      db.get(
-        `
+      isWeekClosed(week.id, (err, closed) => {
+        if (err) return res.status(500).json({ error: err.message })
+        if (closed) return res.status(403).json({ error: "Week closed" })
+
+        // Enforce schedule assignment for this week.
+        db.get(
+          `
           SELECT duty_class
           FROM schedule_assignments
           WHERE week_id=?
             AND red_class=?
           LIMIT 1
         `,
-        [week.id, redClass],
-        (err, row) => {
-          if (err) return res.status(500).json({ error: err.message })
-          const dutyClass = row?.duty_class
-          if (!dutyClass) {
-            return res.status(400).json({ error: "No assignment" })
-          }
+          [week.id, redClass],
+          (err, row) => {
+            if (err) return res.status(500).json({ error: err.message })
+            const dutyClass = row?.duty_class
+            if (!dutyClass) {
+              return res.status(400).json({ error: "No assignment" })
+            }
 
-  // Idempotent create: a class can only have one duty session per day.
-  db.get(
-    `
+            // Idempotent create: a class can only have one duty session per day.
+            db.get(
+              `
       SELECT id
       FROM duty_sessions
       WHERE date=?
@@ -2037,55 +2037,55 @@ requireRole(["co_do"]),
       ORDER BY id DESC
       LIMIT 1
     `,
-    [today, redClass, week.id],
-    (err,existing)=>{
+              [today, redClass, week.id],
+              (err, existing) => {
 
-      if(err){
-        return res.status(500).json({error:err.message})
-      }
+                if (err) {
+                  return res.status(500).json({ error: err.message })
+                }
 
-      if(existing){
-        return res.json({
-          success:true,
-          existing:true,
-          session_id:existing.id
-        })
-      }
+                if (existing) {
+                  return res.json({
+                    success: true,
+                    existing: true,
+                    session_id: existing.id
+                  })
+                }
 
-      db.run(`
+                db.run(`
         INSERT INTO duty_sessions
         (week_id,date,red_class,duty_class,status,created_at)
         VALUES(?,?,?,?,?,?)
       `,
-      [
-        week.id,
-        today,
-        redClass,
-        dutyClass,
-        "draft",
-        time.now()
-      ],
-      function(err){
+                  [
+                    week.id,
+                    today,
+                    redClass,
+                    dutyClass,
+                    "draft",
+                    time.now()
+                  ],
+                  function (err) {
 
-        if(err){
-          return res.status(500).json({error:err.message})
-        }
+                    if (err) {
+                      return res.status(500).json({ error: err.message })
+                    }
 
-        res.json({
-          success:true,
-          existing:false,
-          session_id:this.lastID
-        })
+                    res.json({
+                      success: true,
+                      existing: false,
+                      session_id: this.lastID
+                    })
 
+                  })
+
+              }
+            )
+          }
+        )
       })
-
-    }
-  )
-        }
-      )
     })
   })
-})
 
 /*
 CO_DO: sessions of my duty_class in current week
@@ -2094,11 +2094,11 @@ router.get(
   "/my/week",
   requireLogin,
   requireRole(["co_do"]),
-  (req,res)=>{
+  (req, res) => {
 
     const today = time.today()
     const redClass = req.session.user?.class_name
-    if(!redClass) return res.status(400).json({error:"Missing class"})
+    if (!redClass) return res.status(400).json({ error: "Missing class" })
 
     getWeekForDate(today, (err, week) => {
       if (err) return res.status(500).json({ error: err.message })
@@ -2106,7 +2106,7 @@ router.get(
 
       isWeekClosed(week.id, (err, closed) => {
         if (!err && !closed && !isSunday(today)) {
-          ensureDailySessionsForDate({ weekId: week.id, date: today }, () => {})
+          ensureDailySessionsForDate({ weekId: week.id, date: today }, () => { })
         }
       })
 
@@ -2189,7 +2189,7 @@ router.get(
 
         isWeekClosed(week.id, (err, closed) => {
           if (!err && !closed && isCurrentWeek && !isSunday(today)) {
-            ensureDailySessionsForDate({ weekId: week.id, date: today }, () => {})
+            ensureDailySessionsForDate({ weekId: week.id, date: today }, () => { })
           }
 
           db.get(
@@ -2229,7 +2229,7 @@ router.get(
   "/my/session/:id",
   requireLogin,
   requireRole(["co_do"]),
-  (req,res)=>{
+  (req, res) => {
 
     const id = req.params.id
     const redClass = req.session.user?.class_name
@@ -2257,10 +2257,10 @@ router.get(
         LIMIT 1
       `,
       [redClass, id],
-        (err,session)=>{
+      (err, session) => {
 
-        if(err) return res.status(500).json({error:err.message})
-        if(!session) return res.status(404).json({error:"Session not found"})
+        if (err) return res.status(500).json({ error: err.message })
+        if (!session) return res.status(404).json({ error: "Session not found" })
 
         db.get(
           `SELECT id,week_number,start_date,end_date FROM schedule_weeks WHERE id=? LIMIT 1`,
@@ -2279,8 +2279,8 @@ router.get(
                 ORDER BY v.id DESC
               `,
               [id],
-              (err,violations)=>{
-                if(err) return res.status(500).json({error:err.message})
+              (err, violations) => {
+                if (err) return res.status(500).json({ error: err.message })
                 res.json({ session, week: week || null, violations })
               }
             )
@@ -2298,46 +2298,46 @@ router.get(
 ADD VIOLATION
 */
 router.post(
-"/violation",
-requireLogin,
-requireRole(["co_do"]),
-(req,res)=>{
+  "/violation",
+  requireLogin,
+  requireRole(["co_do"]),
+  (req, res) => {
 
-  const {session_id,rule_id,quantity,note} = req.body
+    const { session_id, rule_id, quantity, note } = req.body
 
-  const redClass = req.session.user?.class_name
+    const redClass = req.session.user?.class_name
 
-  if(!session_id || !rule_id){
-    return res.status(400).json({error:"Missing fields"})
-  }
+    if (!session_id || !rule_id) {
+      return res.status(400).json({ error: "Missing fields" })
+    }
 
-  db.get(
-    `
+    db.get(
+      `
       SELECT id, week_id
       FROM duty_sessions
       WHERE id=?
         AND red_class=?
       LIMIT 1
     `,
-    [session_id, redClass],
-    (err,row)=>{
+      [session_id, redClass],
+      (err, row) => {
 
-      if(err) return res.status(500).json({error:err.message})
-      if(!row) return res.status(404).json({error:"Session not found"})
-
-      isWeekClosed(row.week_id, (err, closed) => {
         if (err) return res.status(500).json({ error: err.message })
-        if (closed) return res.status(403).json({ error: "Week closed" })
+        if (!row) return res.status(404).json({ error: "Session not found" })
 
-        const q = Number(quantity || 1)
-        const n = String(note || "").trim()
-
-        ensureSignedSnapshot(session_id, (err) => {
+        isWeekClosed(row.week_id, (err, closed) => {
           if (err) return res.status(500).json({ error: err.message })
+          if (closed) return res.status(403).json({ error: "Week closed" })
 
-          // Smart merge: same rule_id + same note => increase quantity instead of new row.
-          db.get(
-            `
+          const q = Number(quantity || 1)
+          const n = String(note || "").trim()
+
+          ensureSignedSnapshot(session_id, (err) => {
+            if (err) return res.status(500).json({ error: err.message })
+
+            // Smart merge: same rule_id + same note => increase quantity instead of new row.
+            db.get(
+              `
               SELECT id, quantity
               FROM duty_violations
               WHERE session_id=?
@@ -2346,68 +2346,68 @@ requireRole(["co_do"]),
               ORDER BY id DESC
               LIMIT 1
             `,
-            [session_id, rule_id, n],
-            (err, existing) => {
+              [session_id, rule_id, n],
+              (err, existing) => {
 
-              if (err) return res.status(500).json({ error: err.message })
+                if (err) return res.status(500).json({ error: err.message })
 
-              const finalize = (payload) => {
-                syncSignedStatusAfterChange(session_id, "edit:add_violation", (err) => {
-                  if (err) return res.status(500).json({ error: err.message })
-                  res.json(payload)
-                })
-              }
-
-              if (existing) {
-                db.run(
-                  `UPDATE duty_violations SET quantity=? WHERE id=?`,
-                  [Number(existing.quantity || 0) + q, existing.id],
-                  (err) => {
+                const finalize = (payload) => {
+                  syncSignedStatusAfterChange(session_id, "edit:add_violation", (err) => {
                     if (err) return res.status(500).json({ error: err.message })
-                    finalize({ success: true, merged: true, id: existing.id })
-                  },
-                )
-                return
-              }
+                    res.json(payload)
+                  })
+                }
 
-              db.run(
-                `
+                if (existing) {
+                  db.run(
+                    `UPDATE duty_violations SET quantity=? WHERE id=?`,
+                    [Number(existing.quantity || 0) + q, existing.id],
+                    (err) => {
+                      if (err) return res.status(500).json({ error: err.message })
+                      finalize({ success: true, merged: true, id: existing.id })
+                    },
+                  )
+                  return
+                }
+
+                db.run(
+                  `
                   INSERT INTO duty_violations
                   (session_id,rule_id,quantity,note)
                   VALUES(?,?,?,?)
                 `,
-                [session_id, rule_id, q, n],
-                function (err) {
-                  if (err) return res.status(500).json({ error: err.message })
-                  finalize({ success: true, merged: false, id: this.lastID })
-                },
-              )
+                  [session_id, rule_id, q, n],
+                  function (err) {
+                    if (err) return res.status(500).json({ error: err.message })
+                    finalize({ success: true, merged: false, id: this.lastID })
+                  },
+                )
 
-            }
-          )
+              }
+            )
+          })
         })
-      })
 
-    }
-  )
+      }
+    )
 
-})
+  })
 
 
 /*
 DELETE VIOLATION
 */
 router.delete(
-"/violation/:id",
-requireLogin,
-requireRole(["co_do"]),
-(req,res)=>{
+  "/violation/:id",
+  requireLogin,
+  requireRole(["co_do"]),
+  (req, res) => {
 
-  const id = req.params.id
-  const redClass = req.session.user?.class_name
+    const id = req.params.id
+    const redClass = req.session.user?.class_name
 
-  db.get(
-    `
+    db.get(
+      `
       SELECT v.id, v.session_id, s.week_id
       FROM duty_violations v
       JOIN duty_sessions s
@@ -2416,38 +2416,38 @@ requireRole(["co_do"]),
         AND s.red_class=?
       LIMIT 1
     `,
-    [id, redClass],
-    (err,row)=>{
+      [id, redClass],
+      (err, row) => {
 
-      if(err) return res.status(500).json({error:err.message})
-      if(!row) return res.status(404).json({error:"Violation not found"})
-
-      isWeekClosed(row.week_id, (err, closed) => {
         if (err) return res.status(500).json({ error: err.message })
-        if (closed) return res.status(403).json({ error: "Week closed" })
+        if (!row) return res.status(404).json({ error: "Violation not found" })
 
-        ensureSignedSnapshot(row.session_id, (err) => {
+        isWeekClosed(row.week_id, (err, closed) => {
           if (err) return res.status(500).json({ error: err.message })
+          if (closed) return res.status(403).json({ error: "Week closed" })
 
-          db.run(
-            "DELETE FROM duty_violations WHERE id=?",
-            [id],
-            (err) => {
-              if (err) return res.status(500).json({ error: err.message })
+          ensureSignedSnapshot(row.session_id, (err) => {
+            if (err) return res.status(500).json({ error: err.message })
 
-              syncSignedStatusAfterChange(row.session_id, "edit:remove_violation", (err) => {
+            db.run(
+              "DELETE FROM duty_violations WHERE id=?",
+              [id],
+              (err) => {
                 if (err) return res.status(500).json({ error: err.message })
-                res.json({ success: true })
-              })
-            },
-          )
+
+                syncSignedStatusAfterChange(row.session_id, "edit:remove_violation", (err) => {
+                  if (err) return res.status(500).json({ error: err.message })
+                  res.json({ success: true })
+                })
+              },
+            )
+          })
         })
-      })
 
-    }
-  )
+      }
+    )
 
-})
+  })
 
 /*
 ADMIN: add violation (no status change)
@@ -2474,23 +2474,23 @@ router.post(
 
         ensureWeekUnlocked(session.week_id, (lockErr) => {
           if (lockErr) return res.status(lockErr.status || 500).json({ error: lockErr.message })
-        db.run(
-          `
+          db.run(
+            `
             INSERT INTO duty_violations
             (session_id, rule_id, quantity, note)
             VALUES(?,?,?,?)
           `,
-          [session_id, rule_id, q, n],
-          function (err) {
-            if (err) return res.status(500).json({ error: err.message })
-            db.run(
-              `INSERT INTO duty_revision_logs (session_id, action, created_at) VALUES(?,?,?)`,
-              [session_id, "edit:add_violation", time.now()],
-              () => {},
-            )
-            res.json({ success: true, id: this.lastID })
-          },
-        )
+            [session_id, rule_id, q, n],
+            function (err) {
+              if (err) return res.status(500).json({ error: err.message })
+              db.run(
+                `INSERT INTO duty_revision_logs (session_id, action, created_at) VALUES(?,?,?)`,
+                [session_id, "edit:add_violation", time.now()],
+                () => { },
+              )
+              res.json({ success: true, id: this.lastID })
+            },
+          )
         })
       },
     )
@@ -2526,23 +2526,23 @@ router.put(
 
         ensureWeekUnlocked(row.week_id, (lockErr) => {
           if (lockErr) return res.status(lockErr.status || 500).json({ error: lockErr.message })
-        db.run(
-          `
+          db.run(
+            `
             UPDATE duty_violations
             SET rule_id=?, quantity=?, note=?
             WHERE id=?
           `,
-          [rule_id, q, n, id],
-          (err) => {
-            if (err) return res.status(500).json({ error: err.message })
-            db.run(
-              `INSERT INTO duty_revision_logs (session_id, action, created_at) VALUES(?,?,?)`,
-              [row.session_id, "edit:update_violation", time.now()],
-              () => {},
-            )
-            res.json({ success: true })
-          },
-        )
+            [rule_id, q, n, id],
+            (err) => {
+              if (err) return res.status(500).json({ error: err.message })
+              db.run(
+                `INSERT INTO duty_revision_logs (session_id, action, created_at) VALUES(?,?,?)`,
+                [row.session_id, "edit:update_violation", time.now()],
+                () => { },
+              )
+              res.json({ success: true })
+            },
+          )
         })
       },
     )
@@ -2574,19 +2574,19 @@ router.delete(
 
         ensureWeekUnlocked(row.week_id, (lockErr) => {
           if (lockErr) return res.status(lockErr.status || 500).json({ error: lockErr.message })
-        db.run(
-          `DELETE FROM duty_violations WHERE id=?`,
-          [id],
-          (err) => {
-            if (err) return res.status(500).json({ error: err.message })
-            db.run(
-              `INSERT INTO duty_revision_logs (session_id, action, created_at) VALUES(?,?,?)`,
-              [row.session_id, "edit:remove_violation", time.now()],
-              () => {},
-            )
-            res.json({ success: true })
-          },
-        )
+          db.run(
+            `DELETE FROM duty_violations WHERE id=?`,
+            [id],
+            (err) => {
+              if (err) return res.status(500).json({ error: err.message })
+              db.run(
+                `INSERT INTO duty_revision_logs (session_id, action, created_at) VALUES(?,?,?)`,
+                [row.session_id, "edit:remove_violation", time.now()],
+                () => { },
+              )
+              res.json({ success: true })
+            },
+          )
         })
       },
     )
@@ -3140,8 +3140,8 @@ router.get(
       const rows = scores?.length
         ? scores
         : await new Promise((resolve, reject) => {
-            computeWeekScores(weekId, (err, computedRows) => (err ? reject(err) : resolve(computedRows || [])))
-          })
+          computeWeekScores(weekId, (err, computedRows) => (err ? reject(err) : resolve(computedRows || [])))
+        })
 
       const workbook = new ExcelJS.Workbook()
       const ws = workbook.addWorksheet("Weekly Scores")
@@ -3254,10 +3254,10 @@ router.post(
                 })
               })
             })
-          })
         })
-      },
-    )
+      })
+  },
+)
 /*
 ADMIN: month preview/adjust/close/reopen/summary/breakdown/export
 */
@@ -3470,7 +3470,7 @@ router.post(
         return res.status(400).json({ error: "No valid data rows from row 3 (A=class, B=points)" })
       }
 
-      ;(async () => {
+      ; (async () => {
         try {
           const now = time.now()
           await db.withTransaction(async () => {
@@ -3559,33 +3559,33 @@ router.post(
             return res.status(lockErr.status || 500).json({ error: message })
           }
           loadAdjustments("month_adjustments", "month_key", monthKey, (err2, adjMap) => {
-          if (err2) return res.status(500).json({ error: err2.message })
-          computePeriodFromWeeks(ids, adjMap, (err3, rawRows) => {
-            if (err3) return res.status(500).json({ error: err3.message })
-            const rows = toMonthRows(rawRows)
-            const rowsByGrade = periodToRowsByGrade(rows)
-            writePeriodScores("month_scores", "month_key", monthKey, rowsByGrade, (err4) => {
-              if (err4) return res.status(500).json({ error: err4.message })
-              const closedAt = time.now()
-              upsertPeriodSummary(
-                "month_summaries",
-                "month_key",
-                monthKey,
-                ids,
-                closedAt,
-                (err5) => {
-                  if (err5) return res.status(500).json({ error: err5.message })
-                  res.json({
-                    success: true,
-                    month_key: monthKey,
-                    closed_at: closedAt,
-                    week_ids: ids,
-                  })
-                },
-              )
+            if (err2) return res.status(500).json({ error: err2.message })
+            computePeriodFromWeeks(ids, adjMap, (err3, rawRows) => {
+              if (err3) return res.status(500).json({ error: err3.message })
+              const rows = toMonthRows(rawRows)
+              const rowsByGrade = periodToRowsByGrade(rows)
+              writePeriodScores("month_scores", "month_key", monthKey, rowsByGrade, (err4) => {
+                if (err4) return res.status(500).json({ error: err4.message })
+                const closedAt = time.now()
+                upsertPeriodSummary(
+                  "month_summaries",
+                  "month_key",
+                  monthKey,
+                  ids,
+                  closedAt,
+                  (err5) => {
+                    if (err5) return res.status(500).json({ error: err5.message })
+                    res.json({
+                      success: true,
+                      month_key: monthKey,
+                      closed_at: closedAt,
+                      week_ids: ids,
+                    })
+                  },
+                )
+              })
             })
           })
-        })
         })
       }
 
@@ -3676,9 +3676,9 @@ router.get(
               if (err2) return res.status(500).json({ error: err2.message })
 
               const weekMetaById = new Map()
-              ;(weekMetaRows || []).forEach((w) => {
-                weekMetaById.set(Number(w.id), Number(w.week_number))
-              })
+                ; (weekMetaRows || []).forEach((w) => {
+                  weekMetaById.set(Number(w.id), Number(w.week_number))
+                })
 
               const details = []
               const sortedWeekIds = [...weekIds].sort((a, b) => {
@@ -3878,10 +3878,10 @@ router.post(
           loadPeriodScores("semester_scores", "semester_key", semesterKey, (err3, scores) => {
             if (err3) return res.status(500).json({ error: err3.message })
             const byGrade = { 10: [], 11: [], 12: [] }
-            ;(scores || []).forEach((r) => {
-              const g = Number(r.grade)
-              if (g === 10 || g === 11 || g === 12) byGrade[g].push(r)
-            })
+              ; (scores || []).forEach((r) => {
+                const g = Number(r.grade)
+                if (g === 10 || g === 11 || g === 12) byGrade[g].push(r)
+              })
             res.json({
               semester_key: semesterKey,
               week_ids: meta?.week_ids || [],
@@ -4026,15 +4026,15 @@ router.post(
               return res.status(weekLockErr.status || 500).json({ error: message })
             }
             loadAdjustments("semester_adjustments", "semester_key", semesterKey, (err2, adjMap) => {
-          if (err2) return res.status(500).json({ error: err2.message })
-          computePeriodFromWeeks(ids, adjMap, (err3, rows) => {
-            if (err3) return res.status(500).json({ error: err3.message })
-            const rowsByGrade = periodToRowsByGrade(rows)
-            writePeriodScores("semester_scores", "semester_key", semesterKey, rowsByGrade, (err4) => {
-              if (err4) return res.status(500).json({ error: err4.message })
-              const closedAt = time.now()
-              db.run(
-                `
+              if (err2) return res.status(500).json({ error: err2.message })
+              computePeriodFromWeeks(ids, adjMap, (err3, rows) => {
+                if (err3) return res.status(500).json({ error: err3.message })
+                const rowsByGrade = periodToRowsByGrade(rows)
+                writePeriodScores("semester_scores", "semester_key", semesterKey, rowsByGrade, (err4) => {
+                  if (err4) return res.status(500).json({ error: err4.message })
+                  const closedAt = time.now()
+                  db.run(
+                    `
                   INSERT INTO semester_summaries
                   (semester_key, week_ids, month_keys, closed_at, created_at, updated_at)
                   VALUES(?,?,?,?,?,?)
@@ -4045,20 +4045,20 @@ router.post(
                     closed_at=excluded.closed_at,
                     updated_at=excluded.updated_at
                 `,
-                [semesterKey, JSON.stringify(ids), JSON.stringify(monthKeys || []), closedAt, closedAt, closedAt],
-                (err5) => {
-                  if (err5) return res.status(500).json({ error: err5.message })
-                  res.json({
-                    success: true,
-                    semester_key: semesterKey,
-                    closed_at: closedAt,
-                    week_ids: ids,
-                  })
-                },
-              )
+                    [semesterKey, JSON.stringify(ids), JSON.stringify(monthKeys || []), closedAt, closedAt, closedAt],
+                    (err5) => {
+                      if (err5) return res.status(500).json({ error: err5.message })
+                      res.json({
+                        success: true,
+                        semester_key: semesterKey,
+                        closed_at: closedAt,
+                        week_ids: ids,
+                      })
+                    },
+                  )
+                })
+              })
             })
-          })
-        })
           })
         })
       }
@@ -4272,10 +4272,10 @@ router.post(
           loadPeriodScores("year_scores", "year_key", yearKey, (err3, scores) => {
             if (err3) return res.status(500).json({ error: err3.message })
             const byGrade = { 10: [], 11: [], 12: [] }
-            ;(scores || []).forEach((r) => {
-              const g = Number(r.grade)
-              if (g === 10 || g === 11 || g === 12) byGrade[g].push(r)
-            })
+              ; (scores || []).forEach((r) => {
+                const g = Number(r.grade)
+                if (g === 10 || g === 11 || g === 12) byGrade[g].push(r)
+              })
             res.json({
               year_key: yearKey,
               week_ids: meta?.week_ids || [],
@@ -4544,7 +4544,7 @@ router.delete(
   "/admin/session/:id",
   requireLogin,
   requireRole(["admin"]),
-  (req,res)=>{
+  (req, res) => {
 
     const id = req.params.id
 
@@ -4556,13 +4556,13 @@ router.delete(
       db.run(
         "DELETE FROM duty_sessions WHERE id=?",
         [id],
-        function(err){
+        function (err) {
 
-          if(err){
-            return res.status(500).json({error:err.message})
+          if (err) {
+            return res.status(500).json({ error: err.message })
           }
 
-          res.json({success:true,deleted:this.changes})
+          res.json({ success: true, deleted: this.changes })
 
         }
       )
@@ -4572,7 +4572,7 @@ router.delete(
 )
 
 function sendClassPeriodTree(req, res) {
-  ;(async () => {
+  ; (async () => {
     try {
       const tree = await loadCurrentPeriodTree()
       res.json(tree)
@@ -4709,7 +4709,7 @@ router.get(
 
       isWeekClosed(week.id, (err, closed) => {
         if (!err && !closed && !isSunday(today)) {
-          ensureDailySessionsForDate({ weekId: week.id, date: today }, () => {})
+          ensureDailySessionsForDate({ weekId: week.id, date: today }, () => { })
         }
       })
 
@@ -4722,7 +4722,7 @@ router.get(
             if (baseErr) return res.status(500).json({ error: baseErr.message })
             res.json({ week, sessions: rows || [], base_points: baseScore })
           })
-      })
+        })
     })
   },
 )
@@ -4777,7 +4777,7 @@ router.get(
 
         isWeekClosed(week.id, (err, closed) => {
           if (!err && !closed && isCurrentWeek && !isSunday(today)) {
-            ensureDailySessionsForDate({ weekId: week.id, date: today }, () => {})
+            ensureDailySessionsForDate({ weekId: week.id, date: today }, () => { })
           }
 
           aggregateSessions(
@@ -4868,14 +4868,14 @@ BANCANSU: get duty sessions by red_class
 router.get(
   "/sessions",
   requireLogin,
-  (req,res)=>{
+  (req, res) => {
 
     const redClass = req.query.red_class
-    
+
     let whereSql = "WHERE 1=1"
     let params = []
 
-    if(redClass){
+    if (redClass) {
       whereSql += " AND s.red_class=?"
       params.push(redClass)
     }
@@ -4884,7 +4884,7 @@ router.get(
       whereSql,
       params,
       (err, rows) => {
-        if(err) return res.status(500).json({error:err.message})
+        if (err) return res.status(500).json({ error: err.message })
         res.json(rows || [])
       }
     )
@@ -4942,7 +4942,7 @@ router.get(
 
         isWeekClosed(week.id, (err, closed) => {
           if (!err && !closed && isCurrentWeek && !isSunday(today)) {
-            ensureDailySessionsForDate({ weekId: week.id, date: today }, () => {})
+            ensureDailySessionsForDate({ weekId: week.id, date: today }, () => { })
           }
 
           aggregateSessions(

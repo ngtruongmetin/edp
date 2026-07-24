@@ -9,6 +9,7 @@ import ClassSelector from "../components/ClassSelector"
 import { getDashboardPath } from "../utils/authRoutes"
 import { usePageTitle } from "../utils/usePageTitle"
 import useKeyboardInsets from "../utils/useKeyboardInsets"
+import { getPasskeyErrorMessage, loginWithPasskey } from "../passkeys"
 
 const roleOptions = [
   { value: "admin", label: "Quản trị" },
@@ -132,6 +133,7 @@ export default function Login() {
         })
       }
 
+      sessionStorage.setItem("edp:prompt-passkey-enrollment", "1")
       await refresh()
       window.location.href = getDashboardPath(role)
     } catch {
@@ -299,6 +301,27 @@ export default function Login() {
             className="mt-6 min-h-14 w-full rounded-2xl bg-[#2e77df] px-4 py-3 text-[15px] font-semibold text-white shadow-sm transition hover:bg-[#245fc0] active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60"
           >
             {submitting ? "Đang đăng nhập..." : "Đăng nhập"}
+          </button>
+
+          <button
+            type="button"
+            disabled={submitting}
+            onClick={async () => {
+              try {
+                setSubmitting(true)
+                const result = await loginWithPasskey()
+                toast.success("Đăng nhập bằng Passkey thành công.")
+                await refresh()
+                window.location.href = getDashboardPath(result.data.role)
+              } catch (err) {
+                toast.error(getPasskeyErrorMessage(err, "Xác thực Passkey thất bại."))
+              } finally {
+                setSubmitting(false)
+              }
+            }}
+            className="mt-3 min-h-14 w-full rounded-2xl border border-[#2e77df] bg-white px-4 py-3 text-[15px] font-semibold text-[#2e77df] shadow-sm transition hover:bg-blue-50 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            Đăng nhập bằng Passkey
           </button>
         </form>
       </main>

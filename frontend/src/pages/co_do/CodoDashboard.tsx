@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react"
-import { useNavigate, useOutletContext } from "react-router-dom"
+import { useNavigate } from "react-router-dom"
 import { api } from "../../api/api"
 import { useAuth } from "../../auth/AuthContext"
 
@@ -41,11 +41,6 @@ type DashboardSnapshot = {
 export default function CoDoDashboard() {
   usePageTitle("EDP | Cờ đỏ")
   const { user: authUser, isOffline } = useAuth()
-
-  const context = useOutletContext<any>()
-  const setShowChangePassword = context?.setShowChangePassword as
-    | ((open: boolean) => void)
-    | undefined
 
   const [time, setTime] = useState("")
   const [date, setDate] = useState("")
@@ -278,7 +273,7 @@ export default function CoDoDashboard() {
       <div className="flex-1 max-w-md mx-auto w-full px-4 pt-4 pb-28 space-y-4">
         <div className="overflow-hidden rounded-[28px] bg-gradient-to-br from-[#2e77df] via-[#2b6fd0] to-[#1f5fc0] text-white shadow-[0_18px_42px_rgba(30,64,175,0.28)]">
           <div className="p-5">
-            <div className="flex items-start justify-between gap-3">
+            <div className="flex items-start gap-3">
               <div>
                 <div className="text-xs font-semibold uppercase tracking-[0.14em] opacity-80">
                   Xin chào
@@ -287,12 +282,6 @@ export default function CoDoDashboard() {
                   Cờ đỏ lớp {className || "--"}
                 </div>
               </div>
-              <button
-                onClick={() => setShowChangePassword?.(true)}
-                className="min-h-12 rounded-2xl bg-white/15 px-4 py-3 text-sm font-semibold transition hover:bg-white/25 active:scale-[0.98]"
-              >
-                Cài đặt
-              </button>
             </div>
 
             {dashboardReady ? (

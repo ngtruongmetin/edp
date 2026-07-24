@@ -17,6 +17,7 @@
   "license": "ISC",
   "dependencies": {
     "@google/genai": "^2.12.0",
+    "@simplewebauthn/server": "^13.3.2",
     "ajv": "^8.20.0",
     "bcrypt": "^6.0.0",
     "connect-pg-simple": "^10.0.0",
