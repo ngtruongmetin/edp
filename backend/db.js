@@ -22,6 +22,9 @@ const TABLES_WITH_ID = new Set([
   "timetables",
   "timetable_entries",
   "weekly_scores",
+  "absence_evidences",
+  "absence_evidence_files",
+  "absence_exemption_logs",
 ])
 
 function stripLeadingWhitespace(sql) {

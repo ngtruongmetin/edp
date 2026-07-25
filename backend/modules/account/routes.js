@@ -10,7 +10,7 @@ const router = express.Router()
 
 /*
 POST /api/account/change-password
-Change password for any role (bancansu, co_do, admin, gvcn)
+Change password for any role (ban_can_su, co_do, admin, gvcn)
 body: { old_password, new_password, confirm_password }
 */
 router.post("/change-password", requireLogin, (req, res) => {
@@ -76,9 +76,9 @@ router.post("/change-password", requireLogin, (req, res) => {
 
   let passwordColumn = ""
   let flagColumn = ""
-  if (role === "bancansu") {
-    passwordColumn = "password_bcs"
-    flagColumn = "password_changed_bcs"
+  if (role === "ban_can_su") {
+    passwordColumn = "password_ban_can_su"
+    flagColumn = "password_changed_ban_can_su"
   } else if (role === "co_do") {
     passwordColumn = "password_codo"
     flagColumn = "password_changed_codo"
@@ -125,7 +125,7 @@ router.post("/change-password", requireLogin, (req, res) => {
 
 /*
 POST /api/account/change-pin
-Change PIN for BCS only
+Change PIN for Ban cán sự only
 body: { old_pin, new_pin, confirm_pin }
 */
 router.post("/change-pin", requireLogin, (req, res) => {
@@ -133,8 +133,8 @@ router.post("/change-pin", requireLogin, (req, res) => {
   const role = req.session.user?.role
   const classId = req.session.user?.class_id
 
-  if (role !== "bancansu") {
-    return res.status(403).json({ error: "Chỉ lớp trưởng mới có PIN" })
+  if (role !== "ban_can_su") {
+    return res.status(403).json({ error: "Chỉ Ban cán sự mới có PIN" })
   }
 
   if (!old_pin || !new_pin || !confirm_pin) {
@@ -154,13 +154,13 @@ router.post("/change-pin", requireLogin, (req, res) => {
   }
 
   db.get(
-    `SELECT pin_bcs FROM accounts WHERE class_id=?`,
+    `SELECT pin_ban_can_su FROM accounts WHERE class_id=?`,
     [classId],
     async (err, row) => {
       if (err) return res.status(500).json({ error: err.message })
       if (!row) return res.status(404).json({ error: "Account not found" })
 
-      const storedPin = String(row.pin_bcs || "").trim()
+      const storedPin = String(row.pin_ban_can_su || "").trim()
 
       let matches = false
       try {
@@ -176,7 +176,7 @@ router.post("/change-pin", requireLogin, (req, res) => {
       const hashedPin = await hashPin(new_pin)
 
       db.run(
-        `UPDATE accounts SET pin_bcs=?, pin_failed_attempts=0, pin_locked_until=0 WHERE class_id=?`,
+        `UPDATE accounts SET pin_ban_can_su=?, pin_failed_attempts=0, pin_locked_until=0 WHERE class_id=?`,
         [hashedPin, classId],
         (updateErr) => {
           if (updateErr) return res.status(500).json({ error: updateErr.message })
@@ -205,7 +205,7 @@ router.get("/profile", requireLogin, (req, res) => {
         class_id,
         password_changed,
         password_changed_gvcn,
-        password_changed_bcs,
+        password_changed_ban_can_su,
         password_changed_codo,
         created_at
      FROM accounts
@@ -216,8 +216,8 @@ router.get("/profile", requireLogin, (req, res) => {
       if (!row) return res.status(404).json({ error: "Account not found" })
 
       const rolePasswordChanged =
-        role === "bancansu"
-          ? row.password_changed_bcs
+        role === "ban_can_su"
+          ? row.password_changed_ban_can_su
           : role === "co_do"
             ? row.password_changed_codo
             : role === "gvcn"

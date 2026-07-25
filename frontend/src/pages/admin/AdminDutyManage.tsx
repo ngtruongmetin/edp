@@ -5,6 +5,7 @@ import { api } from "../../api/api"
 import Navbar from "../../components/Navbar"
 import Footer from "../../components/Footer"
 import { formatDutyStatus, formatRevisionAction } from "../../utils/dutyFormat"
+import { effectiveViolationScore, violationQuantityLabel } from "../../utils/dutyViolations"
 import { localISODate } from "../../utils/dateLocal"
 import { usePageTitle } from "../../utils/usePageTitle"
 
@@ -1184,7 +1185,7 @@ export default function AdminDutyManage() {
                   {(() => {
                     const vio = (detail.violations || []).reduce(
                       (sum: number, v: any) =>
-                        sum + Number(v.score_delta || 0) * Number(v.quantity || 0),
+                        sum + effectiveViolationScore(v),
                       0,
                     )
                     const bonus = Number(detail.session?.bonus_points || 0)
@@ -1406,7 +1407,7 @@ export default function AdminDutyManage() {
                                   {v.name}
                                 </div>
                                 <div className="mt-0.5 text-xs text-gray-500">
-                                  {v.category} | x{v.quantity} ({v.score_delta})
+                                  {v.category} | {violationQuantityLabel(v)} ({v.score_delta})
                                 </div>
                                 {v.note ? (
                                   <div className="mt-1 text-xs text-gray-600">

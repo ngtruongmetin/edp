@@ -6,9 +6,11 @@ import { api } from "../../api/api"
 import { useAuth } from "../../auth/AuthContext"
 import Navbar from "../../components/Navbar"
 import Footer from "../../components/Footer"
+import AbsenceEvidencePanel from "../../components/AbsenceEvidencePanel"
 import DutyPeriodSelector, { type DutyPeriodTree } from "../../components/DutyPeriodSelector"
 import DutyPeriodSummaryCard, { type DutyPeriodSummary } from "../../components/DutyPeriodSummaryCard"
 import { formatDutyStatus } from "../../utils/dutyFormat"
+import { effectiveViolationScore, violationQuantityLabel } from "../../utils/dutyViolations"
 import { getApiErrorMessage } from "../../utils/getApiErrorMessage"
 import { buildDashboardCacheKey, getCachedDashboard, setCachedDashboard } from "../../utils/offlineCache"
 import { usePageTitle } from "../../utils/usePageTitle"
@@ -374,6 +376,8 @@ export default function GvcnDashboard() {
           formatDate={formatDateVN}
         />
 
+        <AbsenceEvidencePanel week={week} disabled={isOffline} />
+
         {weekId ? (
           <div className="rounded-3xl bg-white p-5 shadow-sm ring-1 ring-blue-50">
             <div className="flex items-center gap-3">
@@ -477,7 +481,7 @@ export default function GvcnDashboard() {
               <div className="mt-3 max-h-[70vh] overflow-y-auto space-y-4 pb-2">
                 {(() => {
                   const vio = (detail.violations || []).reduce(
-                    (sum: number, v: any) => sum + Number(v.score_delta || 0) * Number(v.quantity || 0),
+                    (sum: number, v: any) => sum + effectiveViolationScore(v),
                     0,
                   )
                   const bonus = Number(detail.session?.bonus_points || 0)
@@ -536,7 +540,7 @@ export default function GvcnDashboard() {
                       <div key={v.id} className="rounded-2xl border border-blue-100 bg-white px-4 py-3">
                         <div className="text-[15px] font-semibold text-gray-900">{v.name}</div>
                         <div className="mt-0.5 text-xs text-gray-500">
-                          {v.category} | x{v.quantity} ({v.score_delta})
+                          {v.category} | {violationQuantityLabel(v)} ({v.score_delta})
                         </div>
                         {v.note ? (
                           <div className="mt-1 text-xs text-gray-600">Ghi chú: {v.note}</div>

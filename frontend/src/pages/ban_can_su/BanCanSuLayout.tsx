@@ -47,12 +47,12 @@ export default function BanCanSuLayout() {
   }
 
   return (
-    <RequireRole role="bancansu">
+    <RequireRole role="ban_can_su">
       <Outlet context={{ user, setShowChangePassword }} />
 
       {showChangePassword && (
         <ChangePasswordModal
-          role="bancansu"
+          role="ban_can_su"
           onSuccess={() => {
             setShowChangePassword(false)
             loadProfile()

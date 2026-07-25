@@ -57,6 +57,14 @@ function buildAdminAiErrorResponse(err, fallbackProvider = "custom") {
   }
 }
 
+function toAdminAiConfig(config) {
+  const { apiKey, ...safeConfig } = config
+  return {
+    ...safeConfig,
+    hasApiKey: Boolean(apiKey),
+  }
+}
+
 function validateGeneralSettingsPayload(payload) {
   const settings = payload?.settings
 
@@ -185,7 +193,7 @@ router.put("/", requireLogin, requireRole(["admin"]), async (req, res) => {
 router.get("/ai", requireLogin, requireRole(["admin"]), async (req, res) => {
   try {
     const config = await getCurrentConfig()
-    res.json({ success: true, config })
+    res.json({ success: true, config: toAdminAiConfig(config) })
   } catch (err) {
     console.error(err)
     const payload = buildAdminAiErrorResponse(err)
@@ -241,10 +249,10 @@ router.put("/ai", requireLogin, requireRole(["admin"]), async (req, res) => {
 
     res.json({
       success: true,
-      config: {
+      config: toAdminAiConfig({
         ...config,
         providerLabel: getProviderLabel(config.provider),
-      },
+      }),
       message: "Đã lưu cấu hình AI.",
     })
   } catch (err) {

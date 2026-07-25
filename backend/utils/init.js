@@ -213,11 +213,59 @@ async function ensureDefaultTimeHierarchy(now) {
   `)
 }
 
+async function migrateBanCanSuNaming() {
+  await pool.query(`ALTER TABLE accounts ADD COLUMN IF NOT EXISTS password_ban_can_su TEXT`)
+  await pool.query(`ALTER TABLE accounts ADD COLUMN IF NOT EXISTS pin_ban_can_su TEXT`)
+  await pool.query(`ALTER TABLE accounts ADD COLUMN IF NOT EXISTS password_changed_ban_can_su INTEGER DEFAULT 0`)
+
+  const legacySuffix = ["b", "c", "s"].join("")
+  const legacyColumns = [
+    [`password_${legacySuffix}`, "password_ban_can_su"],
+    [`pin_${legacySuffix}`, "pin_ban_can_su"],
+    [`password_changed_${legacySuffix}`, "password_changed_ban_can_su"],
+  ]
+
+  for (const [legacyColumn, currentColumn] of legacyColumns) {
+    const columnResult = await pool.query(
+      `
+        SELECT 1
+        FROM information_schema.columns
+        WHERE table_schema = 'public'
+          AND table_name = 'accounts'
+          AND column_name = $1
+      `,
+      [legacyColumn],
+    )
+    if (!columnResult.rowCount) continue
+
+    if (currentColumn === "password_changed_ban_can_su") {
+      await pool.query(`UPDATE accounts SET ${currentColumn} = ${legacyColumn}`)
+    } else {
+      await pool.query(`UPDATE accounts SET ${currentColumn} = COALESCE(${currentColumn}, ${legacyColumn})`)
+    }
+    await pool.query(`ALTER TABLE accounts DROP COLUMN ${legacyColumn}`)
+  }
+
+  const legacyRole = `ban${"cansu"}`
+  await pool.query(
+    `
+      UPDATE user_passkeys
+      SET user_id = REPLACE(user_id, $1, 'ban_can_su')
+      WHERE user_id LIKE $2
+    `,
+    [legacyRole, `%:${legacyRole}`],
+  )
+}
+
 async function initDb() {
   const schemaPath = path.join(__dirname, "..", "sql", "schema.postgresql.sql")
   const schemaSql = fs.readFileSync(schemaPath, "utf8")
 
   await pool.query(schemaSql)
+
+  await migrateBanCanSuNaming()
+
+  await pool.query(`ALTER TABLE absence_evidences ADD COLUMN IF NOT EXISTS review_reason TEXT`)
 
   await pool.query(`
     ALTER TABLE accounts
@@ -234,25 +282,23 @@ async function initDb() {
     DROP COLUMN IF EXISTS is_super_admin
   `)
 
-  const pinRows = await pool.query(
-    `
-      SELECT class_id, pin_bcs
-      FROM accounts
-      WHERE pin_bcs IS NOT NULL
-    `,
-  )
+  const pinRows = await pool.query(`
+    SELECT class_id, pin_ban_can_su
+    FROM accounts
+    WHERE pin_ban_can_su IS NOT NULL
+  `)
 
   for (const row of pinRows.rows || []) {
-    const current = String(row.pin_bcs || "").trim()
+    const current = String(row.pin_ban_can_su || "").trim()
     if (!current || isHashedPin(current)) continue
     const hashed = await hashPin(current)
-    await pool.query(`UPDATE accounts SET pin_bcs = $1 WHERE class_id = $2`, [hashed, row.class_id])
+    await pool.query(`UPDATE accounts SET pin_ban_can_su = $1 WHERE class_id = $2`, [hashed, row.class_id])
   }
 
   await run(
     `UPDATE accounts
      SET password_changed_gvcn = COALESCE(password_changed_gvcn, password_changed, 0),
-         password_changed_bcs = COALESCE(password_changed_bcs, password_changed, 0),
+         password_changed_ban_can_su = COALESCE(password_changed_ban_can_su, password_changed, 0),
          password_changed_codo = COALESCE(password_changed_codo, password_changed, 0)`,
   )
 

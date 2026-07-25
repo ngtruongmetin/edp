@@ -64,9 +64,9 @@ function updateExcel(className,data){
 
     class:r.class || "",
     gvcn_password:r.gvcn_password || "",
-    bcs_password:r.bcs_password || "",
+    ban_can_su_password:r.ban_can_su_password || "",
     codo_password:r.codo_password || "",
-    pin_bcs:""
+    pin_ban_can_su:""
 
   }))
 
@@ -92,9 +92,9 @@ function updateExcel(className,data){
     header:[
       "class",
       "gvcn_password",
-      "bcs_password",
+      "ban_can_su_password",
       "codo_password",
-      "pin_bcs"
+      "pin_ban_can_su"
     ]
   })
 

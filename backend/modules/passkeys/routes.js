@@ -141,7 +141,7 @@ async function getPasskeyUser(sessionUser) {
 
   const role = String(sessionUser?.role || "")
   const classId = Number(sessionUser?.class_id)
-  if (!classId || !["gvcn", "bancansu", "co_do"].includes(role)) return null
+  if (!classId || !["gvcn", "ban_can_su", "co_do"].includes(role)) return null
 
   const result = await pool.query(
     `SELECT a.id, a.class_id, c.name AS class_name
@@ -170,7 +170,7 @@ async function getUserForPasskeyId(userId) {
     return admin ? { role: "admin", username: admin.username } : null
   }
 
-  const accountMatch = /^account:(\d+):(gvcn|bancansu|co_do)$/.exec(String(userId || ""))
+  const accountMatch = /^account:(\d+):(gvcn|ban_can_su|co_do)$/.exec(String(userId || ""))
   if (!accountMatch) return null
 
   const result = await pool.query(

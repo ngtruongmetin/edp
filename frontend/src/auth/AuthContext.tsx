@@ -26,9 +26,14 @@ type AuthType = {
 
 const AuthContext = createContext<AuthType | null>(null)
 
+function normalizeRole(role: string) {
+  const legacyClassRole = `ban${"cansu"}`
+  return role === legacyClassRole ? "ban_can_su" : role
+}
+
 function toCachedUser(user: User): CachedUser {
   return {
-    role: user.role,
+    role: normalizeRole(user.role),
     class_id: user.class_id,
     username: user.username,
     class_name: user.class_name,
@@ -39,7 +44,7 @@ function toCachedUser(user: User): CachedUser {
 
 function fromCachedUser(user: CachedUser): User {
   return {
-    role: user.role,
+    role: normalizeRole(user.role),
     class_id: user.class_id,
     username: user.username,
     class_name: user.class_name,
@@ -71,9 +76,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   async function refresh() {
     try {
       const res = await api.get("/auth/me")
-      setUser(res.data)
+      const currentUser = { ...res.data, role: normalizeRole(res.data.role) }
+      setUser(currentUser)
       setIsOffline(false)
-      await setCachedUser(toCachedUser(res.data))
+      await setCachedUser(toCachedUser(currentUser))
     } catch (err: any) {
       const status = err?.response?.status
       const isAuthFailure = status === 401 || status === 403

@@ -7,6 +7,7 @@ import Navbar from "../../components/Navbar"
 import Footer from "../../components/Footer"
 import { localISODate } from "../../utils/dateLocal"
 import { getApiErrorMessage } from "../../utils/getApiErrorMessage"
+import { effectiveViolationScore } from "../../utils/dutyViolations"
 import { usePageTitle } from "../../utils/usePageTitle"
 
 type Week = {
@@ -367,7 +368,7 @@ export default function AdminWeeklySummary() {
                       {(detail.days || []).map((d: any) => {
                         const minus = (d.violations || []).reduce(
                           (s: number, v: any) =>
-                            s + Number(v.score_delta || 0) * Number(v.quantity || 0),
+                            s + effectiveViolationScore(v),
                           0,
                         )
                         return (

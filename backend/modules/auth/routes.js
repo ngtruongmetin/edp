@@ -9,7 +9,9 @@ CLASS LOGIN
 */
 router.post("/login", (req, res) => {
 
-    const { role, class_name, password } = req.body;
+    const { role: requestedRole, class_name, password } = req.body;
+    const legacyBanCanSuRole = `ban${"cansu"}`
+    const role = requestedRole === legacyBanCanSuRole ? "ban_can_su" : requestedRole
     console.log("[auth/login] request", { role, class_name })
 
     if (!role || !class_name || !password) {
@@ -32,7 +34,7 @@ router.post("/login", (req, res) => {
         let hash = null;
 
         if (role === "gvcn") hash = acc.password_gvcn;
-        if (role === "bancansu") hash = acc.password_bcs;
+        if (role === "ban_can_su") hash = acc.password_ban_can_su;
         if (role === "co_do") hash = acc.password_codo;
 
         if (!hash) return res.status(400).json({ error: "Invalid role" });
@@ -54,8 +56,8 @@ router.post("/login", (req, res) => {
 
 
             const rolePasswordChanged =
-                role === "bancansu"
-                    ? acc.password_changed_bcs
+                role === "ban_can_su"
+                    ? acc.password_changed_ban_can_su
                     : role === "co_do"
                         ? acc.password_changed_codo
                         : role === "gvcn"

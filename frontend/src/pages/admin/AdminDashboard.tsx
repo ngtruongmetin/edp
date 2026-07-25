@@ -25,6 +25,7 @@ const shortcutItems = [
   { label: "Tổng kết học kỳ", hint: "Báo cáo học kỳ", path: "/admin/semester-summary" },
   { label: "Tổng kết năm học", hint: "Báo cáo năm học", path: "/admin/year-summary" },
   { label: "Cấu hình hệ thống", hint: "AI và tham số hệ thống", path: "/admin/system-settings" },
+  { label: "Minh chứng nghỉ học", hint: "Duyệt miễn trừ vắng có phép", path: "/admin/absence-evidences" },
 ]
 
 export default function AdminDashboard() {

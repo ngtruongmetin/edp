@@ -6,9 +6,11 @@ import { api } from "../../api/api"
 import { useAuth } from "../../auth/AuthContext"
 import Navbar from "../../components/Navbar"
 import Footer from "../../components/Footer"
+import AbsenceEvidencePanel from "../../components/AbsenceEvidencePanel"
 import DutyPeriodSelector, { type DutyPeriodTree } from "../../components/DutyPeriodSelector"
 import DutyPeriodSummaryCard, { type DutyPeriodSummary } from "../../components/DutyPeriodSummaryCard"
 import { formatDutyStatus } from "../../utils/dutyFormat"
+import { effectiveViolationScore, violationQuantityLabel } from "../../utils/dutyViolations"
 import { getApiErrorMessage } from "../../utils/getApiErrorMessage"
 import { buildDashboardCacheKey, getCachedDashboard, setCachedDashboard } from "../../utils/offlineCache"
 import { usePageTitle } from "../../utils/usePageTitle"
@@ -164,7 +166,7 @@ export default function BanCanSuDashboard() {
 
   async function loadWeeks() {
     try {
-      const res = await api.get("/duty/bancansu/period-tree")
+      const res = await api.get("/duty/ban_can_su/period-tree")
       const tree = res.data as DutyPeriodTree
       const list: Week[] = (tree.semesters || []).flatMap((semester) =>
         (semester.months || []).flatMap((month) =>
@@ -201,13 +203,13 @@ export default function BanCanSuDashboard() {
   async function loadWeekSessions(id: number) {
     try {
       setLoading(true)
-      const res = await api.get(`/duty/bancansu/week/${id}`)
+      const res = await api.get(`/duty/ban_can_su/week/${id}`)
       setWeek(
         res.data.week
           ? {
-              ...res.data.week,
-              base_points: Number(res.data.base_points || 120),
-            }
+            ...res.data.week,
+            base_points: Number(res.data.base_points || 120),
+          }
           : null,
       )
       setSessions(res.data.sessions || [])
@@ -223,7 +225,7 @@ export default function BanCanSuDashboard() {
   async function loadWeekSummary(id: number) {
     try {
       setSummaryLoading(true)
-      const res = await api.get(`/duty/bancansu/week/${id}/summary`)
+      const res = await api.get(`/duty/ban_can_su/week/${id}/summary`)
       setSummary(res.data)
     } catch (err) {
       toast.error(getApiErrorMessage(err, "Không thể tải tổng kết tuần"))
@@ -236,7 +238,7 @@ export default function BanCanSuDashboard() {
   async function loadPeriodSummary(type: "month" | "semester" | "year", key: string) {
     try {
       setSummaryLoading(true)
-      const res = await api.get(`/duty/bancansu/${type}/${encodeURIComponent(key)}/summary`)
+      const res = await api.get(`/duty/ban_can_su/${type}/${encodeURIComponent(key)}/summary`)
       setSummary(res.data)
     } catch (err) {
       toast.error(getApiErrorMessage(err, "Không thể tải tổng kết"))
@@ -278,7 +280,7 @@ export default function BanCanSuDashboard() {
     setDetailId(id)
     setDetail(null)
     try {
-      const res = await api.get(`/duty/bancansu/session/${id}`)
+      const res = await api.get(`/duty/ban_can_su/session/${id}`)
       setDetail(res.data)
     } catch (err: any) {
       console.error(err)
@@ -377,6 +379,8 @@ export default function BanCanSuDashboard() {
           onWeekChange={handleWeekChange}
           formatDate={formatDateVN}
         />
+
+        <AbsenceEvidencePanel week={week} disabled={isOffline} />
 
         {weekId ? (
           <div className="rounded-3xl bg-white p-5 shadow-sm ring-1 ring-blue-50">
@@ -479,7 +483,7 @@ export default function BanCanSuDashboard() {
               <div className="mt-3 max-h-[70vh] overflow-y-auto space-y-4 pb-2">
                 {(() => {
                   const vio = (detail.violations || []).reduce(
-                    (sum: number, v: any) => sum + Number(v.score_delta || 0) * Number(v.quantity || 0),
+                    (sum: number, v: any) => sum + effectiveViolationScore(v),
                     0,
                   )
                   const bonus = Number(detail.session?.bonus_points || 0)
@@ -538,7 +542,7 @@ export default function BanCanSuDashboard() {
                       <div key={v.id} className="rounded-2xl border border-blue-100 bg-white px-4 py-3">
                         <div className="text-[15px] font-semibold text-gray-900">{v.name}</div>
                         <div className="mt-0.5 text-xs text-gray-500">
-                          {v.category} | x{v.quantity} ({v.score_delta})
+                          {v.category} | {violationQuantityLabel(v)} ({v.score_delta})
                         </div>
                         {v.note ? (
                           <div className="mt-1 text-xs text-gray-600">Ghi chú: {v.note}</div>

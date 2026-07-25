@@ -4,12 +4,12 @@ const { run } = require("./dbp")
 
 async function main() {
   await run("ALTER TABLE accounts ADD COLUMN IF NOT EXISTS password_changed_gvcn INTEGER DEFAULT 0")
-  await run("ALTER TABLE accounts ADD COLUMN IF NOT EXISTS password_changed_bcs INTEGER DEFAULT 0")
+  await run("ALTER TABLE accounts ADD COLUMN IF NOT EXISTS password_changed_ban_can_su INTEGER DEFAULT 0")
   await run("ALTER TABLE accounts ADD COLUMN IF NOT EXISTS password_changed_codo INTEGER DEFAULT 0")
   await run(
     `UPDATE accounts
      SET password_changed_gvcn = COALESCE(password_changed_gvcn, password_changed, 0),
-         password_changed_bcs = COALESCE(password_changed_bcs, password_changed, 0),
+         password_changed_ban_can_su = COALESCE(password_changed_ban_can_su, password_changed, 0),
          password_changed_codo = COALESCE(password_changed_codo, password_changed, 0)`,
   )
 

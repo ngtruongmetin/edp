@@ -9,7 +9,7 @@ loadEnv()
 const DEFAULT_PASSWORD = process.env.CLASS_DEFAULT_PASSWORD
 const DEFAULT_PIN = process.env.CLASS_DEFAULT_PIN
 
-async function resetGvcnBcsDefaults() {
+async function resetGvcnBanCanSuDefaults() {
   if (!DEFAULT_PASSWORD || !DEFAULT_PIN) {
     throw new Error("Missing CLASS_DEFAULT_PASSWORD or CLASS_DEFAULT_PIN")
   }
@@ -32,14 +32,14 @@ async function resetGvcnBcsDefaults() {
             UPDATE accounts
             SET
               password_gvcn=?,
-              password_bcs=?,
+              password_ban_can_su=?,
               password_codo=?,
-              pin_bcs=?,
+              pin_ban_can_su=?,
               pin_failed_attempts=0,
               pin_locked_until=0,
               password_changed=1,
               password_changed_gvcn=1,
-              password_changed_bcs=1,
+              password_changed_ban_can_su=1,
               password_changed_codo=1
             WHERE class_id=?
           `,
@@ -50,9 +50,9 @@ async function resetGvcnBcsDefaults() {
 
       updateExcel(c.name, {
         gvcn_password: DEFAULT_PASSWORD,
-        bcs_password: DEFAULT_PASSWORD,
+        ban_can_su_password: DEFAULT_PASSWORD,
         codo_password: DEFAULT_PASSWORD,
-        pin_bcs: "",
+        pin_ban_can_su: "",
       })
 
       console.log("Reset:", c.name)
@@ -63,4 +63,4 @@ async function resetGvcnBcsDefaults() {
   })
 }
 
-resetGvcnBcsDefaults()
+resetGvcnBanCanSuDefaults()

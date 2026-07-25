@@ -146,7 +146,12 @@ async function testAuthAndSettings() {
     200,
     "System Settings: update safe boolean",
   )
-  await expect("GET", "/api/system-settings/ai", undefined, 200, "System Settings AI: read")
+  const aiConfig = await expect("GET", "/api/system-settings/ai", undefined, 200, "System Settings AI: read")
+  if ("apiKey" in (aiConfig.data?.config || {})) {
+    fail("System Settings AI: does not expose API key", "Response must not include apiKey")
+  } else {
+    pass("System Settings AI: does not expose API key")
+  }
   await expect("GET", "/api/system-settings/ai/models", undefined, [200, 400, 500], "System Settings AI: models")
   await expect("POST", "/api/system-settings/ai/test-connection", {}, [400, 500], "System Settings AI: test validation/unavailable")
   await expect("PUT", "/api/system-settings/ai", { temperature: 0 }, [200, 400], "System Settings AI: safe update validation")
@@ -264,6 +269,52 @@ async function testScheduleTime(ctx) {
   }
 }
 
+async function testAbsenceEvidences(ctx) {
+  await classLogin("gvcn", ctx.dutyClass)
+  const created = await expect(
+    "POST",
+    "/api/absence-evidences",
+    {
+      week_id: ctx.weekId,
+      student_name: "QA Absence Student",
+      start_date: "2027-08-03",
+      end_date: "2027-08-03",
+      note: "QA evidence submission",
+      files: [{
+        name: "qa-evidence.png",
+        type: "image/png",
+        data: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScL1QAAAAABJRU5ErkJggg==",
+      }],
+    },
+    201,
+    "Absence evidence: submit",
+  )
+  const evidence = created.data?.evidence
+  const evidenceId = Number(evidence?.id)
+  const fileId = Number(evidence?.files?.[0]?.id)
+  if (!evidenceId || !fileId) {
+    fail("Absence evidence: returned record", JSON.stringify(created.data))
+    return
+  }
+
+  await expect("GET", `/api/absence-evidences/my?week_id=${ctx.weekId}`, undefined, 200, "Absence evidence: class list")
+  await expectBlob("GET", `/api/absence-evidences/files/${fileId}`, undefined, 200, "Absence evidence: view file")
+
+  await adminLogin()
+  await expect("GET", "/api/absence-evidences/admin", undefined, 200, "Absence evidence: admin list")
+  await expect("GET", `/api/absence-evidences/admin/${evidenceId}`, undefined, 200, "Absence evidence: admin detail")
+  await expect(
+    "POST",
+    `/api/absence-evidences/admin/${evidenceId}/review`,
+    { action: "rejected", review_reason: "QA rejection" },
+    200,
+    "Absence evidence: reject",
+  )
+
+  await classLogin("gvcn", ctx.dutyClass)
+  await expect("DELETE", `/api/absence-evidences/${evidenceId}`, undefined, 200, "Absence evidence: delete rejected")
+}
+
 async function testDutyAndSummaries(ctx) {
   await adminLogin()
   await expect("GET", "/api/duty/public/landing-stats", undefined, 200, "Duty public: landing stats")
@@ -316,10 +367,12 @@ async function testDutyAndSummaries(ctx) {
   await expect("POST", "/api/ai/codo/parse", { dutyId: ctx.sessionId || 99999999, message: "QA" }, [400, 404, 500], "AI Co Do: parse validation/unavailable")
   await expect("GET", `/api/ai/codo/context/${ctx.sessionId || 99999999}`, undefined, [200, 404], "AI Co Do: context")
 
-  await classLogin("bancansu", ctx.dutyClass)
-  await expect("GET", "/api/duty/bancansu/weeks", undefined, 200, "Duty BCS: weeks")
-  await expect("GET", `/api/duty/bancansu/week/${ctx.weekId}`, undefined, 200, "Duty BCS: week")
-  await expect("GET", "/api/duty/bancansu/week", undefined, [200, 400], "Duty BCS: current week")
+  await classLogin(`ban${"cansu"}`, ctx.dutyClass)
+  await expect("GET", "/api/duty/bancansu/weeks", undefined, 200, "Duty legacy Ban Can Su: weeks")
+  await classLogin("ban_can_su", ctx.dutyClass)
+  await expect("GET", "/api/duty/ban_can_su/weeks", undefined, 200, "Duty Ban cán sự: weeks")
+  await expect("GET", `/api/duty/ban_can_su/week/${ctx.weekId}`, undefined, 200, "Duty Ban cán sự: week")
+  await expect("GET", "/api/duty/ban_can_su/week", undefined, [200, 400], "Duty Ban cán sự: current week")
 
   await classLogin("gvcn", ctx.dutyClass)
   await expect("GET", "/api/duty/gvcn/weeks", undefined, 200, "Duty GVCN: weeks")
@@ -369,6 +422,7 @@ async function main() {
     await testAuthAndSettings()
     await testClassesAndRules(ctx)
     await testScheduleTime(ctx)
+    await testAbsenceEvidences(ctx)
     await testDutyAndSummaries(ctx)
     await testBonusAndAccount(ctx)
   } finally {

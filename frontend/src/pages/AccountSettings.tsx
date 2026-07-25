@@ -7,7 +7,7 @@ import Footer from "../components/Footer"
 import Navbar from "../components/Navbar"
 import { usePageTitle } from "../utils/usePageTitle"
 
-type AccountRole = "admin" | "gvcn" | "bancansu" | "co_do"
+type AccountRole = "admin" | "gvcn" | "ban_can_su" | "co_do"
 
 function PasskeyIcon() {
   return (
@@ -37,7 +37,7 @@ function ChevronRightIcon() {
 }
 
 function isAccountRole(role: string | undefined): role is AccountRole {
-  return role === "admin" || role === "gvcn" || role === "bancansu" || role === "co_do"
+  return role === "admin" || role === "gvcn" || role === "ban_can_su" || role === "co_do"
 }
 
 export default function AccountSettings() {

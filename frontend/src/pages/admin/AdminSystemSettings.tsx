@@ -28,7 +28,8 @@ type AiConfig = {
   id?: number
   provider: string
   providerLabel?: string
-  apiKey: string
+  apiKey?: string
+  hasApiKey?: boolean
   baseUrl: string
   model: string
   temperature: number
@@ -168,7 +169,7 @@ export default function AdminSystemSettings() {
   }, [aiProvider, aiModel, apiKey, baseUrl, lastTestFingerprint, temperature])
 
   function applyAiConfig(config: AiConfig) {
-    const nextProvider = config.provider || detectProviderFromApiKey(config.apiKey) || "custom"
+    const nextProvider = config.provider || detectProviderFromApiKey(config.apiKey || "") || "custom"
     const nextBaseUrl = config.baseUrl || providerBaseUrls[nextProvider] || ""
     const nextModel = config.model || ""
     const nextTemperature = String(config.temperature ?? 0)

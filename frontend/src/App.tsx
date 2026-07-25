@@ -21,6 +21,7 @@ import AdminSemesterSummary from "./pages/admin/AdminSemesterSummary"
 import AdminYearSummary from "./pages/admin/AdminYearSummary"
 import AdminTimetable from "./pages/admin/AdminTimetable"
 import AdminSystemSettings from "./pages/admin/AdminSystemSettings"
+import AdminAbsenceEvidences from "./pages/admin/AdminAbsenceEvidences"
 
 import CodoDashboard from "./pages/co_do/CodoDashboard"
 import CodoLayout from "./pages/co_do/CodoLayout"
@@ -84,6 +85,7 @@ export default function App(){
           <Route path="semester-summary" element={<AdminSemesterSummary/>}/>
           <Route path="year-summary" element={<AdminYearSummary/>}/>
           <Route path="system-settings" element={<AdminSystemSettings/>}/>
+          <Route path="absence-evidences" element={<AdminAbsenceEvidences/>}/>
           {/* mọi route admin sai */}
           <Route path="*" element={<NotFound/>}/>
         </Route>
@@ -96,9 +98,9 @@ export default function App(){
           <Route path="*" element={<NotFound/>}/>
         </Route>
 
-        <Route path="/bancansu" element={<BanCanSuLayout/>}>
+        <Route path="/ban_can_su" element={<BanCanSuLayout/>}>
           <Route path="dashboard" element={<BanCanSuDashboard/>}/>
-          {/* mọi route bancansu sai */}
+          {/* mọi route Ban cán sự sai */}
           <Route path="*" element={<NotFound/>}/>
         </Route>
 

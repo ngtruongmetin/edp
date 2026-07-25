@@ -14,7 +14,7 @@ import { getPasskeyErrorMessage, loginWithPasskey } from "../passkeys"
 const roleOptions = [
   { value: "admin", label: "Quản trị" },
   { value: "gvcn", label: "GVCN" },
-  { value: "bancansu", label: "Ban cán sự" },
+  { value: "ban_can_su", label: "Ban cán sự" },
   { value: "co_do", label: "Cờ đỏ" },
 ]
 

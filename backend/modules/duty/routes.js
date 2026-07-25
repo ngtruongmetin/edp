@@ -10,6 +10,12 @@ const crypto = require("crypto")
 const requireLogin = require("../../middleware/requireLogin")
 const requireRole = require("../../middleware/requireRole")
 const SystemSettingService = require("../system-settings/service")
+const {
+  effectiveViolationScoreSql,
+  effectiveViolationQuantitySql,
+  exemptedViolationQuantitySql,
+  getWeekScores,
+} = require("../../utils/absenceEvidenceScoring")
 
 const time = require("../../utils/time")
 
@@ -224,57 +230,7 @@ function ensureDailySessionsForDate({ weekId, date }, cb) {
 }
 
 function computeWeekScores(weekId, cb) {
-  withBaseScore((baseErr, baseScore) => {
-    if (baseErr) return cb(baseErr)
-
-    db.all(
-      `
-        WITH class_list AS (
-          SELECT name as class_name
-          FROM classes
-          WHERE is_active = 1
-        ),
-        session_base AS (
-          SELECT
-            s.id,
-            s.duty_class as class_name,
-            COALESCE(SUM(r.score_delta * v.quantity), 0) as violation_score,
-            COALESCE(MAX(b.points), 0) as bonus_points
-          FROM duty_sessions s
-          LEFT JOIN duty_violations v
-            ON v.session_id = s.id
-          LEFT JOIN rules r
-            ON r.id = v.rule_id
-          LEFT JOIN daily_bonus b
-            ON b.week_id = s.week_id
-           AND b.date = s.date
-           AND b.class_name = s.duty_class
-          WHERE s.week_id=?
-            AND s.status='signed'
-          GROUP BY s.id
-        ),
-        class_totals AS (
-          SELECT
-            class_name,
-            SUM(violation_score + bonus_points) as session_score
-          FROM session_base
-          GROUP BY class_name
-        )
-        SELECT
-          cl.class_name,
-          (? + COALESCE(ct.session_score, 0) + COALESCE(wb.points, 0)) as score
-        FROM class_list cl
-        LEFT JOIN class_totals ct
-          ON ct.class_name = cl.class_name
-        LEFT JOIN weekly_bonus wb
-          ON wb.week_id = ?
-         AND wb.class_name = cl.class_name
-        ORDER BY score DESC
-      `,
-      [weekId, baseScore, weekId],
-      cb,
-    )
-  })
+  getWeekScores(weekId).then((rows) => cb(null, rows)).catch(cb)
 }
 
 function weekSessionCounts(weekId, cb) {
@@ -331,7 +287,7 @@ function weekBreakdowns(weekId, cb) {
         vio_by_class AS (
           SELECT
             s.duty_class as class_name,
-            COALESCE(SUM(r.score_delta * v.quantity), 0) as violation_sum
+            ${effectiveViolationScoreSql("v", "r")} as violation_sum
           FROM signed_sessions s
           LEFT JOIN duty_violations v
             ON v.session_id = s.id
@@ -1875,9 +1831,9 @@ function aggregateSessions(whereSql, params, cb) {
         s.created_at,
         s.signed_at,
         ds.photo_path as signature_photo_path,
-        COALESCE(SUM(r.score_delta * v.quantity), 0) as violation_score,
+        ${effectiveViolationScoreSql("v", "r")} as violation_score,
         COALESCE(MAX(b.points), 0) as bonus_points,
-        COALESCE(SUM(r.score_delta * v.quantity), 0) + COALESCE(MAX(b.points), 0) as total_score
+        ${effectiveViolationScoreSql("v", "r")} + COALESCE(MAX(b.points), 0) as total_score
       FROM duty_sessions s
       LEFT JOIN duty_violations v
         ON v.session_id = s.id
@@ -1964,6 +1920,8 @@ router.get(
 
           db.all(`
         SELECT v.id,v.rule_id,v.quantity,v.note,
+               ${exemptedViolationQuantitySql("v")} AS exempted_quantity,
+               ${effectiveViolationQuantitySql("v")} AS effective_quantity,
                r.name,r.score_delta
         FROM duty_violations v
         LEFT JOIN rules r
@@ -2271,6 +2229,8 @@ router.get(
             db.all(
               `
                 SELECT v.id,v.rule_id,v.quantity,v.note,
+                       ${exemptedViolationQuantitySql("v")} AS exempted_quantity,
+                       ${effectiveViolationQuantitySql("v")} AS effective_quantity,
                        r.category,r.name,r.score_delta
                 FROM duty_violations v
                 LEFT JOIN rules r
@@ -2641,7 +2601,7 @@ router.post(
           db.get(
             `
               SELECT
-                a.pin_bcs,
+                a.pin_ban_can_su,
                 COALESCE(a.pin_failed_attempts, 0) AS pin_failed_attempts,
                 COALESCE(a.pin_locked_until, 0) AS pin_locked_until,
                 a.class_id AS account_class_id
@@ -2655,7 +2615,7 @@ router.post(
             async (pinErr, row) => {
               if (pinErr) return res.status(500).json({ error: pinErr.message })
 
-              const expected = String(row?.pin_bcs || "").trim()
+              const expected = String(row?.pin_ban_can_su || "").trim()
               const accountClassId = row?.account_class_id
 
               if (!accountClassId || !expected) {
@@ -2868,6 +2828,8 @@ router.get(
         db.all(
           `
             SELECT v.id, v.rule_id, v.quantity, v.note,
+                   ${exemptedViolationQuantitySql("v")} AS exempted_quantity,
+                   ${effectiveViolationQuantitySql("v")} AS effective_quantity,
                    r.category, r.name, r.score_delta
             FROM duty_violations v
             LEFT JOIN rules r
@@ -3083,6 +3045,8 @@ router.get(
           db.all(
             `
               SELECT v.session_id, v.id, v.rule_id, v.quantity, v.note,
+                     ${exemptedViolationQuantitySql("v")} AS exempted_quantity,
+                     ${effectiveViolationQuantitySql("v")} AS effective_quantity,
                      r.category, r.name, r.score_delta
               FROM duty_violations v
               LEFT JOIN rules r
@@ -4628,38 +4592,42 @@ function sendClassWeekSummary(req, res) {
   })
 }
 
+function banCanSuPaths(path) {
+  return [path, path.replace("/ban_can_su", "/bancansu")]
+}
+
 router.get(
-  "/bancansu/period-tree",
+  banCanSuPaths("/ban_can_su/period-tree"),
   requireLogin,
-  requireRole(["bancansu"]),
+  requireRole(["ban_can_su"]),
   sendClassPeriodTree,
 )
 
 router.get(
-  "/bancansu/week/:weekId/summary",
+  banCanSuPaths("/ban_can_su/week/:weekId/summary"),
   requireLogin,
-  requireRole(["bancansu"]),
+  requireRole(["ban_can_su"]),
   sendClassWeekSummary,
 )
 
 router.get(
-  "/bancansu/month/:monthKey/summary",
+  banCanSuPaths("/ban_can_su/month/:monthKey/summary"),
   requireLogin,
-  requireRole(["bancansu"]),
+  requireRole(["ban_can_su"]),
   sendClassPeriodSummary("month", (req) => normalizeMonthKey(req.params.monthKey)),
 )
 
 router.get(
-  "/bancansu/semester/:semesterKey/summary",
+  banCanSuPaths("/ban_can_su/semester/:semesterKey/summary"),
   requireLogin,
-  requireRole(["bancansu"]),
+  requireRole(["ban_can_su"]),
   sendClassPeriodSummary("semester", (req) => normalizeSemesterKey(req.params.semesterKey)),
 )
 
 router.get(
-  "/bancansu/year/:yearKey/summary",
+  banCanSuPaths("/ban_can_su/year/:yearKey/summary"),
   requireLogin,
-  requireRole(["bancansu"]),
+  requireRole(["ban_can_su"]),
   sendClassPeriodSummary("year", (req) => normalizeYearKey(req.params.yearKey)),
 )
 
@@ -4692,12 +4660,12 @@ router.get(
 )
 
 /*
-BANCANSU: my incoming sessions (sessions where my class is duty_class) in current week
+BAN CAN SU: my incoming sessions (sessions where my class is duty_class) in current week
 */
 router.get(
-  "/bancansu/week",
+  banCanSuPaths("/ban_can_su/week"),
   requireLogin,
-  requireRole(["bancansu"]),
+  requireRole(["ban_can_su"]),
   (req, res) => {
     const today = time.today()
     const dutyClass = req.session.user?.class_name
@@ -4728,12 +4696,12 @@ router.get(
 )
 
 /*
-BANCANSU: list all weeks (for selection)
+BAN CAN SU: list all weeks (for selection)
 */
 router.get(
-  "/bancansu/weeks",
+  banCanSuPaths("/ban_can_su/weeks"),
   requireLogin,
-  requireRole(["bancansu"]),
+  requireRole(["ban_can_su"]),
   (req, res) => {
     db.all(
       `
@@ -4753,12 +4721,12 @@ router.get(
 )
 
 /*
-BANCANSU: sessions for a specific week (my class as duty_class)
+BAN CAN SU: sessions for a specific week (my class as duty_class)
 */
 router.get(
-  "/bancansu/week/:weekId",
+  banCanSuPaths("/ban_can_su/week/:weekId"),
   requireLogin,
-  requireRole(["bancansu"]),
+  requireRole(["ban_can_su"]),
   (req, res) => {
     const weekId = Number(req.params.weekId)
     const dutyClass = req.session.user?.class_name
@@ -4798,12 +4766,12 @@ router.get(
 )
 
 /*
-BANCANSU: view incoming session detail (current week)
+BAN CAN SU: view incoming session detail (current week)
 */
 router.get(
-  "/bancansu/session/:id",
+  banCanSuPaths("/ban_can_su/session/:id"),
   requireLogin,
-  requireRole(["bancansu"]),
+  requireRole(["ban_can_su"]),
   (req, res) => {
     const id = req.params.id
     const dutyClass = req.session.user?.class_name
@@ -4842,6 +4810,8 @@ router.get(
             db.all(
               `
                 SELECT v.id,v.rule_id,v.quantity,v.note,
+                       ${exemptedViolationQuantitySql("v")} AS exempted_quantity,
+                       ${effectiveViolationQuantitySql("v")} AS effective_quantity,
                        r.category,r.name,r.score_delta
                 FROM duty_violations v
                 LEFT JOIN rules r
@@ -4863,7 +4833,7 @@ router.get(
 )
 
 /*
-BANCANSU: get duty sessions by red_class
+BAN CAN SU: get duty sessions by red_class
 */
 router.get(
   "/sessions",
@@ -5006,6 +4976,8 @@ router.get(
         db.all(
           `
             SELECT v.id,v.rule_id,v.quantity,v.note,
+                   ${exemptedViolationQuantitySql("v")} AS exempted_quantity,
+                   ${effectiveViolationQuantitySql("v")} AS effective_quantity,
                    r.category,r.name,r.score_delta
             FROM duty_violations v
             LEFT JOIN rules r

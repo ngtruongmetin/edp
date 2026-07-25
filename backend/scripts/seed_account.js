@@ -9,13 +9,13 @@ const { loadEnv } = require("../config/env")
 
 loadEnv()
 
-const DEFAULT_GVCN_BCS_PASSWORD = process.env.SEED_DEFAULT_PASSWORD
+const DEFAULT_GVCN_BAN_CAN_SU_PASSWORD = process.env.SEED_DEFAULT_PASSWORD
 const DEFAULT_CODO_PASSWORD = process.env.SEED_DEFAULT_PASSWORD
 const DEFAULT_PIN = process.env.SEED_DEFAULT_PIN
 const workbookPath = path.join(__dirname, "..", "sheets", "accounts_passwords.xlsx")
 
 async function main() {
-  if (!DEFAULT_GVCN_BCS_PASSWORD || !DEFAULT_CODO_PASSWORD || !DEFAULT_PIN) {
+  if (!DEFAULT_GVCN_BAN_CAN_SU_PASSWORD || !DEFAULT_CODO_PASSWORD || !DEFAULT_PIN) {
     throw new Error("Missing SEED_DEFAULT_PASSWORD or SEED_DEFAULT_PIN")
   }
 
@@ -61,56 +61,56 @@ async function main() {
     const account = existingAccounts.get(classId)
     const workbookRow = workbookRows.get(className)
 
-    const gvcnPassword = DEFAULT_GVCN_BCS_PASSWORD
-    const bcsPassword = DEFAULT_GVCN_BCS_PASSWORD
+    const gvcnPassword = DEFAULT_GVCN_BAN_CAN_SU_PASSWORD
+    const banCanSuPassword = DEFAULT_GVCN_BAN_CAN_SU_PASSWORD
     const codoPassword = DEFAULT_CODO_PASSWORD
     const pin = DEFAULT_PIN
 
     if (!account) {
       const hashG = await bcrypt.hash(gvcnPassword, 10)
-      const hashB = await bcrypt.hash(bcsPassword, 10)
+      const hashBanCanSu = await bcrypt.hash(banCanSuPassword, 10)
       const hashC = await bcrypt.hash(codoPassword, 10)
       const hashPinValue = await hashPin(pin)
 
       await db.query(
         `
           INSERT INTO accounts
-          (class_id, password_gvcn, password_bcs, password_codo, pin_bcs, password_changed, password_changed_gvcn, password_changed_bcs, password_changed_codo, created_at)
+          (class_id, password_gvcn, password_ban_can_su, password_codo, pin_ban_can_su, password_changed, password_changed_gvcn, password_changed_ban_can_su, password_changed_codo, created_at)
           VALUES ($1, $2, $3, $4, $5, 1, 1, 1, 1, $6)
         `,
-        [classId, hashG, hashB, hashC, hashPinValue, time.now()],
+        [classId, hashG, hashBanCanSu, hashC, hashPinValue, time.now()],
       )
       console.log("Created", className)
     } else {
       const hashG = await bcrypt.hash(gvcnPassword, 10)
-      const hashB = await bcrypt.hash(bcsPassword, 10)
+      const hashBanCanSu = await bcrypt.hash(banCanSuPassword, 10)
       const hashC = await bcrypt.hash(codoPassword, 10)
       const hashPinValue = await hashPin(pin)
       await db.query(
         `
           UPDATE accounts
-          SET pin_bcs = $1
+          SET pin_ban_can_su = $1
           , pin_failed_attempts = 0
           , pin_locked_until = 0
           , password_gvcn = $3
-          , password_bcs = $4
+          , password_ban_can_su = $4
           , password_codo = $5
           , password_changed = 1
           , password_changed_gvcn = 1
-          , password_changed_bcs = 1
+          , password_changed_ban_can_su = 1
           , password_changed_codo = 1
           WHERE class_id = $2
         `,
-        [hashPinValue, classId, hashG, hashB, hashC],
+        [hashPinValue, classId, hashG, hashBanCanSu, hashC],
       )
     }
 
     excelRows.push({
       class: className,
       gvcn_password: gvcnPassword,
-      bcs_password: bcsPassword,
+      ban_can_su_password: banCanSuPassword,
       codo_password: codoPassword,
-      pin_bcs: "",
+      pin_ban_can_su: "",
     })
   }
 
@@ -124,7 +124,7 @@ async function main() {
   })
 
   const ws = xlsx.utils.json_to_sheet(excelRows, {
-    header: ["class", "gvcn_password", "bcs_password", "codo_password", "pin_bcs"],
+    header: ["class", "gvcn_password", "ban_can_su_password", "codo_password", "pin_ban_can_su"],
   })
   const wb = xlsx.utils.book_new()
   xlsx.utils.book_append_sheet(wb, ws, "accounts")

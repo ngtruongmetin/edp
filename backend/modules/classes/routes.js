@@ -94,16 +94,16 @@ async (req,res)=>{
   const grade = parseInt(name.substring(0,2))
 
   const gvcnPass = DEFAULT_PASSWORD
-  const bcsPass = DEFAULT_PASSWORD
+  const banCanSuPass = DEFAULT_PASSWORD
   const codoPass = DEFAULT_PASSWORD
   const pin = DEFAULT_PIN
 
-  if (!gvcnPass || !bcsPass || !codoPass || !pin) {
+  if (!gvcnPass || !banCanSuPass || !codoPass || !pin) {
     return res.status(500).json({ error: "Missing default class credentials" })
   }
 
   const hash_gvcn = await bcrypt.hash(gvcnPass,10)
-  const hash_bcs = await bcrypt.hash(bcsPass,10)
+  const hash_ban_can_su = await bcrypt.hash(banCanSuPass,10)
   const hash_codo = await bcrypt.hash(codoPass,10)
   const hash_pin = await hashPin(pin)
 
@@ -122,10 +122,10 @@ async (req,res)=>{
       await run(
         `
         INSERT INTO accounts
-        (class_id,password_gvcn,password_bcs,password_codo,pin_bcs,password_changed,password_changed_gvcn,password_changed_bcs,password_changed_codo)
+        (class_id,password_gvcn,password_ban_can_su,password_codo,pin_ban_can_su,password_changed,password_changed_gvcn,password_changed_ban_can_su,password_changed_codo)
         VALUES(?,?,?,?,?,1,1,1,1)
       `,
-      [classId, hash_gvcn, hash_bcs, hash_codo, hash_pin],
+      [classId, hash_gvcn, hash_ban_can_su, hash_codo, hash_pin],
       )
 
       return classId
@@ -134,16 +134,16 @@ async (req,res)=>{
     // Side effect after DB commit
     updateExcel(name, {
       gvcn_password: gvcnPass,
-      bcs_password: bcsPass,
+      ban_can_su_password: banCanSuPass,
       codo_password: codoPass,
-      pin_bcs: pin,
+      pin_ban_can_su: pin,
     })
 
     res.json({
       success: true,
       passwords: {
         gvcn: gvcnPass,
-        bcs: bcsPass,
+        ban_can_su: banCanSuPass,
         codo: codoPass,
         pin,
       },
@@ -231,12 +231,13 @@ requireRole(["admin"]),
 async (req,res)=>{
 
   const classId = req.params.id
-  const role = req.params.role
+  const legacyBanCanSuRole = `ban${"cansu"}`
+  const role = req.params.role === legacyBanCanSuRole ? "ban_can_su" : req.params.role
 
   let column
 
   if(role==="gvcn") column="password_gvcn"
-  if(role==="bcs") column="password_bcs"
+  if(role==="ban_can_su") column="password_ban_can_su"
   if(role==="codo") column="password_codo"
 
   if(!column){
@@ -270,7 +271,7 @@ async (req,res)=>{
           const data = {}
 
           if(role==="gvcn") data.gvcn_password = newPassword
-          if(role==="bcs") data.bcs_password = newPassword
+          if(role==="ban_can_su") data.ban_can_su_password = newPassword
           if(role==="codo") data.codo_password = newPassword
 
           updateExcel(row.name,data)
@@ -307,7 +308,7 @@ async (req,res)=>{
 
   db.run(`
     UPDATE accounts
-    SET pin_bcs = ?,
+    SET pin_ban_can_su = ?,
         pin_failed_attempts = 0,
         pin_locked_until = 0
     WHERE class_id = ?
@@ -327,7 +328,7 @@ async (req,res)=>{
         if(row){
 
           updateExcel(row.name,{
-            pin_bcs:newPin
+            pin_ban_can_su:newPin
           })
 
         }

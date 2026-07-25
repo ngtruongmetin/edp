@@ -30,7 +30,7 @@ async function resetAll() {
       for (const c of rows) {
 
         const hash_gvcn = await bcrypt.hash(DEFAULT_PASSWORD, 10)
-        const hash_bcs = await bcrypt.hash(DEFAULT_PASSWORD, 10)
+        const hash_ban_can_su = await bcrypt.hash(DEFAULT_PASSWORD, 10)
         const hash_codo = await bcrypt.hash(DEFAULT_PASSWORD, 10)
         const hashed_pin = await hashPin(DEFAULT_PIN)
 
@@ -40,18 +40,18 @@ async function resetAll() {
             UPDATE accounts
             SET
               password_gvcn=?,
-              password_bcs=?,
+              password_ban_can_su=?,
               password_codo=?,
-              pin_bcs=?,
+              pin_ban_can_su=?,
               pin_failed_attempts=0,
               pin_locked_until=0,
               password_changed=1,
               password_changed_gvcn=1,
-              password_changed_bcs=1,
+              password_changed_ban_can_su=1,
               password_changed_codo=1
             WHERE class_id=?
           `,
-            [hash_gvcn, hash_bcs, hash_codo, hashed_pin, c.id],
+            [hash_gvcn, hash_ban_can_su, hash_codo, hashed_pin, c.id],
             err => {
 
               if (err) reject(err)
@@ -63,9 +63,9 @@ async function resetAll() {
 
         updateExcel(c.name, {
           gvcn_password: DEFAULT_PASSWORD,
-          bcs_password: DEFAULT_PASSWORD,
+          ban_can_su_password: DEFAULT_PASSWORD,
           codo_password: DEFAULT_PASSWORD,
-          pin_bcs: ""
+          pin_ban_can_su: ""
         })
 
         console.log("Reset:", c.name)

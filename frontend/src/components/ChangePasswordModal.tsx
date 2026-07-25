@@ -4,7 +4,7 @@ import toast from "react-hot-toast"
 import ModalShell from "./ModalShell"
 
 type Props = {
-  role: "bancansu" | "co_do" | "admin" | "gvcn"
+  role: "ban_can_su" | "co_do" | "admin" | "gvcn"
   onSuccess: () => void
   canClose?: boolean
 }
@@ -16,7 +16,7 @@ export default function ChangePasswordModal({ role, onSuccess, canClose = true }
   // Settings (canClose=true): allow to choose
   const isFirstLogin = canClose === false
   const [mode, setMode] = useState<Mode>(
-    role === "bancansu" && canClose ? "choose" : "password"
+    role === "ban_can_su" && canClose ? "choose" : "password"
   )
   const [oldPassword, setOldPassword] = useState("")
   const [newPassword, setNewPassword] = useState("")
@@ -56,7 +56,7 @@ export default function ChangePasswordModal({ role, onSuccess, canClose = true }
       toast.success("Đã cập nhật mật khẩu")
       setPasswordSuccess(true)
       
-      if (role === "bancansu") {
+      if (role === "ban_can_su") {
         // Auto-move to PIN: first login → force, settings → can see success + option
         if (isFirstLogin) {
           // First login: auto-move to PIN after success
@@ -148,7 +148,7 @@ export default function ChangePasswordModal({ role, onSuccess, canClose = true }
                 Đổi Mật Khẩu
               </button>
 
-              {role === "bancansu" && (
+              {role === "ban_can_su" && (
                 <button
                   onClick={() => setMode("pin")}
                   className="w-full rounded-xl border-2 border-orange-400 bg-orange-50 px-4 py-4 text-left font-semibold text-orange-600 hover:bg-orange-100 transition"
@@ -223,7 +223,7 @@ export default function ChangePasswordModal({ role, onSuccess, canClose = true }
 
             <div className="mt-6 flex gap-2">
               {/* Back/Skip button */}
-              {role === "bancansu" && canClose ? (
+              {role === "ban_can_su" && canClose ? (
                 <button
                   onClick={() => setMode("choose")}
                   className="flex-1 rounded-xl border border-gray-300 py-2.5 text-sm font-semibold text-gray-900 hover:bg-gray-50 disabled:opacity-50"
@@ -250,7 +250,7 @@ export default function ChangePasswordModal({ role, onSuccess, canClose = true }
               </button>
             </div>
 
-            {role === "bancansu" && passwordSuccess && (
+            {role === "ban_can_su" && passwordSuccess && (
               <div className="mt-4 p-3 bg-green-50 border border-green-200 rounded-xl text-center text-sm text-green-700 font-semibold">
                 Đã cập nhật mật khẩu
               </div>
@@ -258,8 +258,8 @@ export default function ChangePasswordModal({ role, onSuccess, canClose = true }
           </>
         )}
 
-        {/* PIN MODE (BCS only) */}
-        {mode === "pin" && role === "bancansu" && (
+        {/* PIN mode for Ban cán sự. */}
+        {mode === "pin" && role === "ban_can_su" && (
           <>
             <h2 className="text-xl font-semibold text-gray-900 mb-1">🔑 Đổi Mã PIN</h2>
             <p className="text-sm text-gray-600 mb-6">Mã PIN phải là 6 chữ số</p>

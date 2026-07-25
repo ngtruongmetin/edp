@@ -17,7 +17,7 @@ type ClassType = {
 
 type CreatedCredentials = {
   gvcn: string
-  bcs: string
+  ban_can_su: string
   codo: string
   pin: string
 }
@@ -216,7 +216,7 @@ export default function AdminClasses() {
                   {showPasswords && (
                     <>
                       <th className="px-4 py-4 text-center font-semibold">GVCN</th>
-                      <th className="px-4 py-4 text-center font-semibold">BCS</th>
+                      <th className="px-4 py-4 text-center font-semibold">Ban cán sự</th>
                       <th className="px-4 py-4 text-center font-semibold">Cờ đỏ</th>
                       <th className="px-4 py-4 text-center font-semibold">PIN</th>
                     </>
@@ -260,7 +260,7 @@ export default function AdminClasses() {
                           <td className="px-4 py-4 text-center">
                             <button
                               type="button"
-                              onClick={() => void resetPassword(item.id, "bcs")}
+                              onClick={() => void resetPassword(item.id, "ban_can_su")}
                               className="min-h-10 rounded-[16px] border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700 transition duration-200 active:scale-[0.98]"
                             >
                               RESET
@@ -374,15 +374,15 @@ export default function AdminClasses() {
               <div className="mt-2 text-lg font-semibold text-slate-900">{createdCredentials.gvcn}</div>
             </div>
             <div className="rounded-[22px] border border-slate-200 bg-white p-4">
-              <div className="text-xs text-slate-500">Mật khẩu BCS</div>
-              <div className="mt-2 text-lg font-semibold text-slate-900">{createdCredentials.bcs}</div>
+              <div className="text-xs text-slate-500">Mật khẩu Ban cán sự</div>
+              <div className="mt-2 text-lg font-semibold text-slate-900">{createdCredentials.ban_can_su}</div>
             </div>
             <div className="rounded-[22px] border border-slate-200 bg-white p-4">
               <div className="text-xs text-slate-500">Mật khẩu Cờ đỏ</div>
               <div className="mt-2 text-lg font-semibold text-slate-900">{createdCredentials.codo}</div>
             </div>
             <div className="rounded-[22px] border border-slate-200 bg-white p-4">
-              <div className="text-xs text-slate-500">PIN BCS</div>
+              <div className="text-xs text-slate-500">PIN Ban cán sự</div>
               <div className="mt-2 text-lg font-semibold text-slate-900">{createdCredentials.pin}</div>
             </div>
           </div>
