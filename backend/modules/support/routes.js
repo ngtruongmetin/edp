@@ -512,4 +512,46 @@ router.post("/:id/messages", requireLogin, async (req, res) => {
   }
 })
 
+router.delete("/:id", requireLogin, async (req, res) => {
+  let files = []
+  try {
+    const ticketId = parseId(req.params.id, "Yêu cầu hỗ trợ")
+    const user = req.session.user
+    await assertTicketAccess(ticketId, user)
+
+    const client = await pool.connect()
+    try {
+      await client.query("BEGIN")
+      const lockedTicket = await client.query(
+        `SELECT id FROM support_tickets WHERE id = $1 FOR UPDATE`,
+        [ticketId],
+      )
+      if (!lockedTicket.rows[0]) throw httpError(404, "Không tìm thấy yêu cầu hỗ trợ.")
+
+      const attachmentResult = await client.query(
+        `
+          SELECT attachment.file_path
+          FROM support_attachments attachment
+          JOIN support_messages message ON message.id = attachment.message_id
+          WHERE message.ticket_id = $1
+        `,
+        [ticketId],
+      )
+      files = attachmentResult.rows.map((file) => ({ filePath: file.file_path }))
+      await client.query(`DELETE FROM support_tickets WHERE id = $1`, [ticketId])
+      await client.query("COMMIT")
+    } catch (error) {
+      await client.query("ROLLBACK")
+      throw error
+    } finally {
+      client.release()
+    }
+
+    removeSavedFiles(files)
+    res.json({ success: true })
+  } catch (error) {
+    res.status(error.status || 500).json({ error: error.message || "Không thể xóa yêu cầu hỗ trợ." })
+  }
+})
+
 module.exports = router

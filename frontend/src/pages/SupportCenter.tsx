@@ -341,6 +341,11 @@ export default function SupportCenter() {
       {(selected || loadingDetail) && <TicketModal ticket={selected} loading={loadingDetail} currentRole={user.role as SupportRole} currentClassId={user.class_id} isOffline={isOffline} onClose={() => { setSelected(null); setLoadingDetail(false) }} onTicketUpdated={(ticket) => {
         setSelected(ticket)
         setTickets((current) => current.map((item) => item.id === ticket.id ? { ...item, ...ticket } : item))
+      }} onDeleted={(ticketId) => {
+        setTickets((current) => current.filter((item) => item.id !== ticketId))
+        setSelected(null)
+        setLoadingDetail(false)
+        window.dispatchEvent(new Event("support-notifications-read"))
       }} onPreview={(files, index) => { setPreviewFiles(files); setPreviewIndex(index) }} />}
 
       {previewFiles && <EvidenceFilePreviewModal files={previewFiles} initialIndex={previewIndex} onClose={() => setPreviewFiles(null)} />}
@@ -420,7 +425,7 @@ function CreateTicketModal({ weeks, isOffline, onClose, onCreated }: {
   )
 }
 
-function TicketModal({ ticket, loading, currentRole, currentClassId, isOffline, onClose, onTicketUpdated, onPreview }: {
+function TicketModal({ ticket, loading, currentRole, currentClassId, isOffline, onClose, onTicketUpdated, onDeleted, onPreview }: {
   ticket: Ticket | null
   loading: boolean
   currentRole: SupportRole
@@ -428,16 +433,20 @@ function TicketModal({ ticket, loading, currentRole, currentClassId, isOffline, 
   isOffline: boolean
   onClose: () => void
   onTicketUpdated: (ticket: Ticket) => void
+  onDeleted: (ticketId: number) => void
   onPreview: (files: Attachment[], index: number) => void
 }) {
   const [reply, setReply] = useState("")
   const [files, setFiles] = useState<PendingFile[]>([])
   const [sending, setSending] = useState(false)
+  const [confirmDelete, setConfirmDelete] = useState(false)
+  const [deleting, setDeleting] = useState(false)
 
   useEffect(() => {
     if (ticket) {
       setReply("")
       setFiles([])
+      setConfirmDelete(false)
     }
   }, [ticket])
 
@@ -462,6 +471,20 @@ function TicketModal({ ticket, loading, currentRole, currentClassId, isOffline, 
     }
   }
 
+  async function deleteTicket() {
+    if (isOffline) return toast.error("Chức năng này cần kết nối mạng.")
+    try {
+      setDeleting(true)
+      await api.delete(`/support/${ticketId}`)
+      onDeleted(ticketId)
+      toast.success("Đã xóa yêu cầu hỗ trợ.")
+    } catch (error) {
+      toast.error(getApiErrorMessage(error, "Không thể xóa yêu cầu hỗ trợ."))
+    } finally {
+      setDeleting(false)
+    }
+  }
+
   return (
     <ModalShell className="max-w-5xl overflow-hidden rounded-[30px]" onClose={onClose}>
       <div className="flex max-h-[calc(100dvh-2rem)] flex-col">
@@ -469,6 +492,19 @@ function TicketModal({ ticket, loading, currentRole, currentClassId, isOffline, 
           <div className="min-w-0"><h2 className="text-xl font-semibold text-slate-900">{ticket.title}</h2><p className="mt-1 text-sm text-slate-500">{requestTypeLabels[ticket.request_type]} - tạo {formatDateTime(ticket.created_at)}</p></div>
           <div className="mt-3"><span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${statusClass(ticket.status)}`}>{statusLabels[ticket.status]}</span></div>
           <div className="mt-4 flex flex-wrap gap-x-5 gap-y-2 text-sm text-slate-600"><span>Người gửi: {roleLabel(ticket.creator_role)} - lớp {ticket.creator_class_name}</span>{ticket.linked_duty_session_id && <span>Phiếu trực: Tuần {ticket.linked_week_number}, {ticket.linked_duty_date ? formatDate(ticket.linked_duty_date) : ""} - Cờ đỏ {ticket.linked_red_class}, trực {ticket.linked_duty_class}</span>}</div>
+          <div className="mt-4">
+            {confirmDelete ? (
+              <div className="flex flex-col gap-3 rounded-xl border border-rose-200 bg-rose-50 p-3 sm:flex-row sm:items-center sm:justify-between">
+                <p className="text-sm font-medium text-rose-800">Xóa ticket sẽ xóa toàn bộ hội thoại và tệp đính kèm.</p>
+                <div className="flex gap-2 sm:shrink-0">
+                  <button type="button" onClick={() => setConfirmDelete(false)} disabled={deleting} className="min-h-10 rounded-xl border border-rose-200 bg-white px-3 text-sm font-semibold text-slate-700 disabled:opacity-50">Hủy</button>
+                  <button type="button" onClick={() => void deleteTicket()} disabled={deleting || isOffline} className="min-h-10 rounded-xl bg-rose-600 px-3 text-sm font-semibold text-white disabled:opacity-50">{deleting ? "Đang xóa..." : "Xóa ticket"}</button>
+                </div>
+              </div>
+            ) : (
+              <button type="button" onClick={() => setConfirmDelete(true)} className="min-h-10 rounded-xl border border-rose-200 px-3 text-sm font-semibold text-rose-700 transition hover:bg-rose-50">Xóa ticket</button>
+            )}
+          </div>
         </header>
         <div className="min-h-0 flex-1 overflow-y-auto bg-slate-50/60 px-5 py-5 sm:px-7">
           <div className="space-y-4">
