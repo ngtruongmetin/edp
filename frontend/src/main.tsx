@@ -6,7 +6,34 @@ import "./index.css"
 
 import { AuthProvider } from "./auth/AuthContext"
 
-registerSW({ immediate: true })
+let refreshForNewServiceWorker = false
+
+if ("serviceWorker" in navigator) {
+  navigator.serviceWorker.addEventListener("controllerchange", () => {
+    if (refreshForNewServiceWorker) return
+    refreshForNewServiceWorker = true
+    window.location.reload()
+  })
+}
+
+let updateSW: ((reloadPage?: boolean) => Promise<void>) | undefined
+
+updateSW = registerSW({
+  immediate: true,
+  onNeedRefresh() {
+    void updateSW?.(true)
+  },
+  onRegisteredSW(_swUrl, registration) {
+    if (!registration) return
+
+    const checkForUpdate = () => {
+      void registration.update()
+    }
+
+    checkForUpdate()
+    window.setInterval(checkForUpdate, 60 * 60 * 1000)
+  },
+})
 
 function isZaloWebView() {
   const ua = String(navigator.userAgent || "").toLowerCase()
