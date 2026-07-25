@@ -17,6 +17,7 @@ const TABLES_WITH_ID = new Set([
   "duty_violations",
   "duty_signatures",
   "duty_revision_logs",
+  "duty_evidence_images",
   "daily_bonus",
   "bonus_uploads",
   "timetables",

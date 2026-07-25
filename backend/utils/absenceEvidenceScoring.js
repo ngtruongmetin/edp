@@ -27,12 +27,12 @@ function effectiveViolationScoreSql(violationAlias = "v", ruleAlias = "r") {
   `
 }
 
-async function getWeekScores(weekId) {
-  const baseSetting = await pool.query(
+async function getWeekScores(weekId, database = pool) {
+  const baseSetting = await database.query(
     `SELECT setting_value FROM system_settings WHERE setting_key = 'base_score' LIMIT 1`,
   )
   const baseScore = Number(baseSetting.rows[0]?.setting_value || 100)
-  const scores = await pool.query(
+  const scores = await database.query(
     `
       WITH class_list AS (
         SELECT name AS class_name
@@ -77,11 +77,13 @@ async function getWeekScores(weekId) {
   return scores.rows
 }
 
-async function recalculateWeekScores(weekId) {
-  const scores = await getWeekScores(weekId)
-  const client = await pool.connect()
+async function recalculateWeekScores(weekId, transactionClient = null) {
+  const database = transactionClient || pool
+  const scores = await getWeekScores(weekId, database)
+  const client = transactionClient || await pool.connect()
+  const ownsTransaction = !transactionClient
   try {
-    await client.query("BEGIN")
+    if (ownsTransaction) await client.query("BEGIN")
     await client.query(`DELETE FROM weekly_scores WHERE week_id = $1`, [weekId])
     for (const row of scores) {
       await client.query(
@@ -89,12 +91,12 @@ async function recalculateWeekScores(weekId) {
         [weekId, row.class_name, Number(row.score || 0), new Date().toISOString()],
       )
     }
-    await client.query("COMMIT")
+    if (ownsTransaction) await client.query("COMMIT")
   } catch (error) {
-    await client.query("ROLLBACK")
+    if (ownsTransaction) await client.query("ROLLBACK")
     throw error
   } finally {
-    client.release()
+    if (ownsTransaction) client.release()
   }
 
   return scores
@@ -109,7 +111,7 @@ function parseWeekIds(value) {
   }
 }
 
-async function applyExemptionToClosedPeriodCaches(weekId, className, scoreAdjustment) {
+async function applyExemptionToClosedPeriodCaches(weekId, className, scoreAdjustment, database = pool) {
   if (!scoreAdjustment) return
 
   const periods = [
@@ -119,7 +121,7 @@ async function applyExemptionToClosedPeriodCaches(weekId, className, scoreAdjust
   ]
 
   for (const period of periods) {
-    const result = await pool.query(
+    const result = await database.query(
       `SELECT ${period.key} AS period_key, week_ids FROM ${period.summary} WHERE closed_at IS NOT NULL`,
     )
     const affectedKeys = result.rows
@@ -127,7 +129,7 @@ async function applyExemptionToClosedPeriodCaches(weekId, className, scoreAdjust
       .map((row) => row.period_key)
 
     for (const key of affectedKeys) {
-      await pool.query(
+      await database.query(
         `
           UPDATE ${period.scores}
           SET minus_points = GREATEST(COALESCE(minus_points, 0) - $1, 0),
@@ -138,7 +140,7 @@ async function applyExemptionToClosedPeriodCaches(weekId, className, scoreAdjust
         `,
         [scoreAdjustment, new Date().toISOString(), key, className],
       )
-      await pool.query(
+      await database.query(
         `
           WITH ranked AS (
             SELECT

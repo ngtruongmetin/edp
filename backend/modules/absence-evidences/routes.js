@@ -428,6 +428,87 @@ router.delete(
   },
 )
 
+router.delete(
+  "/admin/:id",
+  requireLogin,
+  requireRole(["admin"]),
+  async (req, res) => {
+    const id = Number(req.params.id)
+    if (!Number.isInteger(id) || id < 1) {
+      return res.status(400).json({ error: "Mã minh chứng không hợp lệ." })
+    }
+
+    let evidence
+    let files = []
+    let scoreAdjustment = 0
+
+    try {
+      const client = await pool.connect()
+      try {
+        await client.query("BEGIN")
+        const evidenceResult = await client.query(
+          `
+            SELECT evidence.*, classes.name AS class_name
+            FROM absence_evidences evidence
+            JOIN classes ON classes.id = evidence.class_id
+            WHERE evidence.id = $1
+            FOR UPDATE
+          `,
+          [id],
+        )
+        evidence = evidenceResult.rows[0]
+        if (!evidence) {
+          const error = new Error("Không tìm thấy minh chứng.")
+          error.status = 404
+          throw error
+        }
+
+        const exemptionResult = await client.query(
+          `
+            SELECT COALESCE(SUM(-rules.score_delta * logs.approved_quantity), 0) AS score_adjustment
+            FROM absence_exemption_logs logs
+            JOIN duty_violations violations ON violations.id = logs.duty_violation_id
+            JOIN rules ON rules.id = violations.rule_id
+            WHERE logs.evidence_id = $1
+          `,
+          [id],
+        )
+        scoreAdjustment = Number(exemptionResult.rows[0]?.score_adjustment || 0)
+
+        const fileResult = await client.query(
+          `SELECT file_url FROM absence_evidence_files WHERE evidence_id = $1`,
+          [id],
+        )
+        files = fileResult.rows.map((file) => ({ fileUrl: file.file_url }))
+
+        await client.query(`DELETE FROM absence_exemption_logs WHERE evidence_id = $1`, [id])
+        await client.query(`DELETE FROM absence_evidences WHERE id = $1`, [id])
+        if (scoreAdjustment) {
+          await recalculateWeekScores(Number(evidence.week_id), client)
+          await applyExemptionToClosedPeriodCaches(
+            Number(evidence.week_id),
+            evidence.class_name,
+            -scoreAdjustment,
+            client,
+          )
+        }
+        await client.query("COMMIT")
+      } catch (error) {
+        await client.query("ROLLBACK")
+        throw error
+      } finally {
+        client.release()
+      }
+
+      removeSavedFiles(files)
+      res.json({ success: true, recalculated: Boolean(scoreAdjustment) })
+    } catch (error) {
+      console.error("[absence-evidences/admin/delete]", error)
+      res.status(error.status || 500).json({ error: error.message || "Không thể xóa minh chứng." })
+    }
+  },
+)
+
 router.get(
   "/admin",
   requireLogin,
@@ -644,6 +725,15 @@ router.post(
           `,
           [action, getReviewedBy(req.session.user), reviewedAt, action === "rejected" ? reviewReason : null, approvedCount, id],
         )
+        if (action === "approved") {
+          await recalculateWeekScores(Number(evidence.week_id), client)
+          await applyExemptionToClosedPeriodCaches(
+            Number(evidence.week_id),
+            evidence.class_name,
+            scoreAdjustment,
+            client,
+          )
+        }
         await client.query("COMMIT")
       } catch (error) {
         await client.query("ROLLBACK")
@@ -652,10 +742,6 @@ router.post(
         client.release()
       }
 
-      if (action === "approved") {
-        await recalculateWeekScores(Number(evidence.week_id))
-        await applyExemptionToClosedPeriodCaches(Number(evidence.week_id), evidence.class_name, scoreAdjustment)
-      }
       const updatedEvidence = await getEvidence(id)
       res.json({ evidence: await presentEvidence(updatedEvidence, true) })
     } catch (error) {

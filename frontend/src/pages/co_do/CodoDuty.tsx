@@ -6,6 +6,7 @@ import Navbar from "../../components/Navbar"
 import Footer from "../../components/Footer"
 import RuleSelector, { type RuleType } from "../../components/RuleSelector"
 import CodoDutySignSheet from "../../components/CodoDutySignSheet"
+import DutyEvidencePanel from "../../components/DutyEvidencePanel"
 
 import toast from "react-hot-toast"
 import { localISODate } from "../../utils/dateLocal"
@@ -357,6 +358,10 @@ export default function CodoDuty() {
               }
             </div>
           </div>
+        )}
+
+        {session && (
+          <DutyEvidencePanel sessionId={Number(session.id)} />
         )}
 
         {session && (

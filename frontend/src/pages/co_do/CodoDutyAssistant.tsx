@@ -5,6 +5,7 @@ import { api } from "../../api/api"
 import { useAuth } from "../../auth/AuthContext"
 import ClassSelector from "../../components/ClassSelector"
 import CodoDutySignSheet from "../../components/CodoDutySignSheet"
+import DutyEvidencePanel from "../../components/DutyEvidencePanel"
 import Navbar from "../../components/Navbar"
 import RuleSelector, { type RuleType } from "../../components/RuleSelector"
 import toast from "react-hot-toast"
@@ -1426,7 +1427,9 @@ export default function CodoDutyAssistant() {
                 </div>
               </div>
             ) : (
-              messages.map((message, index) => {
+              <>
+                {session && <DutyEvidencePanel sessionId={session.id} />}
+                {messages.map((message, index) => {
                 const isUser = message.role === "user"
 
                 if (isConfirmCardMessage(message)) {
@@ -1502,7 +1505,8 @@ export default function CodoDutyAssistant() {
                     </div>
                   </div>
                 )
-              })
+                })}
+              </>
             )}
 
             {isSending && !isBooting && (

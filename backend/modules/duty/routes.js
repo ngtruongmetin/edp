@@ -1,5 +1,7 @@
 const express = require("express")
+const multer = require("multer")
 const db = require("../../db")
+const { pool } = require("../../config/database")
 const bcrypt = require("bcrypt")
 const fs = require("fs")
 const path = require("path")
@@ -20,6 +22,123 @@ const {
 const time = require("../../utils/time")
 
 const router = express.Router()
+const DUTY_EVIDENCE_LIMIT = 10
+const DUTY_EVIDENCE_MAX_BYTES = 1536 * 1024
+const DUTY_EVIDENCE_DIRECTORY = path.join(__dirname, "..", "..", "assets", "duty-evidences")
+const DUTY_SIGNATURE_DIRECTORY = path.join(__dirname, "..", "..", "assets", "duty-signatures")
+const DUTY_EVIDENCE_TYPES = new Map([
+  ["image/jpeg", "jpg"],
+  ["image/png", "png"],
+  ["image/webp", "webp"],
+])
+
+function dutyEvidenceError(status, message) {
+  const error = new Error(message)
+  error.status = status
+  return error
+}
+
+function sanitizeDutyEvidenceFileName(value) {
+  return String(value || "minh-chung")
+    .replace(/[\\/:*?"<>|]+/g, "-")
+    .slice(0, 160)
+}
+
+function removeDutyEvidenceFiles(files) {
+  files.forEach((file) => {
+    const filePath = path.join(DUTY_EVIDENCE_DIRECTORY, path.basename(file.filePath || file.filename || ""))
+    fs.rmSync(filePath, { force: true })
+  })
+}
+
+const dutyEvidenceStorage = multer.diskStorage({
+  destination: (req, file, callback) => {
+    fs.mkdir(DUTY_EVIDENCE_DIRECTORY, { recursive: true }, (error) => {
+      callback(error, DUTY_EVIDENCE_DIRECTORY)
+    })
+  },
+  filename: (req, file, callback) => {
+    const extension = DUTY_EVIDENCE_TYPES.get(String(file.mimetype || "").toLowerCase())
+    callback(null, `${Date.now()}-${crypto.randomUUID()}.${extension || "upload"}`)
+  },
+})
+
+const dutyEvidenceUpload = multer({
+  storage: dutyEvidenceStorage,
+  limits: {
+    files: DUTY_EVIDENCE_LIMIT,
+    fileSize: DUTY_EVIDENCE_MAX_BYTES,
+  },
+  fileFilter: (req, file, callback) => {
+    if (!DUTY_EVIDENCE_TYPES.has(String(file.mimetype || "").toLowerCase())) {
+      return callback(dutyEvidenceError(400, "Ảnh minh chứng chỉ hỗ trợ JPG, PNG hoặc WebP."))
+    }
+    callback(null, true)
+  },
+})
+
+function uploadDutyEvidenceImages(req, res, next) {
+  dutyEvidenceUpload.array("files", DUTY_EVIDENCE_LIMIT)(req, res, (error) => {
+    if (!error) {
+      if (!req.files?.length) {
+        return res.status(400).json({ error: "Vui lòng chọn ít nhất một ảnh minh chứng." })
+      }
+      return next()
+    }
+
+    removeDutyEvidenceFiles(Array.isArray(req.files) ? req.files : [])
+    if (error instanceof multer.MulterError) {
+      if (error.code === "LIMIT_FILE_SIZE") {
+        return res.status(400).json({ error: "Mỗi ảnh minh chứng không được vượt quá 1.5 MB." })
+      }
+      if (error.code === "LIMIT_FILE_COUNT" || error.code === "LIMIT_UNEXPECTED_FILE") {
+        return res.status(400).json({ error: `Mỗi lần chỉ được thêm tối đa ${DUTY_EVIDENCE_LIMIT} ảnh minh chứng.` })
+      }
+    }
+
+    return res.status(error.status || 400).json({ error: error.message || "Không thể tải ảnh minh chứng lên." })
+  })
+}
+
+const dutySignatureUpload = multer({
+  storage: multer.diskStorage({
+    destination: (req, file, callback) => {
+      fs.mkdir(DUTY_SIGNATURE_DIRECTORY, { recursive: true }, (error) => {
+        callback(error, DUTY_SIGNATURE_DIRECTORY)
+      })
+    },
+    filename: (req, file, callback) => {
+      const extension = DUTY_EVIDENCE_TYPES.get(String(file.mimetype || "").toLowerCase())
+      callback(null, `duty-${Date.now()}-${crypto.randomUUID()}.${extension || "upload"}`)
+    },
+  }),
+  limits: { files: 1, fileSize: DUTY_EVIDENCE_MAX_BYTES },
+  fileFilter: (req, file, callback) => {
+    if (!DUTY_EVIDENCE_TYPES.has(String(file.mimetype || "").toLowerCase())) {
+      return callback(dutyEvidenceError(400, "Ảnh xác nhận chỉ hỗ trợ JPG, PNG hoặc WebP."))
+    }
+    callback(null, true)
+  },
+})
+
+function uploadDutySignaturePhoto(req, res, next) {
+  dutySignatureUpload.single("photo")(req, res, (error) => {
+    if (error) {
+      if (req.file?.path) fs.rmSync(req.file.path, { force: true })
+      if (error instanceof multer.MulterError && error.code === "LIMIT_FILE_SIZE") {
+        return res.status(400).json({ error: "Ảnh xác nhận không được vượt quá 1.5 MB." })
+      }
+      return res.status(error.status || 400).json({ error: error.message || "Không thể tải ảnh xác nhận lên." })
+    }
+
+    res.once("finish", () => {
+      if (res.statusCode >= 400 && req.file?.path) {
+        fs.rmSync(req.file.path, { force: true })
+      }
+    })
+    next()
+  })
+}
 
 /*
 PUBLIC: landing stats (no auth)
@@ -2253,6 +2372,206 @@ router.get(
   }
 )
 
+/*
+CO_DO: duty-session evidence images
+*/
+router.get(
+  "/session/:id/evidences",
+  requireLogin,
+  requireRole(["co_do", "admin"]),
+  async (req, res) => {
+    try {
+      const sessionId = Number(req.params.id)
+      const user = req.session.user
+      const sessionResult = user?.role === "admin"
+        ? await pool.query(`SELECT id FROM duty_sessions WHERE id = $1 LIMIT 1`, [sessionId])
+        : await pool.query(
+          `SELECT id FROM duty_sessions WHERE id = $1 AND red_class = $2 LIMIT 1`,
+          [sessionId, user?.class_name],
+        )
+      if (!sessionResult.rows[0]) throw dutyEvidenceError(404, "Không tìm thấy Phiếu trực.")
+
+      const evidenceResult = await pool.query(
+        `
+          SELECT id, file_name, mime_type, byte_size, sort_order, created_at
+          FROM duty_evidence_images
+          WHERE session_id = $1
+          ORDER BY sort_order ASC, id ASC
+        `,
+        [sessionId],
+      )
+      res.json({
+        images: evidenceResult.rows.map((image) => ({
+          ...image,
+          url: `/api/duty/evidence/${image.id}/file`,
+        })),
+      })
+    } catch (error) {
+      res.status(error.status || 500).json({ error: error.message || "Không thể tải ảnh minh chứng." })
+    }
+  },
+)
+
+router.post(
+  "/session/:id/evidences",
+  requireLogin,
+  requireRole(["co_do"]),
+  uploadDutyEvidenceImages,
+  async (req, res) => {
+    const uploadedFiles = Array.isArray(req.files) ? req.files : []
+    let client = null
+
+    try {
+      const sessionId = Number(req.params.id)
+      const redClass = req.session.user?.class_name
+      client = await pool.connect()
+      await client.query("BEGIN")
+
+      const sessionResult = await client.query(
+        `
+          SELECT s.id, s.week_id
+          FROM duty_sessions s
+          WHERE s.id = $1 AND s.red_class = $2
+          FOR UPDATE
+        `,
+        [sessionId, redClass],
+      )
+      const session = sessionResult.rows[0]
+      if (!session) throw dutyEvidenceError(404, "Không tìm thấy Phiếu trực.")
+
+      const closingResult = await client.query(
+        `SELECT 1 FROM week_closings WHERE week_id = $1 AND closed_at IS NOT NULL LIMIT 1`,
+        [session.week_id],
+      )
+      if (closingResult.rows[0]) throw dutyEvidenceError(403, "Tuần đã được khóa.")
+
+      const countResult = await client.query(
+        `SELECT COUNT(*)::int AS count FROM duty_evidence_images WHERE session_id = $1`,
+        [sessionId],
+      )
+      const existingCount = Number(countResult.rows[0]?.count || 0)
+      if (existingCount + uploadedFiles.length > DUTY_EVIDENCE_LIMIT) {
+        throw dutyEvidenceError(400, `Mỗi Phiếu trực chỉ được lưu tối đa ${DUTY_EVIDENCE_LIMIT} ảnh minh chứng.`)
+      }
+
+      const now = time.now()
+      const images = []
+      for (const [index, file] of uploadedFiles.entries()) {
+        const imageResult = await client.query(
+          `
+            INSERT INTO duty_evidence_images
+            (session_id, file_path, file_name, mime_type, byte_size, sort_order, created_at)
+            VALUES ($1, $2, $3, $4, $5, $6, $7)
+            RETURNING id, file_name, mime_type, byte_size, sort_order, created_at
+          `,
+          [
+            sessionId,
+            file.filename,
+            sanitizeDutyEvidenceFileName(file.originalname),
+            file.mimetype,
+            file.size,
+            existingCount + index,
+            now,
+          ],
+        )
+        const image = imageResult.rows[0]
+        images.push({ ...image, url: `/api/duty/evidence/${image.id}/file` })
+      }
+
+      await client.query(
+        `INSERT INTO duty_revision_logs (session_id, action, created_at) VALUES ($1, $2, $3)`,
+        [sessionId, "edit:add_evidence", now],
+      )
+      await client.query("COMMIT")
+      res.status(201).json({ images })
+    } catch (error) {
+      if (client) await client.query("ROLLBACK")
+      if (uploadedFiles.length) removeDutyEvidenceFiles(uploadedFiles)
+      res.status(error.status || 500).json({ error: error.message || "Không thể thêm ảnh minh chứng." })
+    } finally {
+      client?.release()
+    }
+  },
+)
+
+router.delete(
+  "/evidence/:id",
+  requireLogin,
+  requireRole(["co_do"]),
+  async (req, res) => {
+    let client = null
+    try {
+      const imageId = Number(req.params.id)
+      const redClass = req.session.user?.class_name
+      client = await pool.connect()
+      await client.query("BEGIN")
+
+      const imageResult = await client.query(
+        `
+          SELECT image.id, image.file_path, image.session_id, session.week_id
+          FROM duty_evidence_images image
+          JOIN duty_sessions session ON session.id = image.session_id
+          WHERE image.id = $1 AND session.red_class = $2
+          FOR UPDATE
+        `,
+        [imageId, redClass],
+      )
+      const image = imageResult.rows[0]
+      if (!image) throw dutyEvidenceError(404, "Không tìm thấy ảnh minh chứng.")
+
+      const closingResult = await client.query(
+        `SELECT 1 FROM week_closings WHERE week_id = $1 AND closed_at IS NOT NULL LIMIT 1`,
+        [image.week_id],
+      )
+      if (closingResult.rows[0]) throw dutyEvidenceError(403, "Tuần đã được khóa.")
+
+      await client.query(`DELETE FROM duty_evidence_images WHERE id = $1`, [imageId])
+      await client.query(
+        `INSERT INTO duty_revision_logs (session_id, action, created_at) VALUES ($1, $2, $3)`,
+        [image.session_id, "edit:remove_evidence", time.now()],
+      )
+      await client.query("COMMIT")
+      removeDutyEvidenceFiles([{ filePath: image.file_path }])
+      res.json({ success: true })
+    } catch (error) {
+      if (client) await client.query("ROLLBACK")
+      res.status(error.status || 500).json({ error: error.message || "Không thể xóa ảnh minh chứng." })
+    } finally {
+      client?.release()
+    }
+  },
+)
+
+router.get("/evidence/:id/file", requireLogin, async (req, res) => {
+  try {
+    const imageId = Number(req.params.id)
+    const user = req.session.user
+    const imageResult = await pool.query(
+      `
+        SELECT image.file_path, image.file_name, image.mime_type, session.red_class
+        FROM duty_evidence_images image
+        JOIN duty_sessions session ON session.id = image.session_id
+        WHERE image.id = $1
+        LIMIT 1
+      `,
+      [imageId],
+    )
+    const image = imageResult.rows[0]
+    if (!image) throw dutyEvidenceError(404, "Không tìm thấy ảnh minh chứng.")
+    if (user?.role !== "admin" && image.red_class !== user?.class_name) {
+      throw dutyEvidenceError(403, "Bạn không có quyền xem ảnh minh chứng này.")
+    }
+
+    const diskPath = path.join(DUTY_EVIDENCE_DIRECTORY, path.basename(image.file_path))
+    if (!fs.existsSync(diskPath)) throw dutyEvidenceError(404, "Tệp ảnh minh chứng không còn tồn tại.")
+    res.type(image.mime_type)
+    res.setHeader("Content-Disposition", `inline; filename*=UTF-8''${encodeURIComponent(image.file_name)}`)
+    res.sendFile(diskPath)
+  } catch (error) {
+    res.status(error.status || 500).json({ error: error.message || "Không thể mở ảnh minh chứng." })
+  }
+})
+
 
 /*
 ADD VIOLATION
@@ -2565,10 +2884,11 @@ router.post(
   "/sign",
   requireLogin,
   requireRole(["co_do"]),
+  uploadDutySignaturePhoto,
   (req, res) => {
-    const { session_id, pin, photo_data } = req.body
+    const { session_id, pin } = req.body
 
-    // photo_data is optional (fallback mode) - PIN is the real authorization.
+    // The confirmation photo is optional; the PIN is the authorization factor.
     if (!session_id || !pin) {
       return res.status(400).json({ error: "Missing fields" })
     }
@@ -2660,44 +2980,7 @@ router.post(
               }
 
               const proceedWithSignature = () => {
-                let photoPath = null
-
-                // Optional photo (fallback). If provided, save it; otherwise keep NULL.
-                if (typeof photo_data === "string" && photo_data.trim()) {
-                  let base64Data = null
-
-                  if (photo_data.startsWith("data:image/jpeg;base64,")) {
-                    base64Data = photo_data.replace("data:image/jpeg;base64,", "")
-                  } else if (photo_data.startsWith("data:image/png;base64,")) {
-                    base64Data = photo_data.replace("data:image/png;base64,", "")
-                  } else {
-                    return res.status(400).json({ error: "Invalid photo" })
-                  }
-
-                  let buf
-                  try {
-                    buf = Buffer.from(base64Data, "base64")
-                  } catch {
-                    return res.status(400).json({ error: "Invalid photo" })
-                  }
-
-                  const assetsDir = path.join(__dirname, "../../assets")
-                  fs.mkdirSync(assetsDir, { recursive: true })
-
-                  const filename = `duty_${session_id}_${Date.now()}_${Math.random()
-                    .toString(16)
-                    .slice(2)}.jpg`
-
-                  const absPath = path.join(assetsDir, filename)
-
-                  try {
-                    fs.writeFileSync(absPath, buf)
-                  } catch (saveErr) {
-                    return res.status(500).json({ error: "Cannot save photo" })
-                  }
-
-                  photoPath = `/assets/${filename}`
-                }
+                const photoPath = req.file ? `/assets/duty-signatures/${req.file.filename}` : null
 
                 db.run(
                   `

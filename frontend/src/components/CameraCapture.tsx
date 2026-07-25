@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from "react"
 
 type Props = {
-  value: string | null
-  onChange: (pngDataUrl: string | null) => void
+  value: File | null
+  onChange: (file: File | null) => void
 }
 
 export default function CameraCapture({ value, onChange }: Props) {
@@ -11,6 +11,7 @@ export default function CameraCapture({ value, onChange }: Props) {
 
   const [active, setActive] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null)
 
   async function start() {
     setError(null)
@@ -48,12 +49,7 @@ export default function CameraCapture({ value, onChange }: Props) {
     if (!file) return
 
     stop()
-
-    const reader = new FileReader()
-    reader.onload = () => {
-      onChange(reader.result as string)
-    }
-    reader.readAsDataURL(file)
+    onChange(file)
   }
 
   function capture() {
@@ -74,9 +70,25 @@ export default function CameraCapture({ value, onChange }: Props) {
     if (!ctx) return
 
     ctx.drawImage(v, 0, 0, cw, ch)
-    const png = canvas.toDataURL("image/jpeg", 0.8)
-    onChange(png)
+    canvas.toBlob((blob) => {
+      if (!blob) {
+        setError("Không thể tạo ảnh xác nhận")
+        return
+      }
+      onChange(new File([blob], `duty-signature-${Date.now()}.jpg`, { type: "image/jpeg" }))
+    }, "image/jpeg", 0.8)
   }
+
+  useEffect(() => {
+    if (!value) {
+      setPreviewUrl(null)
+      return
+    }
+
+    const nextPreviewUrl = URL.createObjectURL(value)
+    setPreviewUrl(nextPreviewUrl)
+    return () => URL.revokeObjectURL(nextPreviewUrl)
+  }, [value])
 
   useEffect(() => {
     const v = videoRef.current
@@ -111,9 +123,9 @@ export default function CameraCapture({ value, onChange }: Props) {
             </div>
           )}
 
-          {value ? (
+          {previewUrl ? (
             <img
-              src={value}
+              src={previewUrl}
               alt="capture"
               className="absolute inset-0 h-full w-full object-cover"
             />
@@ -173,7 +185,7 @@ export default function CameraCapture({ value, onChange }: Props) {
           Chọn ảnh từ Album
           <input
             type="file"
-            accept="image/*"
+            accept="image/jpeg,image/png,image/webp"
             onChange={handleFile}
             className="hidden"
           />

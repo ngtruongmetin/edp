@@ -36,12 +36,6 @@ export type DutyAssistantHistory = {
   activeSheetMessageId: string | null
 }
 
-const STORAGE_PREFIX = "ai_chat_"
-
-function getStorageKey(dutyId: string | number) {
-  return `${STORAGE_PREFIX}${dutyId}`
-}
-
 export function createEmptyDutyAssistantHistory(): DutyAssistantHistory {
   return {
     messages: [],
@@ -74,7 +68,7 @@ function isDutyAssistantResultMessage(value: any): value is DutyAssistantResultM
   )
 }
 
-function normalizeHistory(value: any): DutyAssistantHistory | null {
+export function normalizeDutyAssistantHistory(value: any): DutyAssistantHistory | null {
   if (!value || typeof value !== "object") return null
 
   const draft = typeof value.draft === "string" ? value.draft : ""
@@ -116,39 +110,5 @@ function normalizeHistory(value: any): DutyAssistantHistory | null {
     messages,
     draft,
     activeSheetMessageId,
-  }
-}
-
-export function loadHistory(dutyId: string | number): DutyAssistantHistory | null {
-  if (typeof window === "undefined") return null
-
-  try {
-    const raw = window.localStorage.getItem(getStorageKey(dutyId))
-    if (!raw) return null
-
-    return normalizeHistory(JSON.parse(raw))
-  } catch (err) {
-    console.error(err)
-    return null
-  }
-}
-
-export function saveHistory(dutyId: string | number, history: DutyAssistantHistory) {
-  if (typeof window === "undefined") return
-
-  try {
-    window.localStorage.setItem(getStorageKey(dutyId), JSON.stringify(history))
-  } catch (err) {
-    console.error(err)
-  }
-}
-
-export function clearHistory(dutyId: string | number) {
-  if (typeof window === "undefined") return
-
-  try {
-    window.localStorage.removeItem(getStorageKey(dutyId))
-  } catch (err) {
-    console.error(err)
   }
 }

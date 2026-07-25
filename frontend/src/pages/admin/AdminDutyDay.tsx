@@ -4,6 +4,7 @@ import { api } from "../../api/api"
 
 import Navbar from "../../components/Navbar"
 import Footer from "../../components/Footer"
+import DutyEvidencePanel from "../../components/DutyEvidencePanel"
 import { formatDutyStatus, formatRevisionAction } from "../../utils/dutyFormat"
 import { violationQuantityLabel } from "../../utils/dutyViolations"
 import { usePageTitle } from "../../utils/usePageTitle"
@@ -257,6 +258,8 @@ export default function AdminDutyDay() {
                       </div>
                     )}
                   </div>
+
+                  <DutyEvidencePanel sessionId={Number(detail.session.id)} readOnly />
 
                   <div className="space-y-2">
                     <div className="text-sm font-semibold text-gray-900">

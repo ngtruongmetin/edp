@@ -71,6 +71,8 @@ export default function AdminAbsenceEvidences() {
   const [showRejectModal, setShowRejectModal] = useState(false)
   const [rejectionReason, setRejectionReason] = useState("")
   const [previewIndex, setPreviewIndex] = useState<number | null>(null)
+  const [deleteTarget, setDeleteTarget] = useState<Evidence | null>(null)
+  const [deleting, setDeleting] = useState(false)
 
   const load = useCallback(async () => {
     try {
@@ -131,6 +133,27 @@ export default function AdminAbsenceEvidences() {
       toast.error(getApiErrorMessage(error, "Không thể xử lý minh chứng."))
     } finally {
       setReviewing(false)
+    }
+  }
+
+  async function deleteEvidence() {
+    if (!deleteTarget) return
+    try {
+      setDeleting(true)
+      await api.delete(`/absence-evidences/admin/${deleteTarget.id}`)
+      setEvidences((current) => current.filter((evidence) => evidence.id !== deleteTarget.id))
+      setPreviewIndex(null)
+      setSelected(null)
+      setDeleteTarget(null)
+      toast.success(
+        deleteTarget.status === "approved"
+          ? "Đã xóa minh chứng và tính lại điểm thi đua."
+          : "Đã xóa minh chứng.",
+      )
+    } catch (error) {
+      toast.error(getApiErrorMessage(error, "Không thể xóa minh chứng."))
+    } finally {
+      setDeleting(false)
     }
   }
 
@@ -210,7 +233,7 @@ export default function AdminAbsenceEvidences() {
       <Footer />
 
       {(selected || loadingDetail) && (
-        <ModalShell className="max-h-[calc(100dvh-2rem)] max-w-3xl overflow-y-auto p-5 sm:p-7" onClose={loadingDetail || reviewing ? undefined : () => { setPreviewIndex(null); setSelected(null) }}>
+        <ModalShell className="max-h-[calc(100dvh-2rem)] max-w-3xl overflow-y-auto p-5 sm:p-7" onClose={loadingDetail || reviewing || deleting ? undefined : () => { setPreviewIndex(null); setSelected(null) }}>
           {loadingDetail || !selected ? (
             <div className="py-10 text-center text-sm text-slate-500">Đang tải chi tiết...</div>
           ) : (
@@ -284,6 +307,16 @@ export default function AdminAbsenceEvidences() {
                     </button>
                   </div>
                 )}
+                <div className="mt-4 border-t border-slate-200 pt-4">
+                  <button
+                    type="button"
+                    disabled={reviewing || deleting}
+                    onClick={() => setDeleteTarget(selected)}
+                    className="min-h-11 rounded-2xl border border-rose-200 bg-rose-50 px-4 text-sm font-semibold text-rose-700 disabled:opacity-60"
+                  >
+                    Xóa minh chứng
+                  </button>
+                </div>
               </section>
             </div>
           )}
@@ -308,6 +341,23 @@ export default function AdminAbsenceEvidences() {
           <div className="mt-6 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
             <button type="button" disabled={reviewing} onClick={() => setShowRejectModal(false)} className="min-h-11 rounded-2xl border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-700 disabled:opacity-60">Hủy</button>
             <button type="button" disabled={reviewing || !rejectionReason.trim()} onClick={() => void review("rejected", rejectionReason)} className="min-h-11 rounded-2xl bg-rose-600 px-4 text-sm font-semibold text-white disabled:opacity-60">{reviewing ? "Đang lưu..." : "Từ chối"}</button>
+          </div>
+        </ModalShell>
+      )}
+
+      {deleteTarget && (
+        <ModalShell className="max-w-md p-5 sm:p-6" onClose={deleting ? undefined : () => setDeleteTarget(null)}>
+          <h2 className="pr-10 text-lg font-semibold text-slate-900">Xóa minh chứng?</h2>
+          {deleteTarget.status === "approved" ? (
+            <p className="mt-3 rounded-2xl bg-amber-50 p-4 text-sm leading-6 text-amber-900">
+              Minh chứng này đã được áp dụng để miễn trừ điểm. Nếu tiếp tục xóa, hệ thống sẽ hủy miễn trừ và tính lại điểm thi đua.
+            </p>
+          ) : (
+            <p className="mt-3 text-sm leading-6 text-slate-600">Minh chứng và các tệp đính kèm sẽ bị xóa vĩnh viễn.</p>
+          )}
+          <div className="mt-6 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
+            <button type="button" disabled={deleting} onClick={() => setDeleteTarget(null)} className="min-h-11 rounded-2xl border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-700 disabled:opacity-60">Hủy</button>
+            <button type="button" disabled={deleting} onClick={() => void deleteEvidence()} className="min-h-11 rounded-2xl bg-rose-600 px-4 text-sm font-semibold text-white disabled:opacity-60">{deleting ? "Đang xóa..." : "Xóa"}</button>
           </div>
         </ModalShell>
       )}

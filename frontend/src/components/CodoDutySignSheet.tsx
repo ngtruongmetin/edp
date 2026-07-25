@@ -24,14 +24,14 @@ export default function CodoDutySignSheet({
   onSigned,
 }: Props) {
   const [pin, setPin] = useState("")
-  const [photoData, setPhotoData] = useState<string | null>(null)
+  const [photoFile, setPhotoFile] = useState<File | null>(null)
   const [signing, setSigning] = useState(false)
   const pinInputRef = useRef<HTMLInputElement | null>(null)
 
   useEffect(() => {
     if (!open) {
       setPin("")
-      setPhotoData(null)
+      setPhotoFile(null)
       setSigning(false)
       return
     }
@@ -61,11 +61,11 @@ export default function CodoDutySignSheet({
     setSigning(true)
 
     try {
-      await api.post("/duty/sign", {
-        session_id: activeSession.id,
-        pin,
-        photo_data: photoData,
-      })
+      const formData = new FormData()
+      formData.append("session_id", String(activeSession.id))
+      formData.append("pin", pin)
+      if (photoFile) formData.append("photo", photoFile)
+      await api.post("/duty/sign", formData)
 
       toast.success("Đã ký xác nhận")
 
@@ -77,7 +77,7 @@ export default function CodoDutySignSheet({
 
       onClose()
       setPin("")
-      setPhotoData(null)
+      setPhotoFile(null)
     } catch (err: any) {
       console.error(err)
       const message =
@@ -152,7 +152,7 @@ export default function CodoDutySignSheet({
           <div className="rounded-2xl border border-blue-100 bg-white px-4 py-3 shadow-sm">
             <div className="text-[11px] text-gray-500">Ảnh xác nhận</div>
             <div className="mt-3">
-              <CameraCapture value={photoData} onChange={setPhotoData} />
+              <CameraCapture value={photoFile} onChange={setPhotoFile} />
             </div>
           </div>
 
