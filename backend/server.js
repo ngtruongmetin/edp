@@ -31,6 +31,7 @@ console.log("[session] config", {
 
 // Evidence submissions may contain up to five base64-encoded files.
 app.use("/api/absence-evidences", express.json({ limit: "60mb" }))
+app.use("/api/support", express.json({ limit: "60mb" }))
 app.use(express.json({ limit: "25mb" }))
 app.use("/assets", express.static(path.join(__dirname, "assets")))
 
@@ -82,6 +83,7 @@ app.use("/api/schedule", require("./modules/schedule/routes"))
 app.use("/api/duty", require("./modules/duty/routes"))
 app.use("/api/bonus", require("./modules/bonus/routes"))
 app.use("/api/absence-evidences", require("./modules/absence-evidences/routes"))
+app.use("/api/support", require("./modules/support/routes"))
 app.use("/api/ai", require("./modules/ai/routes"))
 app.use("/api/system-settings", require("./modules/system-settings/routes"))
 

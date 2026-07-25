@@ -1,4 +1,4 @@
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { NavLink, useNavigate } from "react-router-dom"
 import { useAuth } from "../auth/AuthContext"
 import ModalShell from "./ModalShell"
@@ -53,11 +53,49 @@ function SettingsIcon() {
   )
 }
 
+function SupportIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" className="h-5 w-5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M5.5 18.5 4 21l3.5-1.2A8.5 8.5 0 1 0 3.5 12c0 1.65.47 3.19 1.28 4.5" />
+      <path d="M8 11.5h.01M12 11.5h.01M16 11.5h.01" strokeWidth="2.4" />
+    </svg>
+  )
+}
+
 export default function Navbar() {
   const { user, loading, logout, isOffline } = useAuth()
   const navigate = useNavigate()
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false)
   const [isLoggingOut, setIsLoggingOut] = useState(false)
+  const [supportUnreadCount, setSupportUnreadCount] = useState(0)
+
+  useEffect(() => {
+    if (!user || loading || isOffline) {
+      setSupportUnreadCount(0)
+      return
+    }
+
+    let active = true
+    const loadUnreadCount = async () => {
+      try {
+        const response = await fetch("/api/support/notifications/unread-count", { credentials: "include" })
+        if (!response.ok) return
+        const data = await response.json() as { count?: number }
+        if (active) setSupportUnreadCount(Math.max(0, Number(data.count || 0)))
+      } catch {
+        // The support badge remains hidden when its non-critical request is unavailable.
+      }
+    }
+
+    void loadUnreadCount()
+    window.addEventListener("support-notifications-read", loadUnreadCount)
+    const timer = window.setInterval(() => void loadUnreadCount(), 60000)
+    return () => {
+      active = false
+      window.removeEventListener("support-notifications-read", loadUnreadCount)
+      window.clearInterval(timer)
+    }
+  }, [isOffline, loading, user])
 
   async function handleLogout() {
     setIsLoggingOut(true)
@@ -144,6 +182,21 @@ export default function Navbar() {
             >
               Lịch trực
             </NavLink>
+
+            {!loading && user && (
+              <NavLink
+                to="/support"
+                className={({ isActive }) =>
+                  `rounded-full px-4 py-2 transition ${
+                    isActive
+                      ? "bg-[#2e77df] text-white shadow-sm"
+                      : "text-slate-600 hover:bg-blue-50 hover:text-[#2e77df]"
+                  }`
+                }
+              >
+                Hỗ trợ{supportUnreadCount > 0 ? ` (${supportUnreadCount})` : ""}
+              </NavLink>
+            )}
           </nav>
 
           <div className="ml-auto flex items-center gap-3">
@@ -179,7 +232,7 @@ export default function Navbar() {
         }}
         aria-label="Điều hướng chính"
       >
-        <div className={`mx-auto grid max-w-6xl gap-1 px-3 pt-2 ${user ? "grid-cols-4" : "grid-cols-3"}`}>
+        <div className={`mx-auto grid max-w-6xl gap-1 px-3 pt-2 ${user ? "grid-cols-5" : "grid-cols-3"}`}>
           <NavLink
             to={dashboardPath}
             className={({ isActive }) =>
@@ -211,6 +264,29 @@ export default function Navbar() {
             </span>
             Lịch trực
           </NavLink>
+
+          {user && (
+            <NavLink
+              to="/support"
+              className={({ isActive }) =>
+                `relative flex min-h-14 flex-col items-center justify-center rounded-2xl px-1 py-2 text-[11px] font-semibold transition active:scale-[0.98] ${
+                  isActive
+                    ? "bg-[#eff6ff] text-[#2e77df]"
+                    : "text-slate-500 hover:bg-slate-50 hover:text-slate-900"
+                }`
+              }
+            >
+              <span className="relative mb-1 flex h-6 w-6 items-center justify-center">
+                <SupportIcon />
+                {supportUnreadCount > 0 && (
+                  <span className="absolute -right-2 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-[#2e77df] px-1 text-[9px] leading-none text-white">
+                    {supportUnreadCount > 9 ? "9+" : supportUnreadCount}
+                  </span>
+                )}
+              </span>
+              Hỗ trợ
+            </NavLink>
+          )}
 
           {user && (
             <NavLink

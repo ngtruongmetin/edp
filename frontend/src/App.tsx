@@ -7,6 +7,7 @@ import OpenInBrowser from "./pages/OpenInBrowser"
 import Schedule from "./pages/Schedule"
 import Passkeys from "./pages/Passkeys"
 import AccountSettings from "./pages/AccountSettings"
+import SupportCenter from "./pages/SupportCenter"
 
 import AdminLayout from "./pages/admin/AdminLayout"
 import AdminDashboard from "./pages/admin/AdminDashboard"
@@ -70,6 +71,7 @@ export default function App(){
         <Route path="/schedule" element={<Schedule/>}/>
         <Route path="/account/settings" element={<AccountSettings/>}/>
         <Route path="/account/passkeys" element={<Passkeys/>}/>
+        <Route path="/support" element={<SupportCenter/>}/>
 
         {/* admin */}
         <Route path="/admin" element={<AdminLayout/>}>

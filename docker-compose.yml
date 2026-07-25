@@ -43,6 +43,8 @@ services:
       BACKEND_ORIGIN: ${BACKEND_ORIGIN:-http://127.0.0.1:3000}
     ports:
       - "${PORT:-3000}:3000"
+    volumes:
+      - edp_backend_assets:/app/assets
 
   frontend:
     build:
@@ -57,3 +59,4 @@ services:
 
 volumes:
   edp_postgres_data:
+  edp_backend_assets:
