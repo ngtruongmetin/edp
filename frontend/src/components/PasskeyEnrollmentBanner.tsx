@@ -7,7 +7,10 @@ import {
   isPasskeyRegistrationInProgressError,
   registerPasskey,
   supportsPasskeys,
+  type Passkey,
 } from "../passkeys"
+import { api } from "../api/api"
+import { useAuth } from "../auth/AuthContext"
 
 const PROMPT_KEY = "edp:prompt-passkey-enrollment"
 
@@ -22,13 +25,37 @@ function PasskeyIcon() {
 
 export default function PasskeyEnrollmentBanner() {
   const navigate = useNavigate()
+  const { user, isOffline } = useAuth()
   const [visible, setVisible] = useState(false)
   const [registering, setRegistering] = useState(false)
 
   useEffect(() => {
-    if (sessionStorage.getItem(PROMPT_KEY) !== "1" || !supportsPasskeys()) return
-    setVisible(true)
-  }, [])
+    if (!user || isOffline || sessionStorage.getItem(PROMPT_KEY) !== "1" || !supportsPasskeys()) return
+
+    let cancelled = false
+
+    async function checkExistingPasskeys() {
+      try {
+        const response = await api.get<Passkey[]>("/passkeys")
+        if (cancelled) return
+
+        if (response.data.length > 0) {
+          sessionStorage.removeItem(PROMPT_KEY)
+          return
+        }
+
+        setVisible(true)
+      } catch {
+        // Do not show an enrollment prompt when the current passkey state is unknown.
+      }
+    }
+
+    void checkExistingPasskeys()
+
+    return () => {
+      cancelled = true
+    }
+  }, [isOffline, user])
 
   function dismiss() {
     sessionStorage.removeItem(PROMPT_KEY)
@@ -71,7 +98,7 @@ export default function PasskeyEnrollmentBanner() {
         <button type="button" onClick={dismiss} disabled={registering} className="min-h-11 rounded-[18px] border border-white/70 bg-white/70 px-4 text-sm font-semibold text-slate-700 shadow-[0_10px_24px_rgba(15,23,42,0.06)] transition active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60">
           Để sau
         </button>
-        <button type="button" onClick={() => navigate("/account/settings")} disabled={registering} className="min-h-11 rounded-[18px] px-3 text-sm font-semibold text-[#2e77df] transition hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-60 sm:ml-auto">
+        <button type="button" onClick={() => navigate("/account/passkeys")} disabled={registering} className="min-h-11 rounded-[18px] px-3 text-sm font-semibold text-[#2e77df] transition hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-60 sm:ml-auto">
           Quản lý
         </button>
       </div>
