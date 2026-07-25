@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useState, type Dispatch, type SetStateAction } from "react"
 import { Link } from "react-router-dom"
 import toast from "react-hot-toast"
 
@@ -119,6 +119,26 @@ async function readFiles(files: FileList | null): Promise<PendingFile[]> {
     })
     return { name: file.name, type: file.type, data }
   }))
+}
+
+async function appendSelectedFiles(
+  event: React.ChangeEvent<HTMLInputElement>,
+  setFiles: Dispatch<SetStateAction<PendingFile[]>>,
+) {
+  try {
+    const selected = await readFiles(event.target.files)
+    setFiles((current) => {
+      if (current.length + selected.length > 5) {
+        toast.error("Chỉ được đính kèm tối đa 5 tệp cho mỗi tin nhắn.")
+        return current
+      }
+      return [...current, ...selected]
+    })
+  } catch (error) {
+    toast.error(error instanceof Error ? error.message : "Không thể đọc tệp.")
+  } finally {
+    event.target.value = ""
+  }
 }
 
 function FileChips({ files, onPreview, onRemove }: {
@@ -356,16 +376,6 @@ function CreateTicketModal({ weeks, isOffline, onClose, onCreated }: {
     return () => { active = false }
   }, [requestType, weekId])
 
-  async function handleFiles(event: React.ChangeEvent<HTMLInputElement>) {
-    try {
-      setFiles(await readFiles(event.target.files))
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Không thể đọc tệp.")
-    } finally {
-      event.target.value = ""
-    }
-  }
-
   async function submit(event: React.FormEvent) {
     event.preventDefault()
     if (isOffline) return toast.error("Chức năng này cần kết nối mạng.")
@@ -400,7 +410,7 @@ function CreateTicketModal({ weeks, isOffline, onClose, onCreated }: {
             <label className="text-sm font-semibold text-slate-700">Phiếu trực<select required value={sessionId} onChange={(event) => setSessionId(event.target.value)} disabled={!weekId} className="mt-2 min-h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm font-normal outline-none focus:border-[#2e77df] disabled:bg-slate-50"><option value="">Chọn phiếu trực</option>{sessions.map((session) => <option key={session.id} value={session.id}>{formatDate(session.date)} - Cờ đỏ {session.red_class}, trực {session.duty_class}</option>)}</select></label>
           </div>}
           <label className="text-sm font-semibold text-slate-700">Nội dung<textarea required maxLength={5000} value={body} onChange={(event) => setBody(event.target.value)} rows={6} className="mt-2 w-full rounded-xl border border-slate-200 px-3 py-3 text-sm font-normal leading-6 outline-none focus:border-[#2e77df] focus:ring-4 focus:ring-blue-100" /></label>
-          <label className="flex min-h-11 cursor-pointer items-center justify-center rounded-xl border border-dashed border-[#2e77df]/45 bg-blue-50/50 px-4 text-sm font-semibold text-[#2e77df] hover:bg-blue-50">Đính kèm tệp<input className="sr-only" type="file" multiple accept="image/jpeg,image/png,application/pdf" onChange={(event) => void handleFiles(event)} /></label>
+          <label className="flex min-h-11 cursor-pointer items-center justify-center rounded-xl border border-dashed border-[#2e77df]/45 bg-blue-50/50 px-4 text-sm font-semibold text-[#2e77df] hover:bg-blue-50">Đính kèm tệp<input className="sr-only" type="file" multiple accept="image/jpeg,image/png,application/pdf" onChange={(event) => void appendSelectedFiles(event, setFiles)} /></label>
           <p className="-mt-2 text-xs text-slate-500">JPG, JPEG, PNG hoặc PDF. Tối đa 5 tệp, 8 MB mỗi tệp.</p>
           <FileChips files={files} onRemove={(index) => setFiles((current) => current.filter((_, itemIndex) => itemIndex !== index))} />
         </div>
@@ -435,23 +445,6 @@ function TicketModal({ ticket, loading, currentRole, currentClassId, isOffline, 
   if (!ticket) return null
   const ticketId = ticket.id
 
-  async function addFiles(event: React.ChangeEvent<HTMLInputElement>) {
-    try {
-      const next = await readFiles(event.target.files)
-      setFiles((current) => {
-        if (current.length + next.length > 5) {
-          toast.error("Chỉ được đính kèm tối đa 5 tệp cho mỗi tin nhắn.")
-          return current
-        }
-        return [...current, ...next]
-      })
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Không thể đọc tệp.")
-    } finally {
-      event.target.value = ""
-    }
-  }
-
   async function sendReply(event: React.FormEvent) {
     event.preventDefault()
     if (isOffline) return toast.error("Chức năng này cần kết nối mạng.")
@@ -485,7 +478,7 @@ function TicketModal({ ticket, loading, currentRole, currentClassId, isOffline, 
             })}
           </div>
         </div>
-        <form onSubmit={(event) => void sendReply(event)} className="border-t border-slate-100 bg-white p-4 sm:p-5"><textarea required value={reply} onChange={(event) => setReply(event.target.value)} maxLength={5000} rows={3} placeholder="Nhập phản hồi..." className="w-full rounded-xl border border-slate-200 px-3 py-3 text-sm leading-6 outline-none focus:border-[#2e77df] focus:ring-4 focus:ring-blue-100" /><div className="mt-3 flex flex-col gap-3 sm:flex-row sm:items-center"><label className="inline-flex min-h-10 cursor-pointer items-center justify-center rounded-xl border border-dashed border-[#2e77df]/45 px-4 text-sm font-semibold text-[#2e77df] hover:bg-blue-50">Đính kèm<input className="sr-only" type="file" multiple accept="image/jpeg,image/png,application/pdf" onChange={(event) => void addFiles(event)} /></label><div className="min-w-0 flex-1"><FileChips files={files} onRemove={(index) => setFiles((current) => current.filter((_, itemIndex) => itemIndex !== index))} /></div><button type="submit" disabled={sending || isOffline} className="min-h-11 rounded-xl bg-[#2e77df] px-5 text-sm font-semibold text-white shadow-sm disabled:opacity-50">{sending ? "Đang gửi..." : "Gửi phản hồi"}</button></div></form>
+        <form onSubmit={(event) => void sendReply(event)} className="border-t border-slate-100 bg-white p-4 sm:p-5"><textarea required value={reply} onChange={(event) => setReply(event.target.value)} maxLength={5000} rows={3} placeholder="Nhập phản hồi..." className="w-full rounded-xl border border-slate-200 px-3 py-3 text-sm leading-6 outline-none focus:border-[#2e77df] focus:ring-4 focus:ring-blue-100" /><div className="mt-3 flex flex-col gap-3 sm:flex-row sm:items-center"><label className="inline-flex min-h-10 cursor-pointer items-center justify-center rounded-xl border border-dashed border-[#2e77df]/45 px-4 text-sm font-semibold text-[#2e77df] hover:bg-blue-50">Đính kèm<input className="sr-only" type="file" multiple accept="image/jpeg,image/png,application/pdf" onChange={(event) => void appendSelectedFiles(event, setFiles)} /></label><div className="min-w-0 flex-1"><FileChips files={files} onRemove={(index) => setFiles((current) => current.filter((_, itemIndex) => itemIndex !== index))} /></div><button type="submit" disabled={sending || isOffline} className="min-h-11 rounded-xl bg-[#2e77df] px-5 text-sm font-semibold text-white shadow-sm disabled:opacity-50">{sending ? "Đang gửi..." : "Gửi phản hồi"}</button></div></form>
       </div>
     </ModalShell>
   )
