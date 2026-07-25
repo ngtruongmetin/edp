@@ -182,11 +182,17 @@ export default function CodoDuty() {
   async function addViolation() {
     if (!ruleId || !session) return
 
+    const trimmedNote = note.trim()
+    if (!trimmedNote) {
+      toast.error("Ghi tên học sinh vi phạm hoặc ghi 'Không'")
+      return
+    }
+
     await api.post("/duty/violation", {
       session_id: session.id,
       rule_id: ruleId,
       quantity,
-      note,
+      note: trimmedNote,
     })
 
     setRuleId(null)
@@ -411,12 +417,13 @@ export default function CodoDuty() {
               </div>
 
               <div className="rounded-2xl border border-blue-100 bg-white px-4 py-3 shadow-sm">
-                <div className="text-[11px] text-gray-500">Ghi chú</div>
+                <div className="text-[11px] text-gray-500">Ghi chú *</div>
                 <input
                   value={note}
                   onChange={(e) => setNote(e.target.value)}
                   className="mt-1 w-full bg-transparent text-[16px] text-gray-900 outline-none"
-                  placeholder="Có thể ghi hoặc không"
+                  placeholder="Tên học sinh vi phạm hoặc ghi 'Không'"
+                  required
                   onFocus={(e) => {
                     e.currentTarget.scrollIntoView({
                       block: "center",
@@ -432,6 +439,10 @@ export default function CodoDuty() {
                     try {
                       if (!ruleId) {
                         toast.error("Chọn lỗi vi phạm")
+                        return
+                      }
+                      if (!note.trim()) {
+                        toast.error("Ghi tên học sinh vi phạm hoặc ghi 'Không'")
                         return
                       }
                       await addViolation()

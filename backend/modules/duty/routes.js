@@ -2292,6 +2292,10 @@ router.post(
           const q = Number(quantity || 1)
           const n = String(note || "").trim()
 
+          if (!n) {
+            return res.status(400).json({ error: "Ghi tên học sinh vi phạm hoặc ghi 'Không'" })
+          }
+
           ensureSignedSnapshot(session_id, (err) => {
             if (err) return res.status(500).json({ error: err.message })
 

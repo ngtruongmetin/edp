@@ -10,6 +10,7 @@ export type DutyAssistantParsedViolationDraft = {
   className: string
   ruleId: number | null
   quantity: number
+  studentName: string
   confidence?: number
   matchedText?: string
 }

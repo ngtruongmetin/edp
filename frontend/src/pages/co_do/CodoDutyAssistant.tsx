@@ -61,6 +61,7 @@ type AssistantMeta = {
 type AiViolation = {
   ruleId: number
   quantity: number
+  studentName: string
   confidence?: number
   matchedText?: string
 }
@@ -163,12 +164,18 @@ function getSaveStateMeta(status: ResultMessage["status"]): SaveStateMeta | null
   return null
 }
 
+function normalizeStudentName(value: unknown) {
+  const studentName = typeof value === "string" ? value.trim() : ""
+  return studentName || "Không"
+}
+
 function buildParsedSignature(parsed: ParsedViolationDraft[]) {
   return JSON.stringify(
     parsed.map((item) => ({
       className: item.className,
       quantity: Number(item.quantity || 0),
       ruleId: item.ruleId,
+      studentName: normalizeStudentName(item.studentName),
     })),
   )
 }
@@ -452,6 +459,7 @@ type ResultSheetProps = {
   onRuleChange: (itemId: string, ruleId: number | null) => void
   onClassChange: (itemId: string, className: string) => void
   onQuantityChange: (itemId: string, nextQuantity: number) => void
+  onStudentNameChange: (itemId: string, studentName: string) => void
   onDeleteViolation: (itemId: string) => void
   onOpenAddViolation: () => void
   onConfirm: () => void
@@ -467,6 +475,7 @@ function ResultSheetV2({
   onRuleChange,
   onClassChange,
   onQuantityChange,
+  onStudentNameChange,
   onDeleteViolation,
   onOpenAddViolation,
   onConfirm,
@@ -547,6 +556,19 @@ function ResultSheetV2({
                       />
                     </div>
 
+                    <label className="block">
+                      <div className="mb-2 text-xs uppercase tracking-[0.14em] text-slate-400">
+                        Học sinh vi phạm
+                      </div>
+                      <input
+                        value={normalizeStudentName(item.studentName)}
+                        onChange={(event) => onStudentNameChange(item.id, event.target.value)}
+                        placeholder="Tên học sinh hoặc ghi 'Không'"
+                        disabled={isSaving}
+                        className="min-h-11 w-full rounded-[18px] border border-slate-200/80 bg-white px-3 text-sm text-slate-900 outline-none transition focus:border-[#2e77df] disabled:opacity-50"
+                      />
+                    </label>
+
                     <div className="grid grid-cols-[1fr_auto] items-center gap-3 rounded-[22px] border border-slate-200/80 bg-white/90 px-4 py-3">
                       <div>
                         <div className="text-xs uppercase tracking-[0.14em] text-slate-400">
@@ -625,6 +647,9 @@ function ResultSheetV2({
                           <OverflowMarquee text={`✓ ${rule?.name || "Chưa chọn lỗi"} ×${item.quantity}`} />
                           <div className="mt-1 text-xs text-slate-500">
                             {item.className || "--"} • Điểm {getViolationScore(item.ruleId, item.quantity, rules)}
+                          </div>
+                          <div className="mt-1 text-xs text-slate-500">
+                            Học sinh: {normalizeStudentName(item.studentName)}
                           </div>
                         </div>
                         <div className="rounded-full bg-red-50 px-2.5 py-1 text-xs font-semibold text-red-600">
@@ -968,6 +993,7 @@ export default function CodoDutyAssistant() {
       className: meta.dutyClass || session?.duty_class || "",
       ruleId: Number.isInteger(item.ruleId) ? item.ruleId : null,
       quantity: Math.max(1, Number(item.quantity || 1)),
+      studentName: normalizeStudentName(item.studentName),
       confidence: item.confidence,
       matchedText: item.matchedText,
     }))
@@ -1214,6 +1240,20 @@ export default function CodoDutyAssistant() {
     }))
   }
 
+  function handleStudentNameChange(messageId: string, itemId: string, studentName: string) {
+    updateEditableResultMessage(messageId, (message) => ({
+      ...message,
+      parsed: message.parsed.map((item) =>
+        item.id === itemId
+          ? {
+            ...item,
+            studentName,
+          }
+          : item,
+      ),
+    }))
+  }
+
   function handleOpenAddViolation(messageId: string) {
     updateHistory((current) => ({
       ...current,
@@ -1232,6 +1272,7 @@ export default function CodoDutyAssistant() {
           className: meta.dutyClass || session?.duty_class || "",
           ruleId,
           quantity: 1,
+          studentName: "Không",
         },
       ],
     }))
@@ -1270,6 +1311,7 @@ export default function CodoDutyAssistant() {
       (item) =>
         item.ruleId == null ||
         item.quantity < 1 ||
+        !normalizeStudentName(item.studentName) ||
         item.className !== (meta.dutyClass || session.duty_class),
     )
 
@@ -1300,7 +1342,7 @@ export default function CodoDutyAssistant() {
           session_id: session.id,
           rule_id: item.ruleId,
           quantity: item.quantity,
-          note: "",
+          note: normalizeStudentName(item.studentName),
         })
 
         if (Number.isInteger(res.data?.id)) {
@@ -1409,6 +1451,7 @@ export default function CodoDutyAssistant() {
                       onRuleChange={(itemId, ruleId) => handleRuleChange(message.id, itemId, ruleId)}
                       onClassChange={(itemId, className) => handleClassChange(message.id, itemId, className)}
                       onQuantityChange={(itemId, quantity) => handleQuantityChange(message.id, itemId, quantity)}
+                      onStudentNameChange={(itemId, studentName) => handleStudentNameChange(message.id, itemId, studentName)}
                       onDeleteViolation={(itemId) => handleDeleteViolation(message.id, itemId)}
                       onOpenAddViolation={() => handleOpenAddViolation(message.id)}
                       onConfirm={() => void handleConfirm(message.id)}
