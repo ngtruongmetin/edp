@@ -112,7 +112,7 @@ export default function App(){
           <Route path="*" element={<NotFound/>}/>
         </Route>
 
-        {/* global 404 */}
+        {/* fallback route */}
         <Route path="*" element={<NotFound/>}/>
 
       </Routes>

@@ -85,6 +85,7 @@ app.use("/api/bonus", require("./modules/bonus/routes"))
 app.use("/api/absence-evidences", require("./modules/absence-evidences/routes"))
 app.use("/api/support", require("./modules/support/routes"))
 app.use("/api/ai", require("./modules/ai/routes"))
+app.use("/api/v1/gvcn/ai", require("./modules/gvcn-ai/routes"))
 app.use("/api/system-settings", require("./modules/system-settings/routes"))
 
 app.get("/", (req, res) => {

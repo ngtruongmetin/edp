@@ -16,9 +16,7 @@ if ("serviceWorker" in navigator) {
   })
 }
 
-let updateSW: ((reloadPage?: boolean) => Promise<void>) | undefined
-
-updateSW = registerSW({
+const updateSW = registerSW({
   immediate: true,
   onNeedRefresh() {
     void updateSW?.(true)

@@ -32,7 +32,9 @@ export default function AdminTimetable() {
       setRows(res.data.timetables || [])
       const firstId = res.data.timetables?.[0]?.id ?? null
       setSelectedId(firstId)
-    } catch {}
+    } catch {
+      // Keep the current timetable view when its initial load is unavailable.
+    }
   }
 
   async function uploadTimetable() {

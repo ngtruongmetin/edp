@@ -103,7 +103,6 @@ export default function CameraCapture({ value, onChange }: Props) {
 
   useEffect(() => {
     return () => stop()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   return (

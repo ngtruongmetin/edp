@@ -2,6 +2,8 @@ const { createProvider, getProviderLabel } = require("./providerFactory")
 const { getRuntimeConfig } = require("./configService")
 
 const isDevelopment = process.env.NODE_ENV !== "production"
+const MAX_GENERATION_ATTEMPTS = 3
+const RETRY_DELAY_MS = 600
 
 function createAiUnavailableError(message = "AI unavailable", cause = undefined, meta = {}) {
   const error = new Error(message)
@@ -97,10 +99,9 @@ function isQuotaError(err) {
   )
 }
 
-function isModelUnavailableError(err, model) {
+function isModelUnavailableError(err) {
   const status = getErrorStatus(err)
   const message = toLower(err?.message)
-  const normalizedModel = toLower(model)
 
   return (
     status === 404 ||
@@ -108,9 +109,19 @@ function isModelUnavailableError(err, model) {
     message.includes("no longer available") ||
     message.includes("not available to new users") ||
     message.includes("deprecated") ||
-    message.includes("retired") ||
-    (normalizedModel && message.includes(normalizedModel))
+    message.includes("retired")
   )
+}
+
+function isTransientProviderError(err) {
+  const status = getErrorStatus(err)
+  return isTimeoutError(err) || [408, 429, 500, 502, 503, 504].includes(status)
+}
+
+function waitForRetry(attempt) {
+  return new Promise((resolve) => {
+    setTimeout(resolve, RETRY_DELAY_MS * attempt)
+  })
 }
 
 function mapProviderError(err, config) {
@@ -118,7 +129,7 @@ function mapProviderError(err, config) {
   const providerLabel = config.providerLabel || getProviderLabel(config.provider)
   const model = String(config.model || "").trim()
 
-  if (isModelUnavailableError(err, model)) {
+  if (isModelUnavailableError(err)) {
     return createAiUnavailableError(
       "Mô hình AI hiện tại không còn được hỗ trợ. Vui lòng chọn model khác.",
       err,
@@ -154,6 +165,16 @@ function mapProviderError(err, config) {
     })
   }
 
+  if (getErrorStatus(err) === 503) {
+    return createAiUnavailableError("AI unavailable", err, {
+      httpStatus: 503,
+      aiStatus: 503,
+      adminMessage: `${providerLabel} đang quá tải hoặc tạm thời không khả dụng.`,
+      suggestion: "Hãy thử lại sau ít phút.",
+      provider: providerLabel,
+    })
+  }
+
   if (isTimeoutError(err)) {
     return createAiUnavailableError("AI unavailable", err, {
       httpStatus: 500,
@@ -172,35 +193,48 @@ function mapProviderError(err, config) {
   })
 }
 
-async function generateViolationJson(prompt) {
+async function generateAiText(prompt) {
   const config = await getRuntimeConfig()
+  const provider = createProvider(config.provider, {
+    baseUrl: config.baseUrl,
+  })
 
-  try {
-    const provider = createProvider(config.provider, {
-      baseUrl: config.baseUrl,
-    })
+  let lastError = null
 
-    const result = await provider.generateText({
-      apiKey: config.apiKey,
-      baseUrl: config.baseUrl,
-      model: config.model,
-      prompt,
-      temperature: config.temperature,
-      maxOutputTokens: config.maxOutputTokens,
-    })
+  for (let attempt = 1; attempt <= MAX_GENERATION_ATTEMPTS; attempt += 1) {
+    try {
+      const result = await provider.generateText({
+        apiKey: config.apiKey,
+        baseUrl: config.baseUrl,
+        model: config.model,
+        prompt,
+        temperature: config.temperature,
+        maxOutputTokens: config.maxOutputTokens,
+      })
 
-    return String(result.text || "").trim()
-  } catch (err) {
-    if (err?.aiUnavailable) {
-      throw err
+      return String(result.text || "").trim()
+    } catch (err) {
+      if (err?.aiUnavailable) {
+        throw err
+      }
+
+      lastError = err
+      if (attempt < MAX_GENERATION_ATTEMPTS && isTransientProviderError(err)) {
+        if (isDevelopment) {
+          console.warn(`[ai] generation attempt ${attempt} failed; retrying`, err?.message || err)
+        }
+        await waitForRetry(attempt)
+        continue
+      }
     }
-
-    logProviderError(err)
-    throw mapProviderError(err, config)
   }
+
+  logProviderError(lastError)
+  throw mapProviderError(lastError, config)
 }
 
 module.exports = {
   createAiUnavailableError,
-  generateViolationJson,
+  generateAiText,
+  generateViolationJson: generateAiText,
 }

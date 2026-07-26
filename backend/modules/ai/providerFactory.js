@@ -23,6 +23,7 @@ const PROVIDER_PREFIXES = [
 
 const GENERIC_CHAT_MODEL = "gpt-4o-mini"
 const GENERIC_TEST_PROMPT = "Trả lời đúng một từ: OK"
+const GROQ_QWEN_36_MODEL = "qwen/qwen3.6-27b"
 
 let GoogleGenAIClass = null
 
@@ -66,6 +67,10 @@ function getChatModelFallback(provider) {
   const normalized = normalizeProviderName(provider)
   if (normalized === "gemini") return "gemini-2.5-flash"
   return GENERIC_CHAT_MODEL
+}
+
+function usesConfigurableReasoning(provider, model) {
+  return normalizeProviderName(provider) === "groq" && String(model || "").trim().toLowerCase() === GROQ_QWEN_36_MODEL
 }
 
 async function getGoogleGenAIClass() {
@@ -257,6 +262,7 @@ class OpenAICompatibleProvider extends BaseAIProvider {
           messages: [{ role: "user", content: String(prompt || "") }],
           temperature: Number.isFinite(temperature) ? temperature : 0,
           max_tokens: Number.isInteger(maxOutputTokens) ? maxOutputTokens : 256,
+          ...(usesConfigurableReasoning(this.provider, chosenModel) ? { reasoning_effort: "none" } : {}),
         }),
       },
       this.provider,

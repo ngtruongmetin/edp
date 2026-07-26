@@ -219,7 +219,9 @@ export default function AdminDutyManage() {
     try {
       const res = await api.get("/rules/admin")
       setRules(res.data || [])
-    } catch {}
+    } catch {
+      // The rules panel remains empty when the request is unavailable.
+    }
   }
 
   function arrayBufferToBase64(buf: ArrayBuffer) {
