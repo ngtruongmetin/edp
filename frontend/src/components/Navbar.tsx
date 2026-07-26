@@ -3,6 +3,7 @@ import { NavLink, useNavigate } from "react-router-dom"
 import { useAuth } from "../auth/AuthContext"
 import ModalShell from "./ModalShell"
 import { getDashboardPath } from "../utils/authRoutes"
+import { useOptionalDutyOffline } from "../offline/duty/DutyOfflineContext"
 
 function DashboardIcon() {
   return (
@@ -64,6 +65,7 @@ function SupportIcon() {
 
 export default function Navbar() {
   const { user, loading, logout, isOffline } = useAuth()
+  const dutyOffline = useOptionalDutyOffline()
   const navigate = useNavigate()
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false)
   const [isLoggingOut, setIsLoggingOut] = useState(false)
@@ -125,6 +127,25 @@ export default function Navbar() {
   const primaryIcon = <DashboardIcon />
   const authLabel = user ? "Đăng xuất" : "Đăng nhập"
   const authIcon = user ? <LogoutIcon /> : <LoginIcon />
+  const dutySyncLabel = user?.role !== "co_do" || !dutyOffline
+    ? null
+    : dutyOffline.status.phase === "offline"
+      ? !dutyOffline.readiness.ready
+        ? "Thiết bị chưa sẵn sàng làm việc ngoại tuyến."
+        : dutyOffline.status.pending > 0
+          ? `Đang ngoại tuyến · Có ${dutyOffline.status.pending} phiên trực chờ đồng bộ`
+          : "Đang làm việc ngoại tuyến"
+      : dutyOffline.readiness.syncing
+        ? "Đang chuẩn bị dữ liệu ngoại tuyến"
+      : dutyOffline.status.phase === "syncing"
+        ? `Đang đồng bộ ${dutyOffline.status.completed} / ${dutyOffline.status.total}`
+        : dutyOffline.status.phase === "error"
+          ? `Không thể đồng bộ · ${dutyOffline.status.pendingOperations} thao tác`
+          : dutyOffline.status.phase === "synced" && dutyOffline.status.total > 0
+            ? "Đồng bộ thành công"
+            : dutyOffline.readiness.ready
+              ? null
+              : "Thiết bị chưa sẵn sàng làm việc ngoại tuyến."
 
   return (
     <>
@@ -200,9 +221,9 @@ export default function Navbar() {
           </nav>
 
           <div className="ml-auto flex items-center gap-3">
-            {isOffline && (
-              <span className="rounded-full border border-amber-200 bg-amber-50 px-3 py-1.5 text-xs font-semibold text-amber-700">
-                Đang làm việc ngoại tuyến
+            {dutySyncLabel && (
+              <span className={`rounded-full border px-3 py-1.5 text-xs font-semibold ${dutyOffline?.status.phase === "synced" ? "border-emerald-200 bg-emerald-50 text-emerald-700" : "border-amber-200 bg-amber-50 text-amber-700"}`}>
+                {dutySyncLabel}
               </span>
             )}
             {!loading && user ? (
@@ -333,9 +354,9 @@ export default function Navbar() {
             </NavLink>
           )}
         </div>
-        {isOffline && (
-          <div className="px-3 pb-1 text-center text-[11px] font-semibold text-amber-700">
-            Đang làm việc ngoại tuyến
+        {dutySyncLabel && (
+          <div className={`px-3 pb-1 text-center text-[11px] font-semibold ${dutyOffline?.status.phase === "synced" ? "text-emerald-700" : "text-amber-700"}`}>
+            {dutySyncLabel}
           </div>
         )}
       </nav>

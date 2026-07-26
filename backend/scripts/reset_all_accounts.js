@@ -45,6 +45,7 @@ async function resetAll() {
               pin_ban_can_su=?,
               pin_failed_attempts=0,
               pin_locked_until=0,
+              pin_version=COALESCE(pin_version, 1) + 1,
               password_changed=1,
               password_changed_gvcn=1,
               password_changed_ban_can_su=1,

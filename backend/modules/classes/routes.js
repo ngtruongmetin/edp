@@ -310,7 +310,8 @@ async (req,res)=>{
     UPDATE accounts
     SET pin_ban_can_su = ?,
         pin_failed_attempts = 0,
-        pin_locked_until = 0
+        pin_locked_until = 0,
+        pin_version = COALESCE(pin_version, 1) + 1
     WHERE class_id = ?
   `,
   [hashedPin,classId],

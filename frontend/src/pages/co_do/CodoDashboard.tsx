@@ -7,8 +7,9 @@ import Navbar from "../../components/Navbar"
 import Footer from "../../components/Footer"
 import toast from "react-hot-toast"
 import { formatDutyStatus } from "../../utils/dutyFormat"
-import { buildDashboardCacheKey, getCachedDashboard, setCachedDashboard } from "../../utils/offlineCache"
 import { usePageTitle } from "../../utils/usePageTitle"
+import { useDutyOffline } from "../../offline/duty/DutyOfflineContext"
+import type { OfflineDutySession } from "../../offline/duty/types"
 
 type Assignment = {
   red_class: string
@@ -27,20 +28,21 @@ type ScheduleRes = {
   assignments: Assignment[]
 }
 
-type DashboardSnapshot = {
-  className: string
-  dutyClassCurrent: string | null
-  dutyClassView: string | null
-  weeks: Week[]
-  weekId: number | null
-  prevWeekId: number | null
-  week: Week | null
-  myWeekSessions: any[]
+type DutySessionListItem = {
+  id: number
+  date: string
+  red_class: string
+  duty_class: string
+  status: "draft" | "signed"
+  total_score?: number
+  violation_score?: number
+  bonus_points?: number
 }
 
 export default function CoDoDashboard() {
   usePageTitle("EDP | Cờ đỏ")
   const { user: authUser, isOffline } = useAuth()
+  const { repository, syncNow } = useDutyOffline()
 
   const [time, setTime] = useState("")
   const [date, setDate] = useState("")
@@ -53,36 +55,12 @@ export default function CoDoDashboard() {
   const [weekId, setWeekId] = useState<number | null>(null)
   const [prevWeekId, setPrevWeekId] = useState<number | null>(null)
   const [week, setWeek] = useState<Week | null>(null)
-  const [myWeekSessions, setMyWeekSessions] = useState<any[]>([])
+  const [myWeekSessions, setMyWeekSessions] = useState<DutySessionListItem[]>([])
   const [detailId, setDetailId] = useState<number | null>(null)
   const [detail, setDetail] = useState<any>(null)
 
   const navigate = useNavigate()
   const dashboardReady = !!className && (week !== null || weeks.length > 0)
-
-  useEffect(() => {
-    async function loadCachedSnapshot() {
-      try {
-        const cacheKey = buildDashboardCacheKey(authUser)
-        const cached = await getCachedDashboard<DashboardSnapshot>(cacheKey)
-
-        if (!cached) return
-
-        setClassName(cached.className || "")
-        setDutyClassCurrent(cached.dutyClassCurrent || null)
-        setDutyClassView(cached.dutyClassView || null)
-        setWeeks(cached.weeks || [])
-        setWeekId(cached.weekId ?? null)
-        setPrevWeekId(cached.prevWeekId ?? null)
-        setWeek(cached.week || null)
-        setMyWeekSessions(cached.myWeekSessions || [])
-      } catch (err) {
-        console.error(err)
-      }
-    }
-
-    void loadCachedSnapshot()
-  }, [authUser])
 
   useEffect(() => {
     setClassName(authUser?.class_name || "")
@@ -115,34 +93,31 @@ export default function CoDoDashboard() {
 
   useEffect(() => {
     if (!weekId || isOffline) return
-    loadMyWeek(weekId)
+    void loadMyWeek(weekId)
   }, [weekId, isOffline])
 
   useEffect(() => {
-    if (
-      !className &&
-      !dutyClassCurrent &&
-      !dutyClassView &&
-      !weeks.length &&
-      !week &&
-      !myWeekSessions.length
-    ) {
-      return
-    }
-
-    const cacheKey = buildDashboardCacheKey(authUser)
-
-    void setCachedDashboard(cacheKey, {
-      className,
-      dutyClassCurrent,
-      dutyClassView,
-      weeks,
-      weekId,
-      prevWeekId,
-      week,
-      myWeekSessions,
+    if (!isOffline) return
+    void repository.getBootstrap().then(async (cached) => {
+      if (!cached) return
+      setClassName(cached.ownerClass)
+      setDutyClassCurrent(cached.dutyClass)
+      setDutyClassView(cached.dutyClass)
+      setWeek(cached.week)
+      setWeeks([cached.week])
+      setWeekId(cached.week.id)
+      await loadCachedWeek(cached.week.id)
     })
-  }, [authUser, className, dutyClassCurrent, dutyClassView, weeks, weekId, prevWeekId, week, myWeekSessions])
+  }, [isOffline, repository])
+
+  useEffect(() => {
+    if (!className || !dutyClassCurrent || !week?.id) return
+    void repository.saveBootstrap({
+      ownerClass: className,
+      dutyClass: dutyClassCurrent,
+      week: week as Required<Week>,
+    })
+  }, [className, dutyClassCurrent, repository, week])
 
   async function loadSchedule() {
     try {
@@ -158,6 +133,13 @@ export default function CoDoDashboard() {
 
       if (row) {
         setDutyClassCurrent(row.duty_class)
+        if (data.week?.id) {
+          await repository.saveBootstrap({
+            ownerClass: className,
+            dutyClass: row.duty_class,
+            week: data.week as Required<Week>,
+          })
+        }
       } else {
         setDutyClassCurrent(null)
       }
@@ -186,33 +168,46 @@ export default function CoDoDashboard() {
     try {
       const res = await api.get(`/duty/co_do/week/${id}`)
       setWeek(res.data.week || null)
-      setMyWeekSessions(res.data.sessions || [])
+      const sessions: DutySessionListItem[] = res.data.sessions || []
+      setMyWeekSessions(sessions)
+      await Promise.all(sessions.map((item) => repository.cacheServerSession(item, [], res.data.week)))
 
       setDutyClassView(res.data.duty_class || null)
     } catch (err) {
       console.error(err)
+      await loadCachedWeek(id)
     }
   }
 
+  async function loadCachedWeek(id?: number) {
+    const cachedSessions = await repository.listSessions()
+    const sessions = cachedSessions
+      .filter((item) => !id || Number(item.week.id) === Number(id))
+      .map((item: OfflineDutySession): DutySessionListItem => ({
+        id: item.serverId || item.localId,
+        date: item.date,
+        red_class: item.redClass,
+        duty_class: item.dutyClass,
+        status: item.status,
+        total_score: item.violations.reduce((sum, violation) => sum + violation.score_delta * violation.quantity, 0) + item.bonusPoints,
+        violation_score: item.violations.reduce((sum, violation) => sum + violation.score_delta * violation.quantity, 0),
+        bonus_points: item.bonusPoints,
+      }))
+    setMyWeekSessions(sessions)
+    if (sessions[0]) setDutyClassView(sessions[0].duty_class)
+  }
+
   async function startDutyNow() {
-    if (isOffline) {
-      toast("Chức năng này cần kết nối mạng")
-      return
-    }
-
     try {
-      const res = await api.post("/duty/create", {})
-      const sessionId = Number(res.data?.session_id || 0)
-
-      if (!sessionId) {
-        toast.error("Không thể mở phiếu trực")
-        return
-      }
-
-      navigate(`/co_do/duty/${sessionId}`)
+      const existing = await repository.findCurrentLocalSession()
+      const session = existing || await repository.createSession()
+      void syncNow()
+      navigate(`/co_do/duty/${session.serverId || session.localId}`)
     } catch (err: any) {
       console.error(err)
-      const msg = err?.response?.data?.error || "Không thể bắt đầu ca trực"
+      const msg = err instanceof Error && err.message === "OFFLINE_DATA_NOT_READY"
+        ? "Thiết bị chưa sẵn sàng làm việc ngoại tuyến."
+        : err?.response?.data?.error || "Không thể bắt đầu ca trực"
       toast.error(msg)
     }
   }
@@ -233,6 +228,9 @@ export default function CoDoDashboard() {
   const latestWeek = weeks[0] || null
 
   async function openDetail(id: number) {
+    navigate(`/co_do/duty/${id}`)
+    return
+
     if (isOffline) {
       toast("Chi tiết phiếu cần kết nối mạng")
       return
@@ -376,7 +374,7 @@ export default function CoDoDashboard() {
         <div className="sticky bottom-[calc(env(safe-area-inset-bottom)+0.75rem)] z-30">
           <button
             onClick={startDutyNow}
-            disabled={!dutyClassCurrent || isOffline}
+            disabled={!dutyClassCurrent}
             className="block w-full min-h-14 rounded-[20px] bg-[#2e77df] px-4 py-4 text-center text-[15px] font-semibold text-white shadow-[0_12px_28px_rgba(46,119,223,0.24)] transition hover:bg-[#1f5fc0] active:scale-[0.98] disabled:opacity-50"
           >
             Bắt đầu trực
@@ -402,7 +400,7 @@ export default function CoDoDashboard() {
               {myWeekSessions.map((s: any) => (
                 <button
                   key={s.id}
-                  onClick={() => openDetail(s.id)}
+                  onClick={() => void openDetail(s.id)}
                   className="w-full rounded-2xl border border-blue-100 bg-white px-4 py-3 text-left shadow-sm transition hover:bg-slate-50 active:scale-[0.99]"
                 >
                   <div className="flex items-start gap-3">

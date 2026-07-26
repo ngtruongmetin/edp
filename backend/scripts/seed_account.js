@@ -92,6 +92,7 @@ async function main() {
           SET pin_ban_can_su = $1
           , pin_failed_attempts = 0
           , pin_locked_until = 0
+          , pin_version = COALESCE(pin_version, 1) + 1
           , password_gvcn = $3
           , password_ban_can_su = $4
           , password_codo = $5

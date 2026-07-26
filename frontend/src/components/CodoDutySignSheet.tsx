@@ -2,12 +2,16 @@ import { useEffect, useRef, useState } from "react"
 
 import toast from "react-hot-toast"
 
-import { api } from "../api/api"
 import CameraCapture from "./CameraCapture"
+import { useDutyOffline } from "../offline/duty/DutyOfflineContext"
+import { offlinePinVerifier } from "../offline/duty/offlinePinVerifier"
 
 type SignableDutySession = {
   id: number
   duty_class: string
+  clientId?: string
+  localId?: number
+  serverId?: number
 }
 
 type Props = {
@@ -23,6 +27,7 @@ export default function CodoDutySignSheet({
   onClose,
   onSigned,
 }: Props) {
+  const { repository, syncNow } = useDutyOffline()
   const [pin, setPin] = useState("")
   const [photoFile, setPhotoFile] = useState<File | null>(null)
   const [signing, setSigning] = useState(false)
@@ -61,11 +66,25 @@ export default function CodoDutySignSheet({
     setSigning(true)
 
     try {
-      const formData = new FormData()
-      formData.append("session_id", String(activeSession.id))
-      formData.append("pin", pin)
-      if (photoFile) formData.append("photo", photoFile)
-      await api.post("/duty/sign", formData)
+      let signableSession = await repository.getSessionByRouteId(activeSession.id)
+      if (!signableSession && navigator.onLine) {
+        signableSession = await repository.loadSessionById(activeSession.id)
+      }
+      if (!signableSession) throw new Error("DUTY_OFFLINE_SESSION_MISSING")
+      if (navigator.onLine && !signableSession.serverId) {
+        await syncNow()
+        signableSession = await repository.getSessionByRouteId(signableSession.localId) || signableSession
+      }
+      if (navigator.onLine) {
+        try {
+          await repository.syncOfflineData()
+        } catch (error) {
+          console.warn("Khong the lam moi du lieu ngoai tuyen truoc khi ky.", error)
+        }
+      }
+      await offlinePinVerifier.authorize(signableSession, pin)
+      await repository.queueSignature(signableSession, photoFile)
+      void syncNow()
 
       toast.success("Đã ký xác nhận")
 
@@ -80,10 +99,14 @@ export default function CodoDutySignSheet({
       setPhotoFile(null)
     } catch (err: any) {
       console.error(err)
-      const message =
-        err?.response?.data?.error === "Invalid pin"
-          ? "PIN không đúng"
-          : "Không thể ký xác nhận"
+      const code = err instanceof Error ? err.message : ""
+      const message = code === "OFFLINE_DATA_NOT_READY"
+        ? "Thiết bị chưa sẵn sàng làm việc ngoại tuyến."
+        : code === "OFFLINE_PIN_LOCKED"
+          ? "PIN tạm khóa 5 phút"
+          : code === "INVALID_OFFLINE_PIN" || err?.response?.data?.error === "Invalid pin"
+            ? "PIN không đúng"
+            : "Không thể ký xác nhận"
       toast.error(message)
     } finally {
       setSigning(false)

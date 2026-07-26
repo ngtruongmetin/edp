@@ -5,6 +5,7 @@ import { api } from "../../api/api"
 import { useAuth } from "../../auth/AuthContext"
 import ChangePasswordModal from "../../components/ChangePasswordModal"
 import toast from "react-hot-toast"
+import { DutyOfflineProvider } from "../../offline/duty/DutyOfflineContext"
 
 type FabPosition = {
   x: number
@@ -318,20 +319,21 @@ export default function AdminLayout(){
   return(
 
     <RequireRole role="co_do">
+      <DutyOfflineProvider>
+        <Outlet context={{ user, setShowChangePassword }} />
+        <CoDoFloatingAssistantFab />
 
-      <Outlet context={{ user, setShowChangePassword }} />
-      <CoDoFloatingAssistantFab />
-
-      {showChangePassword && (
-        <ChangePasswordModal
-          role="co_do"
-          onSuccess={() => {
-            setShowChangePassword(false)
-            loadProfile()
-          }}
-          canClose={user?.password_changed === true}
-        />
-      )}
+        {showChangePassword && (
+          <ChangePasswordModal
+            role="co_do"
+            onSuccess={() => {
+              setShowChangePassword(false)
+              loadProfile()
+            }}
+            canClose={user?.password_changed === true}
+          />
+        )}
+      </DutyOfflineProvider>
 
     </RequireRole>
 

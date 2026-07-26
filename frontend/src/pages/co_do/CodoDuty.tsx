@@ -12,9 +12,15 @@ import toast from "react-hot-toast"
 import { localISODate } from "../../utils/dateLocal"
 import { usePageTitle } from "../../utils/usePageTitle"
 import useKeyboardInsets from "../../utils/useKeyboardInsets"
+import { useAuth } from "../../auth/AuthContext"
+import { useDutyOffline } from "../../offline/duty/DutyOfflineContext"
+import { DUTY_STORAGE_CHANGED_EVENT } from "../../offline/duty/storage"
+import type { OfflineDutySession, OfflineDutyViolation } from "../../offline/duty/types"
 
 type Violation = {
   id: number
+  serverId?: number
+  clientId?: string
   rule_id: number
   name: string
   quantity: number
@@ -40,6 +46,8 @@ export default function CodoDuty() {
   const params = useParams()
   const routeSessionId = params.id ? Number(params.id) : null
   const navigate = useNavigate()
+  const { user: authUser } = useAuth()
+  const { repository, syncNow } = useDutyOffline()
 
   const [time, setTime] = useState(new Date())
 
@@ -59,6 +67,7 @@ export default function CodoDuty() {
   const [quantity, setQuantity] = useState(1)
   const [quantityInput, setQuantityInput] = useState("1")
   const [note, setNote] = useState("")
+  const [editingViolation, setEditingViolation] = useState<Violation | null>(null)
 
   const [showSign, setShowSign] = useState(false)
 
@@ -97,6 +106,34 @@ export default function CodoDuty() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [routeSessionId])
 
+  useEffect(() => {
+    const clientId = session?.clientId as string | undefined
+    if (!clientId) return
+
+    let active = true
+    let refreshing = false
+    const refreshFromDevice = async () => {
+      if (refreshing) return
+      refreshing = true
+      try {
+        const value = await repository.getSession(clientId)
+        if (!active || !value) return
+        setSession(presentSession(value))
+        setViolations(value.violations)
+        setDutyClass(value.dutyClass)
+        setWeek(value.week)
+      } finally {
+        refreshing = false
+      }
+    }
+
+    window.addEventListener(DUTY_STORAGE_CHANGED_EVENT, refreshFromDevice)
+    return () => {
+      active = false
+      window.removeEventListener(DUTY_STORAGE_CHANGED_EVENT, refreshFromDevice)
+    }
+  }, [repository, session?.clientId])
+
   async function boot() {
     try {
       await loadRules()
@@ -118,18 +155,22 @@ export default function CodoDuty() {
   }
 
   async function loadUser(){
-    const me = await api.get("/auth/me")
-    const cn = me.data.class_name as string
+    const cn = authUser?.class_name || ""
     setClassName(cn)
   }
 
   async function loadRules() {
-    const res = await api.get("/rules")
-    setRules(res.data)
+    setRules(await repository.loadRules() as RuleType[])
   }
 
   async function loadUserAndSchedule() {
-    const cn = className || (await api.get("/auth/me")).data.class_name
+    const cn = className || authUser?.class_name || ""
+    if (!navigator.onLine) {
+      const cached = await repository.getBootstrap()
+      setWeek(cached?.week || null)
+      setDutyClass(cached?.dutyClass || null)
+      return
+    }
     const sch = await api.get("/schedule")
 
     setWeek(sch.data?.week || null)
@@ -139,14 +180,31 @@ export default function CodoDuty() {
     )
 
     setDutyClass(row ? row.duty_class : null)
+    if (row && sch.data?.week?.id) {
+      await repository.saveBootstrap({ ownerClass: cn, dutyClass: row.duty_class, week: sch.data.week })
+    }
+  }
+
+  function presentSession(value: OfflineDutySession | null) {
+    if (!value) return null
+    return {
+      ...value,
+      id: value.serverId || value.localId,
+      client_id: value.clientId,
+      red_class: value.redClass,
+      duty_class: value.dutyClass,
+      bonus_points: value.bonusPoints,
+      signed_at: value.signedAt,
+      signature_signed_at: value.signatureSignedAt,
+      signature_photo_path: value.signaturePhotoPath,
+    }
   }
 
   async function loadSession() {
-    const res = await api.get("/duty/current")
-
-    if (res.data.session) {
-      setSession(res.data.session)
-      setViolations(res.data.violations || [])
+    const value = await repository.loadCurrentSession()
+    if (value) {
+      setSession(presentSession(value))
+      setViolations(value.violations)
       return
     }
 
@@ -155,17 +213,17 @@ export default function CodoDuty() {
   }
 
   async function loadSessionById(id:number){
-    const res = await api.get(`/duty/my/session/${id}`)
-    setSession(res.data.session)
-    setViolations(res.data.violations || [])
-    setDutyClass(res.data.session?.duty_class || null)
-    setWeek(res.data.week || null)
+    const value = await repository.loadSessionById(id)
+    setSession(presentSession(value))
+    setViolations(value?.violations || [])
+    setDutyClass(value?.dutyClass || null)
+    setWeek(value?.week || null)
   }
 
   async function goToCurrentDuty() {
     try {
-      const res = await api.get("/duty/current")
-      const currentId = Number(res.data?.session?.id || 0)
+      const value = await repository.loadCurrentSession()
+      const currentId = Number(value?.serverId || value?.localId || 0)
 
       if (!currentId) {
         toast("Hôm nay chưa có phiếu trực")
@@ -189,32 +247,61 @@ export default function CodoDuty() {
       return
     }
 
-    await api.post("/duty/violation", {
-      session_id: session.id,
-      rule_id: ruleId,
-      quantity,
-      note: trimmedNote,
-    })
+    const selected = rules.find((item) => item.id === ruleId)
+    if (!selected) return
+    const next = await repository.addViolation(session as OfflineDutySession, selected, quantity, trimmedNote)
+    setSession(presentSession(next))
+    setViolations(next.violations)
+    void syncNow()
 
     setRuleId(null)
     setQuantity(1)
     setQuantityInput("1")
     setNote("")
 
-    if(routeSessionId){
-      await loadSessionById(routeSessionId)
-    }else{
-      await loadSession()
-    }
   }
 
   async function removeViolation(id: number) {
-    await api.delete(`/duty/violation/${id}`)
-    if(routeSessionId){
-      await loadSessionById(routeSessionId)
-    }else{
-      await loadSession()
+    const violation = violations.find((item) => item.id === id)
+    if (!violation || !session) return
+    const next = await repository.removeViolation(session as OfflineDutySession, violation as OfflineDutyViolation)
+    setSession(presentSession(next))
+    setViolations(next.violations)
+    void syncNow()
+  }
+
+  async function saveViolation() {
+    if (!ruleId || !session) return
+    const trimmedNote = note.trim()
+    if (!trimmedNote) {
+      toast.error("Ghi tên học sinh vi phạm hoặc ghi 'Không'")
+      return
     }
+    const selected = rules.find((item) => item.id === ruleId)
+    if (!selected) return
+
+    if (editingViolation) {
+      const next = await repository.updateViolation(session as OfflineDutySession, editingViolation as OfflineDutyViolation, selected, quantity, trimmedNote)
+      setSession(presentSession(next))
+      setViolations(next.violations)
+      setEditingViolation(null)
+    } else {
+      await addViolation()
+    }
+    void syncNow()
+    setRuleId(null)
+    setQuantity(1)
+    setQuantityInput("1")
+    setNote("")
+  }
+
+  function beginEditViolation(violation: Violation) {
+    setEditingViolation(violation)
+    setRuleId(violation.rule_id)
+    setQuantity(violation.quantity)
+    setQuantityInput(String(violation.quantity))
+    setNote(violation.note)
+    window.setTimeout(() => document.querySelector<HTMLInputElement>("input[placeholder^='Tên học sinh']")?.scrollIntoView({ block: "center", behavior: "smooth" }), 0)
   }
 
   function formatDate(d: Date) {
@@ -361,7 +448,7 @@ export default function CodoDuty() {
         )}
 
         {session && (
-          <DutyEvidencePanel sessionId={Number(session.id)} />
+          <DutyEvidencePanel session={session as OfflineDutySession} />
         )}
 
         {session && (
@@ -439,6 +526,21 @@ export default function CodoDuty() {
               </div>
 
               <div className="sticky bottom-[calc(env(safe-area-inset-bottom)+0.75rem+var(--edp-keyboard-offset,0px))] z-20 rounded-[24px] bg-white/95 pt-3 backdrop-blur">
+                {editingViolation && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setEditingViolation(null)
+                      setRuleId(null)
+                      setQuantity(1)
+                      setQuantityInput("1")
+                      setNote("")
+                    }}
+                    className="mb-2 w-full min-h-11 rounded-2xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700"
+                  >
+                    Hủy sửa
+                  </button>
+                )}
                 <button
                   onClick={async () => {
                     try {
@@ -450,8 +552,8 @@ export default function CodoDuty() {
                         toast.error("Ghi tên học sinh vi phạm hoặc ghi 'Không'")
                         return
                       }
-                      await addViolation()
-                      toast.success("Đã thêm vi phạm")
+                      await saveViolation()
+                      toast.success(editingViolation ? "Đã sửa vi phạm" : "Đã thêm vi phạm")
                     } catch (err) {
                       console.error(err)
                       toast.error("Không thể thêm vi phạm")
@@ -459,7 +561,7 @@ export default function CodoDuty() {
                   }}
                   className="w-full min-h-14 rounded-2xl bg-[#2e77df] px-4 py-3 text-[15px] font-semibold text-white shadow-sm transition active:scale-[0.98]"
                 >
-                  Thêm vi phạm
+                  {editingViolation ? "Lưu thay đổi" : "Thêm vi phạm"}
                 </button>
               </div>
             </div>
@@ -505,6 +607,13 @@ export default function CodoDuty() {
                       <div className="rounded-full bg-red-50 px-2.5 py-1 text-xs font-semibold text-red-600">
                         {v.score_delta * v.quantity}
                       </div>
+
+                      <button
+                        onClick={() => beginEditViolation(v)}
+                        className="text-xs font-semibold text-[#2e77df]"
+                      >
+                        Sửa
+                      </button>
 
                       <button
                         onClick={async () => {

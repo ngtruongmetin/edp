@@ -20,28 +20,22 @@ const {
 } = require("../../utils/absenceEvidenceScoring")
 
 const time = require("../../utils/time")
+const {
+  DUTY_EVIDENCE_DIRECTORY,
+  DUTY_EVIDENCE_LIMIT,
+  DUTY_EVIDENCE_MAX_BYTES,
+  DUTY_EVIDENCE_TYPES,
+  DUTY_SIGNATURE_DIRECTORY,
+  sanitizeDutyEvidenceFileName,
+} = require("./dutyFiles")
+const { verifyClassPin } = require("./pinVerification")
 
 const router = express.Router()
-const DUTY_EVIDENCE_LIMIT = 10
-const DUTY_EVIDENCE_MAX_BYTES = 1536 * 1024
-const DUTY_EVIDENCE_DIRECTORY = path.join(__dirname, "..", "..", "assets", "duty-evidences")
-const DUTY_SIGNATURE_DIRECTORY = path.join(__dirname, "..", "..", "assets", "duty-signatures")
-const DUTY_EVIDENCE_TYPES = new Map([
-  ["image/jpeg", "jpg"],
-  ["image/png", "png"],
-  ["image/webp", "webp"],
-])
 
 function dutyEvidenceError(status, message) {
   const error = new Error(message)
   error.status = status
   return error
-}
-
-function sanitizeDutyEvidenceFileName(value) {
-  return String(value || "minh-chung")
-    .replace(/[\\/:*?"<>|]+/g, "-")
-    .slice(0, 160)
 }
 
 function removeDutyEvidenceFiles(files) {
@@ -2900,8 +2894,6 @@ router.post(
       return res.status(400).json({ error: "Invalid pin" })
     }
 
-    const nowMs = Date.now()
-
     db.get(
       `
         SELECT *
@@ -2922,64 +2914,7 @@ router.post(
           if (closedErr) return res.status(500).json({ error: closedErr.message })
           if (closed) return res.status(403).json({ error: "Week closed" })
 
-          db.get(
-            `
-              SELECT
-                a.pin_ban_can_su,
-                COALESCE(a.pin_failed_attempts, 0) AS pin_failed_attempts,
-                COALESCE(a.pin_locked_until, 0) AS pin_locked_until,
-                a.class_id AS account_class_id
-              FROM classes c
-              LEFT JOIN accounts a
-                ON a.class_id = c.id
-              WHERE c.name=?
-              LIMIT 1
-            `,
-            [dutyClass],
-            async (pinErr, row) => {
-              if (pinErr) return res.status(500).json({ error: pinErr.message })
-
-              const expected = String(row?.pin_ban_can_su || "").trim()
-              const accountClassId = row?.account_class_id
-
-              if (!accountClassId || !expected) {
-                return res.status(403).json({ error: "Invalid pin" })
-              }
-
-              if (Number(row?.pin_locked_until || 0) > nowMs) {
-                return res.status(429).json({ error: "Invalid pin" })
-              }
-
-              let ok = false
-              try {
-                ok = await bcrypt.compare(provided, expected)
-              } catch (compareErr) {
-                return res.status(500).json({ error: compareErr.message })
-              }
-
-              if (!ok) {
-                const attempts = Number(row?.pin_failed_attempts || 0) + 1
-                const lockedUntil = attempts >= 5 ? nowMs + 5 * 60 * 1000 : 0
-
-                db.run(
-                  `
-                    UPDATE accounts
-                    SET pin_failed_attempts = ?,
-                        pin_locked_until = ?
-                    WHERE class_id = ?
-                  `,
-                  [attempts >= 5 ? 5 : attempts, lockedUntil, accountClassId],
-                  (lockErr) => {
-                    if (lockErr) {
-                      return res.status(500).json({ error: lockErr.message })
-                    }
-                    return res.status(403).json({ error: "Invalid pin" })
-                  },
-                )
-                return
-              }
-
-              const proceedWithSignature = () => {
+          const proceedWithSignature = () => {
                 const photoPath = req.file ? `/assets/duty-signatures/${req.file.filename}` : null
 
                 db.run(
@@ -3027,26 +2962,13 @@ router.post(
                     })
                   },
                 )
-              }
+          }
 
-              db.run(
-                `
-                  UPDATE accounts
-                  SET pin_failed_attempts = 0,
-                      pin_locked_until = 0
-                  WHERE class_id = ?
-                `,
-                [accountClassId],
-                (resetErr) => {
-                  if (resetErr) {
-                    return res.status(500).json({ error: resetErr.message })
-                  }
-
-                  proceedWithSignature()
-                },
-              )
-            },
-          )
+          verifyClassPin(dutyClass, provided)
+            .then(proceedWithSignature)
+            .catch((pinError) => {
+              res.status(pinError.status || 500).json({ error: pinError.message || "Invalid pin" })
+            })
         })
       },
     )

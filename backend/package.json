@@ -10,6 +10,7 @@
     "reset:defaults": "node scripts/reset_gvcn_ban_can_su_defaults.js",
     "seed:accounts": "node scripts/seed_account.js",
     "seed:admin": "node scripts/seed_admin.js",
+    "test:offline": "node scripts/qa-duty-offline.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],

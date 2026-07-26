@@ -176,7 +176,12 @@ router.post("/change-pin", requireLogin, (req, res) => {
       const hashedPin = await hashPin(new_pin)
 
       db.run(
-        `UPDATE accounts SET pin_ban_can_su=?, pin_failed_attempts=0, pin_locked_until=0 WHERE class_id=?`,
+        `UPDATE accounts
+         SET pin_ban_can_su=?,
+             pin_failed_attempts=0,
+             pin_locked_until=0,
+             pin_version=COALESCE(pin_version, 1) + 1
+         WHERE class_id=?`,
         [hashedPin, classId],
         (updateErr) => {
           if (updateErr) return res.status(500).json({ error: updateErr.message })

@@ -60,6 +60,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     try {
       console.log("getCurrentUser()")
       const cachedUser = await getCachedUser()
+      if (cachedUser?.role !== "co_do") {
+        setUser(null)
+        return null
+      }
       console.log("cachedUser", cachedUser)
       const restoredUser = cachedUser ? fromCachedUser(cachedUser) : null
       console.log("setUser()", restoredUser)
@@ -120,6 +124,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     function handleOffline() {
       setIsOffline(true)
+      setUser((current) => current?.role === "co_do" ? current : null)
     }
 
     function handleOnline() {

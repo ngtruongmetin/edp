@@ -3,16 +3,20 @@ import toast from "react-hot-toast"
 
 import { api } from "../api/api"
 import EvidenceFilePreviewModal, { type EvidencePreviewFile } from "./EvidenceFilePreviewModal"
+import { useOptionalDutyOffline } from "../offline/duty/DutyOfflineContext"
+import type { DutyOfflineAttachment, OfflineDutySession } from "../offline/duty/types"
 
 type DutyEvidenceImage = EvidencePreviewFile & {
   id: number
+  attachment?: DutyOfflineAttachment
   byte_size: number
   sort_order: number
   created_at: string
 }
 
 type Props = {
-  sessionId: number
+  session?: OfflineDutySession
+  sessionId?: number
   readOnly?: boolean
 }
 
@@ -20,7 +24,15 @@ const MAX_IMAGES = 10
 const MAX_FILE_BYTES = 1536 * 1024
 const ACCEPTED_TYPES = new Set(["image/jpeg", "image/png", "image/webp"])
 
-export default function DutyEvidencePanel({ sessionId, readOnly = false }: Props) {
+function attachmentUiId(attachment: DutyOfflineAttachment) {
+  if (attachment.serverId) return attachment.serverId
+  let hash = 0
+  for (const char of attachment.id) hash = (hash * 31 + char.charCodeAt(0)) | 0
+  return -Math.max(1, Math.abs(hash))
+}
+
+export default function DutyEvidencePanel({ session, sessionId, readOnly = false }: Props) {
+  const dutyOffline = useOptionalDutyOffline()
   const fileInputRef = useRef<HTMLInputElement | null>(null)
   const [images, setImages] = useState<DutyEvidenceImage[]>([])
   const [loading, setLoading] = useState(true)
@@ -31,7 +43,32 @@ export default function DutyEvidencePanel({ sessionId, readOnly = false }: Props
   async function loadImages() {
     try {
       setLoading(true)
-      const response = await api.get<{ images: DutyEvidenceImage[] }>(`/duty/session/${sessionId}/evidences`)
+      const activeServerId = session?.serverId || sessionId
+      if (session && dutyOffline) {
+        if (navigator.onLine && activeServerId) {
+          const response = await api.get<{ images: Array<Record<string, unknown>> }>(`/duty/session/${activeServerId}/evidences`)
+          await dutyOffline.repository.cacheServerEvidence(session, Array.isArray(response.data?.images) ? response.data.images : [])
+        }
+        const attachments = await dutyOffline.repository.listEvidence(session)
+        setImages((current) => {
+          current.forEach((image) => {
+            if (image.url.startsWith("blob:")) URL.revokeObjectURL(image.url)
+          })
+          return attachments.map((attachment, index) => ({
+            id: attachmentUiId(attachment),
+            attachment,
+            url: URL.createObjectURL(attachment.blob),
+            file_name: attachment.fileName,
+            mime_type: attachment.mimeType,
+            byte_size: attachment.byteSize,
+            sort_order: index,
+            created_at: attachment.createdAt,
+          }))
+        })
+        return
+      }
+      if (!activeServerId) throw new Error("Thiếu Phiếu trực")
+      const response = await api.get<{ images: DutyEvidenceImage[] }>(`/duty/session/${activeServerId}/evidences`)
       setImages(Array.isArray(response.data?.images) ? response.data.images : [])
     } catch (error) {
       console.error(error)
@@ -43,7 +80,12 @@ export default function DutyEvidencePanel({ sessionId, readOnly = false }: Props
 
   useEffect(() => {
     void loadImages()
-  }, [sessionId])
+    return () => {
+      images.forEach((image) => {
+        if (image.url.startsWith("blob:")) URL.revokeObjectURL(image.url)
+      })
+    }
+  }, [session?.clientId, sessionId])
 
   async function handleFileSelection(event: React.ChangeEvent<HTMLInputElement>) {
     const selectedFiles = Array.from(event.target.files || [])
@@ -66,9 +108,17 @@ export default function DutyEvidencePanel({ sessionId, readOnly = false }: Props
 
     try {
       setUploading(true)
-      const formData = new FormData()
-      selectedFiles.forEach((file) => formData.append("files", file))
-      await api.post(`/duty/session/${sessionId}/evidences`, formData)
+      if (session && dutyOffline) {
+        for (const file of selectedFiles) {
+          await dutyOffline.repository.addEvidence(session, file)
+        }
+        void dutyOffline.syncNow()
+      } else {
+        if (!sessionId) throw new Error("Thiếu Phiếu trực")
+        const formData = new FormData()
+        selectedFiles.forEach((file) => formData.append("files", file))
+        await api.post(`/duty/session/${sessionId}/evidences`, formData)
+      }
       await loadImages()
       toast.success("Đã thêm ảnh minh chứng")
     } catch (error) {
@@ -84,7 +134,13 @@ export default function DutyEvidencePanel({ sessionId, readOnly = false }: Props
 
     try {
       setRemovingId(image.id)
-      await api.delete(`/duty/evidence/${image.id}`)
+      if (session && dutyOffline && image.attachment) {
+        await dutyOffline.repository.removeEvidence(session, image.attachment)
+        if (image.url.startsWith("blob:")) URL.revokeObjectURL(image.url)
+        void dutyOffline.syncNow()
+      } else {
+        await api.delete(`/duty/evidence/${image.id}`)
+      }
       setImages((current) => current.filter((item) => item.id !== image.id))
       setPreviewIndex((current) => (current == null ? null : Math.min(current, Math.max(images.length - 2, 0))))
       toast.success("Đã xóa ảnh minh chứng")
