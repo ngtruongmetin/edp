@@ -5,6 +5,7 @@ import { api } from "../../api/api"
 import Navbar from "../../components/Navbar"
 import Footer from "../../components/Footer"
 import DutyEvidencePanel from "../../components/DutyEvidencePanel"
+import RuleSelector from "../../components/RuleSelector"
 import { formatDutyStatus, formatRevisionAction } from "../../utils/dutyFormat"
 import { effectiveViolationScore, violationQuantityLabel } from "../../utils/dutyViolations"
 import { localISODate } from "../../utils/dateLocal"
@@ -653,6 +654,11 @@ export default function AdminDutyManage() {
     clearSelected()
   }
 
+  const selectedNewViolationRule = newViolationRule
+    ? rules.find((rule) => Number(rule.id) === Number(newViolationRule))
+    : null
+  const newViolationScore = Number(selectedNewViolationRule?.score_delta || 0) * newViolationQty
+
   return (
     <div className="min-h-screen flex flex-col bg-[radial-gradient(circle_at_top,#edf5ff_0%,#f8fbff_34%,#f3f6fb_100%)]">
       <Navbar />
@@ -1300,47 +1306,97 @@ export default function AdminDutyManage() {
                     </div>
                   </div>
 
-                  <div className="space-y-2">
-                    <div className="text-sm font-semibold text-gray-900">Vi phạm</div>
-                    <div className="rounded-2xl border border-blue-100 bg-white px-4 py-3 space-y-2">
-                      <div className="grid grid-cols-1 md:grid-cols-[1fr_120px_1fr_120px] gap-2">
-                        <select
-                          value={newViolationRule}
-                          onChange={(e) =>
-                            setNewViolationRule(e.target.value ? Number(e.target.value) : "")
-                          }
-                          className="rounded-xl border border-blue-100 px-3 py-2 text-sm outline-none focus:border-[#2e77df]"
-                        >
-                          <option value="">Chọn lỗi</option>
-                          {rules.map((r: any) => (
-                            <option key={r.id} value={r.id}>
-                              {r.category} - {r.name} ({r.score_delta})
-                            </option>
-                          ))}
-                        </select>
-                        <input
-                          type="number"
-                          value={newViolationQty}
-                          onChange={(e) => setNewViolationQty(Number(e.target.value || 1))}
-                          className="rounded-xl border border-blue-100 px-3 py-2 text-sm outline-none focus:border-[#2e77df]"
-                          placeholder="Số lượng"
-                        />
-                        <input
-                          type="text"
+                  <div className="space-y-3">
+                    <div className="flex items-center gap-3">
+                      <div className="text-sm font-semibold text-gray-900">Vi phạm</div>
+                      <div className="h-px min-w-0 flex-1 bg-slate-200" />
+                    </div>
+
+                    <section className="rounded-2xl border border-slate-200 bg-slate-50/85 p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.9)]">
+                      <div className="flex flex-wrap items-start justify-between gap-2">
+                        <div>
+                          <h3 className="text-sm font-semibold text-slate-900">Thêm lỗi vi phạm</h3>
+                        </div>
+                        {selectedNewViolationRule && (
+                          <span className={`rounded-lg px-2.5 py-1 text-xs font-semibold ${Number(selectedNewViolationRule.score_delta) < 0 ? "bg-rose-100 text-rose-700" : "bg-emerald-100 text-emerald-700"}`}>
+                            {Number(selectedNewViolationRule.score_delta) > 0 ? "+" : ""}{selectedNewViolationRule.score_delta} điểm / lần
+                          </span>
+                        )}
+                      </div>
+
+                      <div className="mt-4 grid gap-4 sm:grid-cols-[minmax(0,1fr)_9.5rem]">
+                        <label className="block">
+                          <span className="text-xs font-semibold text-slate-700">Lỗi vi phạm</span>
+                          <div className="mt-2">
+                            <RuleSelector
+                              rules={rules}
+                              value={newViolationRule || null}
+                              onChange={(ruleId) => setNewViolationRule(ruleId ?? "")}
+                              placeholder="Tìm và chọn lỗi vi phạm"
+                            />
+                          </div>
+                        </label>
+
+                        <div>
+                          <span className="text-xs font-semibold text-slate-700">Số lượng</span>
+                          <div className="mt-2 flex min-h-14 items-center overflow-hidden rounded-2xl border border-blue-100 bg-white shadow-sm">
+                            <button
+                              type="button"
+                              onClick={() => setNewViolationQty((current) => Math.max(1, current - 1))}
+                              disabled={newViolationQty <= 1 || violationSaving}
+                              className="flex h-14 w-11 items-center justify-center border-r border-blue-100 text-lg font-semibold text-slate-600 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
+                              aria-label="Giảm số lượng"
+                            >
+                              -
+                            </button>
+                            <input
+                              type="number"
+                              min={1}
+                              inputMode="numeric"
+                              value={newViolationQty}
+                              onChange={(event) => setNewViolationQty(Math.max(1, Number(event.target.value) || 1))}
+                              className="h-14 min-w-0 flex-1 border-0 bg-transparent px-1 text-center text-base font-semibold text-slate-900 outline-none [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+                              aria-label="Số lượng vi phạm"
+                            />
+                            <button
+                              type="button"
+                              onClick={() => setNewViolationQty((current) => current + 1)}
+                              disabled={violationSaving}
+                              className="flex h-14 w-11 items-center justify-center border-l border-blue-100 text-lg font-semibold text-[#2e77df] transition hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-40"
+                              aria-label="Tăng số lượng"
+                            >
+                              +
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+
+                      <label className="mt-4 block">
+                        <span className="text-xs font-semibold text-slate-700">Ghi chú <span className="font-normal text-slate-400">(không bắt buộc)</span></span>
+                        <textarea
                           value={newViolationNote}
-                          onChange={(e) => setNewViolationNote(e.target.value)}
-                          className="rounded-xl border border-blue-100 px-3 py-2 text-sm outline-none focus:border-[#2e77df]"
-                          placeholder="Ghi chú (nếu có)"
+                          onChange={(event) => setNewViolationNote(event.target.value)}
+                          rows={2}
+                          maxLength={1000}
+                          placeholder="Ví dụ: Danh sách học sinh hoặc tình huống cần lưu ý"
+                          className="mt-2 w-full resize-y rounded-2xl border border-blue-100 bg-white px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-[#2e77df] focus:ring-2 focus:ring-blue-100"
                         />
+                      </label>
+
+                      <div className="mt-4 flex flex-col gap-3 border-t border-slate-200 pt-4 sm:flex-row sm:items-center sm:justify-between">
+                        <div className="rounded-xl bg-white px-3 py-2 text-sm text-slate-600 ring-1 ring-slate-200">
+                          Tác động điểm: <span className={`ml-1 font-semibold ${newViolationScore < 0 ? "text-rose-700" : newViolationScore > 0 ? "text-emerald-700" : "text-slate-500"}`}>{newViolationScore > 0 ? "+" : ""}{newViolationScore}</span>
+                        </div>
                         <button
+                          type="button"
                           onClick={addViolation}
-                          disabled={violationSaving}
-                          className="rounded-xl bg-emerald-600 px-3 py-2 text-xs font-semibold text-white shadow-sm disabled:opacity-50"
+                          disabled={violationSaving || !newViolationRule}
+                          className="min-h-11 rounded-2xl bg-[#2e77df] px-5 text-sm font-semibold text-white shadow-[0_8px_18px_rgba(46,119,223,0.22)] transition hover:bg-[#245fc0] active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50"
                         >
-                          Thêm lỗi
+                          {violationSaving ? "Đang thêm..." : "Thêm vi phạm"}
                         </button>
                       </div>
-                    </div>
+                    </section>
                     {detail.violations.length === 0 ? (
                       <div className="text-sm text-gray-600">Không có vi phạm.</div>
                     ) : (
