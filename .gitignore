@@ -27,6 +27,8 @@ lerna-debug.log*
 
 # Editor and OS files
 .vscode/
+.codex/
+.docker-config/
 .idea/
 .DS_Store
 Thumbs.db
