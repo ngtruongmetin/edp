@@ -25,6 +25,26 @@ const DEFAULT_SYSTEM_SETTINGS = [
     value: "1",
     description: "Ap dung so dau bai dien tu khi tong ket tuan",
   },
+  {
+    key: "weekly_bonus_enabled",
+    value: "1",
+    description: "Ap dung thuong tu so dau bai theo tuan",
+  },
+  {
+    key: "weekly_bonus_score_threshold",
+    value: "10",
+    description: "Diem so dau bai toi thieu de xet thuong tuan",
+  },
+  {
+    key: "weekly_bonus_require_all_entries",
+    value: "1",
+    description: "Yeu cau tat ca diem so dau bai dat nguong de thuong tuan",
+  },
+  {
+    key: "weekly_bonus_points",
+    value: "30",
+    description: "So diem thuong so dau bai theo tuan",
+  },
 ]
 
 function detectProviderFromApiKey(apiKey) {
@@ -267,6 +287,15 @@ async function initDb() {
 
   await pool.query(`ALTER TABLE absence_evidences ADD COLUMN IF NOT EXISTS review_reason TEXT`)
 
+  // Preserve the current authorized-absence rule through display-name changes.
+  // Administrators can review and maintain this business code in rule management.
+  await pool.query(`
+    UPDATE rules
+    SET rule_code = 'AUTHORIZED_ABSENCE'
+    WHERE rule_code IS NULL
+      AND (lower(name) LIKE '%vắng có phép%' OR lower(name) LIKE '%vang co phep%')
+  `)
+
   await pool.query(`
     ALTER TABLE accounts
     ADD COLUMN IF NOT EXISTS pin_failed_attempts INTEGER NOT NULL DEFAULT 0
@@ -305,19 +334,21 @@ async function initDb() {
   const now = new Date().toISOString()
   await ensureDefaultTimeHierarchy(now)
 
+  await seedSystemSettings(now)
+
   const row = await get(`SELECT COUNT(*)::int as c FROM year_summaries`)
   const count = Number(row?.c || 0)
   if (count === 0) {
+    const schoolYear = (await get(`SELECT setting_value FROM system_settings WHERE setting_key='school_year' LIMIT 1`))?.setting_value || "2026-2027"
     await run(
       `
         INSERT INTO year_summaries (year_key, week_ids, semester_keys, closed_at, created_at, updated_at)
         VALUES(?,?,?,?,?,?)
       `,
-      ["2026-2027", "[]", "[]", null, now, now],
+      [schoolYear, "[]", "[]", null, now, now],
     )
   }
 
-  await seedSystemSettings(now)
   await seedAiSettings(now)
 }
 

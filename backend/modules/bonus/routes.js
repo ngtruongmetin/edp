@@ -11,6 +11,66 @@ const time = require("../../utils/time")
 const { mapDatabaseError, get, all, run, withTransaction } = require("../../utils/dbp")
 
 const router = express.Router()
+const WEEKLY_GRADEBOOK_BONUS_REASON = "weekly_bonus:gradebook"
+
+function getWeeklyBonusConfig(cb) {
+  db.all(
+    `SELECT setting_key, setting_value FROM system_settings WHERE setting_key IN ('weekly_bonus_enabled', 'weekly_bonus_score_threshold', 'weekly_bonus_require_all_entries', 'weekly_bonus_points')`,
+    [],
+    (err, rows) => {
+      if (err) return cb(err)
+      const values = new Map((rows || []).map((row) => [row.setting_key, row.setting_value]))
+      const numberOr = (key, fallback) => {
+        const value = Number(values.get(key))
+        return Number.isFinite(value) && value >= 0 ? value : fallback
+      }
+      cb(null, {
+        enabled: String(values.get("weekly_bonus_enabled") ?? "1") !== "0",
+        threshold: numberOr("weekly_bonus_score_threshold", 10),
+        requireAllEntries: String(values.get("weekly_bonus_require_all_entries") ?? "1") !== "0",
+        points: numberOr("weekly_bonus_points", 30),
+      })
+    },
+  )
+}
+
+function getWeeklyBonusEligibility(weekId, className, cb) {
+  getWeeklyBonusConfig((configErr, config) => {
+    if (configErr) return cb(configErr)
+    db.get(
+      `
+        SELECT
+          COUNT(*) as session_count,
+          SUM(CASE WHEN b.min_score IS NOT NULL THEN 1 ELSE 0 END) as bonus_count,
+          SUM(CASE WHEN b.min_score >= ? THEN 1 ELSE 0 END) as ok_count,
+          MIN(COALESCE(b.min_score, -1)) as min_of_min
+        FROM duty_sessions s
+        LEFT JOIN daily_bonus b
+          ON b.week_id=s.week_id AND b.date=s.date AND b.class_name=s.duty_class
+        WHERE s.week_id=? AND s.duty_class=?
+      `,
+      [config.threshold, weekId, className],
+      (err, row) => {
+        if (err) return cb(err)
+        const sessionCount = Number(row?.session_count || 0)
+        const bonusCount = Number(row?.bonus_count || 0)
+        const okCount = Number(row?.ok_count || 0)
+        const complete = sessionCount > 0 && bonusCount === sessionCount
+        const scoreCondition = config.requireAllEntries ? okCount === sessionCount : okCount > 0
+        cb(null, {
+          config,
+          sessionCount,
+          bonusCount,
+          okCount,
+          missingCount: Math.max(0, sessionCount - bonusCount),
+          minScore: sessionCount > 0 ? Number(row?.min_of_min ?? -1) : null,
+          complete,
+          eligible: config.enabled && complete && scoreCondition,
+        })
+      },
+    )
+  })
+}
 
 function isWeekClosed(weekId, cb) {
   db.get(
@@ -809,23 +869,11 @@ router.post(
       }
 
       for (const className of Array.from(appliedClasses)) {
-        const row = await get(
-          `
-            SELECT
-              COUNT(*) as bonus_count,
-              SUM(CASE WHEN min_score >= 9 THEN 1 ELSE 0 END) as ok_count
-            FROM daily_bonus
-            WHERE week_id=?
-              AND class_name=?
-          `,
-          [weekId, className],
-        )
-        const bonusCount = Number(row?.bonus_count || 0)
-        const okCount = Number(row?.ok_count || 0)
-        const eligible = bonusCount > 0 && okCount === bonusCount
-
+        const eligibility = await new Promise((resolve, reject) => {
+          getWeeklyBonusEligibility(weekId, className, (err, result) => err ? reject(err) : resolve(result))
+        })
         const now = time.now()
-        if (eligible) {
+        if (eligibility.eligible) {
           await run(
             `
               INSERT INTO weekly_bonus (week_id,class_name,points,reason,created_at,updated_at)
@@ -836,12 +884,12 @@ router.post(
                 reason=excluded.reason,
                 updated_at=excluded.updated_at
             `,
-            [weekId, className, 30, "Thuong tu so dau bai: tat ca tiet >= 9", now, now],
+            [weekId, className, eligibility.config.points, WEEKLY_GRADEBOOK_BONUS_REASON, now, now],
           )
         } else {
           await run(
-            `DELETE FROM weekly_bonus WHERE week_id=? AND class_name=? AND points=30`,
-            [weekId, className],
+            `DELETE FROM weekly_bonus WHERE week_id=? AND class_name=? AND reason=?`,
+            [weekId, className, WEEKLY_GRADEBOOK_BONUS_REASON],
           )
         }
       }
@@ -1116,68 +1164,24 @@ router.post(
 
         const now = time.now()
         const finalizeWeeklyBonus = () => {
-          db.get(
-            `
-              SELECT
-                COUNT(*) as bonus_count,
-                SUM(CASE WHEN min_score >= 9 THEN 1 ELSE 0 END) as ok_count
-              FROM daily_bonus
-              WHERE week_id=?
-                AND class_name=?
-            `,
-            [weekId, className],
-            (err2, row2) => {
-              if (err2) return res.status(500).json({ error: err2.message })
-              const bonusCount = Number(row2?.bonus_count || 0)
-              const okCount = Number(row2?.ok_count || 0)
-              const eligible = bonusCount > 0 && okCount === bonusCount
-
-              db.get(
-                `SELECT points FROM weekly_bonus WHERE week_id=? AND class_name=? LIMIT 1`,
-                [weekId, className],
-                (err3, existingBonus) => {
-                  if (err3) return res.status(500).json({ error: err3.message })
-
-                  if (eligible && !existingBonus) {
-                    db.run(
-                      `
-                        INSERT INTO weekly_bonus
-                        (week_id,class_name,points,reason,created_at,updated_at)
-                        VALUES(?,?,?,?,?,?)
-                      `,
-                      [
-                        weekId,
-                        className,
-                        30,
-                        "Thuong tu so dau bai: tat ca tiet >= 9",
-                        now,
-                        now,
-                      ],
-                      (err4) => {
-                        if (err4) return res.status(500).json({ error: err4.message })
-                        res.json({ success: true, eligible })
-                      },
-                    )
-                    return
-                  }
-
-                  if (!eligible && existingBonus && existingBonus.points === 30) {
-                    db.run(
-                      `DELETE FROM weekly_bonus WHERE week_id=? AND class_name=? AND points=30`,
-                      [weekId, className],
-                      (err4) => {
-                        if (err4) return res.status(500).json({ error: err4.message })
-                        res.json({ success: true, eligible })
-                      },
-                    )
-                    return
-                  }
-
-                  res.json({ success: true, eligible })
-                },
-              )
-            },
-          )
+          getWeeklyBonusEligibility(weekId, className, (eligibilityErr, eligibility) => {
+            if (eligibilityErr) return res.status(500).json({ error: eligibilityErr.message })
+            db.get(`SELECT reason FROM weekly_bonus WHERE week_id=? AND class_name=? LIMIT 1`, [weekId, className], (err, existingBonus) => {
+              if (err) return res.status(500).json({ error: err.message })
+              const isAutomaticBonus = existingBonus?.reason === WEEKLY_GRADEBOOK_BONUS_REASON
+              if (eligibility.eligible && (!existingBonus || isAutomaticBonus)) {
+                return db.run(
+                  `INSERT INTO weekly_bonus (week_id,class_name,points,reason,created_at,updated_at) VALUES(?,?,?,?,?,?) ON CONFLICT(week_id,class_name) DO UPDATE SET points=excluded.points,reason=excluded.reason,updated_at=excluded.updated_at`,
+                  [weekId, className, eligibility.config.points, WEEKLY_GRADEBOOK_BONUS_REASON, now, now],
+                  (writeErr) => writeErr ? res.status(500).json({ error: writeErr.message }) : res.json({ success: true, eligible: true, complete: eligibility.complete }),
+                )
+              }
+              if (!eligibility.eligible && isAutomaticBonus) {
+                return db.run(`DELETE FROM weekly_bonus WHERE week_id=? AND class_name=? AND reason=?`, [weekId, className, WEEKLY_GRADEBOOK_BONUS_REASON], (writeErr) => writeErr ? res.status(500).json({ error: writeErr.message }) : res.json({ success: true, eligible: false, complete: eligibility.complete }))
+              }
+              res.json({ success: true, eligible: eligibility.eligible, complete: eligibility.complete })
+            })
+          })
         }
 
         if (!hasPeriods) {
@@ -1618,13 +1622,15 @@ router.post(
               (err) => {
                 if (err) return res.status(500).json({ error: err.message })
 
-                // After updating daily_bonus, recheck weekly_bonus eligibility
+                // Recheck only after every required duty session has gradebook data.
+                getWeeklyBonusConfig((configErr, config) => {
+                  if (configErr) return res.status(500).json({ error: configErr.message })
                 db.get(
                   `
                     SELECT
                       COUNT(*) as session_count,
                       SUM(CASE WHEN b.min_score IS NOT NULL THEN 1 ELSE 0 END) as bonus_count,
-                      SUM(CASE WHEN b.min_score >= 9 THEN 1 ELSE 0 END) as ok_count
+                      SUM(CASE WHEN b.min_score >= ? THEN 1 ELSE 0 END) as ok_count
                     FROM duty_sessions s
                     LEFT JOIN daily_bonus b
                       ON b.week_id = s.week_id
@@ -1633,37 +1639,44 @@ router.post(
                   WHERE s.week_id=?
                     AND s.duty_class=?
                   `,
-                  [session.week_id, session.duty_class],
+                  [config.threshold, session.week_id, session.duty_class],
                   (err, checkRow) => {
                     if (err) return res.status(500).json({ error: err.message })
 
                     const sessionCount = Number(checkRow?.session_count || 0)
                     const bonusCount = Number(checkRow?.bonus_count || 0)
                     const okCount = Number(checkRow?.ok_count || 0)
-                    const eligible = bonusCount > 0 && okCount === bonusCount
+                    const complete = sessionCount > 0 && bonusCount === sessionCount
+                    const scoreCondition = config.requireAllEntries
+                      ? okCount === sessionCount
+                      : okCount > 0
+                    const eligible = config.enabled && complete && scoreCondition
 
                     // Check if weekly_bonus already exists
                     db.get(
-                      `SELECT points FROM weekly_bonus WHERE week_id=? AND class_name=?`,
+                      `SELECT points, reason FROM weekly_bonus WHERE week_id=? AND class_name=?`,
                       [session.week_id, session.duty_class],
                       (err, existingBonus) => {
                         if (err) return res.status(500).json({ error: err.message })
 
-                        if (eligible && !existingBonus) {
-                          // Eligible but no weekly bonus yet -> add it
+                        const isAutomaticBonus = existingBonus && (
+                          existingBonus.reason === WEEKLY_GRADEBOOK_BONUS_REASON ||
+                          String(existingBonus.reason || "").startsWith("Thuong tu so dau bai:")
+                        )
+
+                        if (eligible && (!existingBonus || isAutomaticBonus)) {
                           db.run(
-                            `INSERT INTO weekly_bonus (week_id,class_name,points,reason,created_at,updated_at) VALUES(?,?,?,?,?,?)`,
-                            [session.week_id, session.duty_class, 30, "Thurong tu so dau bai: tat ca tiet >= 9", now, now],
+                            `INSERT INTO weekly_bonus (week_id,class_name,points,reason,created_at,updated_at) VALUES(?,?,?,?,?,?) ON CONFLICT(week_id,class_name) DO UPDATE SET points=excluded.points, reason=excluded.reason, updated_at=excluded.updated_at`,
+                            [session.week_id, session.duty_class, config.points, WEEKLY_GRADEBOOK_BONUS_REASON, now, now],
                             (err) => {
                               if (err) return res.status(500).json({ error: err.message })
                               recordLog()
                             }
                           )
-                        } else if (!eligible && existingBonus && existingBonus.points === 30) {
-                          // Not eligible but has weekly bonus -> remove it
+                        } else if (!eligible && isAutomaticBonus) {
                           db.run(
-                            `DELETE FROM weekly_bonus WHERE week_id=? AND class_name=? AND points=30`,
-                            [session.week_id, session.duty_class],
+                            `DELETE FROM weekly_bonus WHERE week_id=? AND class_name=? AND reason IN (?, ?)`,
+                            [session.week_id, session.duty_class, WEEKLY_GRADEBOOK_BONUS_REASON, existingBonus.reason],
                             (err) => {
                               if (err) return res.status(500).json({ error: err.message })
                               recordLog()
@@ -1680,7 +1693,7 @@ router.post(
                             [sessionId, "bonus:apply_daily_bonus", time.now()],
                             (err) => {
                               if (err) return res.status(500).json({ error: err.message })
-                              res.json({ success: true, eligible, bonus_adjusted: eligible !== !existingBonus })
+                              res.json({ success: true, eligible, complete, bonus_adjusted: eligible !== !existingBonus })
                             }
                           )
                         }
@@ -1688,6 +1701,7 @@ router.post(
                     )
                   }
                 )
+                })
               },
             )
           },

@@ -10,6 +10,7 @@ const requireRole = require("../../middleware/requireRole")
 const router = express.Router()
 
 const REQUIRED_HEADERS = ["Category", "Rule", "Point"]
+const RULE_CODE_HEADER = "Code"
 
 function normalizeText(value) {
   return String(value || "").trim()
@@ -31,9 +32,27 @@ function toInteger(value) {
   return Math.trunc(numeric)
 }
 
+function normalizeRuleCode(value) {
+  const code = normalizeText(value).toUpperCase()
+  if (!code) return null
+  if (!/^[A-Z][A-Z0-9_]{1,63}$/.test(code)) {
+    const err = new Error("Rule code must contain only uppercase letters, digits, and underscores")
+    err.status = 400
+    throw err
+  }
+  return code
+}
+
+function generateRuleCode(category, name) {
+  const source = `${category}|${name}`
+  const hex = Buffer.from(source, "utf8").toString("hex").toUpperCase().slice(0, 54)
+  return `IMPORTED_${hex}`
+}
+
 function buildRulesWorksheet(workbook) {
   const sheet = workbook.addWorksheet("Rules")
   sheet.columns = [
+    { header: RULE_CODE_HEADER, key: "rule_code", width: 28 },
     { header: "Category", key: "category", width: 24 },
     { header: "Rule", key: "name", width: 42 },
     { header: "Point", key: "score_delta", width: 14 },
@@ -94,7 +113,8 @@ function parseImportWorkbook(fileData) {
   })[0] || []
 
   const normalizedHeaders = headerRow.map((value) => normalizeText(value))
-  const hasRequiredHeaders = REQUIRED_HEADERS.every((header, index) => normalizedHeaders[index] === header)
+  const offset = normalizedHeaders[0] === RULE_CODE_HEADER ? 1 : 0
+  const hasRequiredHeaders = REQUIRED_HEADERS.every((header, index) => normalizedHeaders[index + offset] === header)
   if (!hasRequiredHeaders) {
     const err = new Error("File Excel phải có đúng 3 cột: Category | Rule | Point")
     err.status = 400
@@ -109,6 +129,8 @@ function parseImportWorkbook(fileData) {
     const category = normalizeText(row.Category)
     const name = normalizeText(row.Rule)
     const score = toInteger(row.Point)
+    const suppliedRuleCode = normalizeRuleCode(row[RULE_CODE_HEADER])
+    const ruleCode = suppliedRuleCode || generateRuleCode(category, name)
 
     if (!category || !name) {
       const err = new Error(`Dòng ${index + 2} thiếu Category hoặc Rule`)
@@ -126,6 +148,8 @@ function parseImportWorkbook(fileData) {
       category,
       name,
       score_delta: score,
+      rule_code: ruleCode,
+      has_rule_code: Boolean(suppliedRuleCode),
     })
   })
 
@@ -144,7 +168,7 @@ router.get(
   (req, res) => {
     db.all(
       `
-        SELECT id, category, name, score_delta
+        SELECT id, rule_code, category, name, score_delta
         FROM rules
         ORDER BY category, id
       `,
@@ -167,7 +191,7 @@ router.get(
   (req, res) => {
     db.all(
       `
-        SELECT id, category, name, score_delta
+        SELECT id, rule_code, category, name, score_delta
         FROM rules
         ORDER BY category, id
       `,
@@ -193,11 +217,13 @@ router.get(
       const sheet = buildRulesWorksheet(workbook)
 
       sheet.addRow({
+        rule_code: "AUTHORIZED_ABSENCE",
         category: "Nề nếp",
         name: "Đi học muộn",
         score_delta: -5,
       })
       sheet.addRow({
+        rule_code: "POSITIVE_ACTIVITY",
         category: "Phong trào",
         name: "Tham gia hoạt động tốt",
         score_delta: 10,
@@ -222,7 +248,7 @@ router.get(
     try {
       const rules = await db.all(
         `
-          SELECT category, name, score_delta
+          SELECT rule_code, category, name, score_delta
           FROM rules
           ORDER BY category, id
         `,
@@ -233,6 +259,7 @@ router.get(
 
       for (const rule of rules) {
         sheet.addRow({
+          rule_code: rule.rule_code || "",
           category: rule.category,
           name: rule.name,
           score_delta: rule.score_delta,
@@ -261,34 +288,47 @@ router.post(
 
       await db.withTransaction(async () => {
         for (const row of importedRows) {
-          const existing = await db.get(
-            `
-              SELECT id
-              FROM rules
-              WHERE category=? AND name=?
-              LIMIT 1
-            `,
-            [row.category, row.name],
-          )
+          // Keep the nullable rule_code branch separate. PostgreSQL cannot infer
+          // the type of a parameter used only in "? IS NULL" when its value is
+          // null, which caused imports to fail with an indeterminate $2 type.
+          const existing = row.has_rule_code
+            ? await db.get(
+                `
+                  SELECT id
+                  FROM rules
+                  WHERE rule_code=?
+                  LIMIT 1
+                `,
+                [row.rule_code],
+              )
+            : await db.get(
+                `
+                  SELECT id
+                  FROM rules
+                  WHERE rule_code IS NULL AND category=? AND name=?
+                  LIMIT 1
+                `,
+                [row.category, row.name],
+              )
 
           if (existing?.id) {
             await db.run(
               `
                 UPDATE rules
-                SET score_delta=?
+                SET category=?, name=?, score_delta=?, rule_code=COALESCE(?, rule_code)
                 WHERE id=?
               `,
-              [row.score_delta, existing.id],
+              [row.category, row.name, row.score_delta, row.rule_code, existing.id],
             )
             continue
           }
 
           await db.run(
             `
-              INSERT INTO rules(category, name, score_delta)
-              VALUES(?,?,?)
+              INSERT INTO rules(rule_code, category, name, score_delta)
+              VALUES(?,?,?,?)
             `,
-            [row.category, row.name, row.score_delta],
+            [row.rule_code, row.category, row.name, row.score_delta],
           )
         }
       })
@@ -312,6 +352,12 @@ router.post(
   requireRole(["admin"]),
   (req, res) => {
     const { category, name, score_delta } = req.body
+    let ruleCode
+    try {
+      ruleCode = normalizeRuleCode(req.body?.rule_code)
+    } catch (err) {
+      return res.status(err.status || 400).json({ error: err.message })
+    }
 
     if (!category || !name) {
       return res.status(400).json({ error: "Missing data" })
@@ -319,10 +365,10 @@ router.post(
 
     db.run(
       `
-        INSERT INTO rules(category,name,score_delta)
-        VALUES(?,?,?)
+        INSERT INTO rules(rule_code,category,name,score_delta)
+        VALUES(?,?,?,?)
       `,
-      [category, name, score_delta || 0],
+      [ruleCode, category, name, score_delta || 0],
       function onCreate(err) {
         if (err) {
           return res.status(500).json({ error: err.message })
@@ -340,14 +386,20 @@ router.patch(
   requireRole(["admin"]),
   (req, res) => {
     const { category, name, score_delta } = req.body
+    let ruleCode
+    try {
+      ruleCode = normalizeRuleCode(req.body?.rule_code)
+    } catch (err) {
+      return res.status(err.status || 400).json({ error: err.message })
+    }
 
     db.run(
       `
         UPDATE rules
-        SET category=?, name=?, score_delta=?
+        SET rule_code=?, category=?, name=?, score_delta=?
         WHERE id=?
       `,
-      [category, name, score_delta, req.params.id],
+      [ruleCode, category, name, score_delta, req.params.id],
       function onUpdate(err) {
         if (err) {
           return res.status(500).json({ error: err.message })

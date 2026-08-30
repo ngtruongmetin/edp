@@ -13,6 +13,22 @@ const SETTING_DEFINITIONS = {
     key: "use_electronic_gradebook",
     description: "Ap dung so dau bai dien tu khi tong ket tuan",
   },
+  weekly_bonus_enabled: {
+    key: "weekly_bonus_enabled",
+    description: "Ap dung thuong tu so dau bai theo tuan",
+  },
+  weekly_bonus_score_threshold: {
+    key: "weekly_bonus_score_threshold",
+    description: "Diem so dau bai toi thieu de xet thuong tuan",
+  },
+  weekly_bonus_require_all_entries: {
+    key: "weekly_bonus_require_all_entries",
+    description: "Yeu cau tat ca diem so dau bai dat nguong de thuong tuan",
+  },
+  weekly_bonus_points: {
+    key: "weekly_bonus_points",
+    description: "So diem thuong so dau bai theo tuan",
+  },
 }
 
 let settingsCache = null

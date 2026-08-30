@@ -36,7 +36,7 @@ function buildRulesSection(rules) {
   }
 
   return normalizedRules
-    .map((rule) => `${formatValue(rule?.id)}|${formatValue(rule?.name)}`)
+    .map((rule) => `${formatValue(rule?.ruleCode)}|${formatValue(rule?.name)}`)
     .join("\n")
 }
 
@@ -44,6 +44,7 @@ function buildContextContent(context) {
   return [
     buildDutyContextLine(context),
     buildClassContextLine(context),
+    "Use the first value of each rule row as ruleCode. Never return a database id.",
     buildRulesSection(context?.rules),
   ]
     .filter(Boolean)

@@ -72,8 +72,9 @@ async function loadCodoDutyContext({ dutyId, redClass }) {
 
   const rules = await all(
     `
-      SELECT id, name
+      SELECT id, rule_code, name
       FROM rules
+      WHERE rule_code IS NOT NULL
       ORDER BY category, id
     `,
     [],
@@ -91,6 +92,7 @@ async function loadCodoDutyContext({ dutyId, redClass }) {
     },
     rules: (rules || []).map((rule) => ({
       id: Number(rule.id),
+      ruleCode: String(rule.rule_code),
       name: String(rule.name || ""),
     })),
   }
@@ -99,8 +101,9 @@ async function loadCodoDutyContext({ dutyId, redClass }) {
 async function loadCodoPromptPreviewContext() {
   const rules = await all(
     `
-      SELECT id, name
+      SELECT id, rule_code, name
       FROM rules
+      WHERE rule_code IS NOT NULL
       ORDER BY category, id
     `,
     [],
@@ -118,6 +121,7 @@ async function loadCodoPromptPreviewContext() {
     },
     rules: (rules || []).map((rule) => ({
       id: Number(rule.id),
+      ruleCode: String(rule.rule_code),
       name: String(rule.name || ""),
     })),
   }
@@ -276,6 +280,20 @@ function validateAiResponse(data) {
   return data
 }
 
+function resolveRuleCodes(data, rules) {
+  const ruleIdsByCode = new Map(rules.map((rule) => [rule.ruleCode, Number(rule.id)]))
+  const violations = data.violations.map((violation) => {
+    const ruleId = ruleIdsByCode.get(violation.ruleCode)
+    if (!ruleId) {
+      const error = new Error("AI returned an unknown rule code")
+      error.status = 422
+      throw error
+    }
+    return { ...violation, ruleId }
+  })
+  return { ...data, violations }
+}
+
 async function parseCodoMessage({ dutyId, message, redClass }) {
   const trimmedMessage = String(message || "").trim()
   if (!trimmedMessage) {
@@ -312,9 +330,10 @@ async function parseCodoMessage({ dutyId, message, redClass }) {
   )
 
   const valid = validateAiResponse(parsed)
+  const resolved = resolveRuleCodes(valid, context.rules)
   logDevBlock("===== AI VALID =====", JSON.stringify(valid, null, 2))
 
-  return valid
+  return resolved
 }
 
 async function buildCodoPromptPreview({ message }) {

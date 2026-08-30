@@ -144,7 +144,7 @@ export default function Navbar() {
           : dutyOffline.status.phase === "synced" && dutyOffline.status.total > 0
             ? "Đồng bộ thành công"
             : dutyOffline.readiness.ready
-              ? null
+              ? "Thiết bị đã sẵn sàng làm việc ngoại tuyến"
               : "Thiết bị chưa sẵn sàng làm việc ngoại tuyến."
 
   return (
@@ -222,7 +222,7 @@ export default function Navbar() {
 
           <div className="ml-auto flex items-center gap-3">
             {dutySyncLabel && (
-              <span className={`rounded-full border px-3 py-1.5 text-xs font-semibold ${dutyOffline?.status.phase === "synced" ? "border-emerald-200 bg-emerald-50 text-emerald-700" : "border-amber-200 bg-amber-50 text-amber-700"}`}>
+                <span className={`rounded-full border px-3 py-1.5 text-xs font-semibold ${dutyOffline?.readiness.ready || dutyOffline?.status.phase === "synced" ? "border-emerald-200 bg-emerald-50 text-emerald-700" : "border-amber-200 bg-amber-50 text-amber-700"}`}>
                 {dutySyncLabel}
               </span>
             )}
@@ -355,7 +355,7 @@ export default function Navbar() {
           )}
         </div>
         {dutySyncLabel && (
-          <div className={`px-3 pb-1 text-center text-[11px] font-semibold ${dutyOffline?.status.phase === "synced" ? "text-emerald-700" : "text-amber-700"}`}>
+          <div className={`px-3 pb-1 text-center text-[11px] font-semibold ${dutyOffline?.readiness.ready || dutyOffline?.status.phase === "synced" ? "text-emerald-700" : "text-amber-700"}`}>
             {dutySyncLabel}
           </div>
         )}

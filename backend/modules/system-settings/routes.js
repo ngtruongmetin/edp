@@ -109,6 +109,28 @@ function validateGeneralSettingsPayload(payload) {
     normalized.use_electronic_gradebook = enabled
   }
 
+  for (const key of ["weekly_bonus_enabled", "weekly_bonus_require_all_entries"]) {
+    if (!(key in settings)) continue
+    const enabled = normalizeBooleanSetting(settings[key])
+    if (enabled === null) {
+      const error = new Error("Cau hinh thuong so dau bai khong hop le")
+      error.status = 400
+      throw error
+    }
+    normalized[key] = enabled
+  }
+
+  for (const key of ["weekly_bonus_score_threshold", "weekly_bonus_points"]) {
+    if (!(key in settings)) continue
+    const value = toNumber(settings[key])
+    if (!Number.isFinite(value) || value < 0) {
+      const error = new Error("Gia tri thuong so dau bai phai la so khong am")
+      error.status = 400
+      throw error
+    }
+    normalized[key] = String(value)
+  }
+
   if (Object.keys(normalized).length === 0) {
     const error = new Error("Không có cấu hình nào để cập nhật")
     error.status = 400

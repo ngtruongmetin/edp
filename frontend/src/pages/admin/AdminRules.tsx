@@ -11,18 +11,21 @@ import { usePageTitle } from "../../utils/usePageTitle"
 
 type Rule = {
   id: number
+  rule_code: string | null
   category: string
   name: string
   score_delta: number
 }
 
 type RuleFormState = {
+  rule_code: string
   category: string
   name: string
   score_delta: string
 }
 
 const EMPTY_FORM: RuleFormState = {
+  rule_code: "",
   category: "",
   name: "",
   score_delta: "",
@@ -96,6 +99,7 @@ export default function AdminRules() {
     setEditingRule(rule)
     setForm({
       category: rule.category,
+      rule_code: rule.rule_code || "",
       name: rule.name,
       score_delta: String(rule.score_delta),
     })
@@ -129,6 +133,7 @@ export default function AdminRules() {
 
       if (editingRule) {
         await api.patch(`/rules/${editingRule.id}`, {
+          rule_code: form.rule_code.trim(),
           category,
           name,
           score_delta: score,
@@ -136,6 +141,7 @@ export default function AdminRules() {
         toast.success("Đã cập nhật luật")
       } else {
         await api.post("/rules/create", {
+          rule_code: form.rule_code.trim(),
           category,
           name,
           score_delta: score,
@@ -324,6 +330,7 @@ export default function AdminRules() {
               <thead className="bg-slate-50/90 text-slate-500">
                 <tr>
                   <th className="px-4 py-4 text-left font-semibold">#</th>
+                  <th className="px-4 py-4 text-left font-semibold">Mã</th>
                   <th className="px-4 py-4 text-left font-semibold">Nhóm</th>
                   <th className="px-4 py-4 text-left font-semibold">Tên lỗi</th>
                   <th className="px-4 py-4 text-left font-semibold">Điểm</th>
@@ -334,14 +341,14 @@ export default function AdminRules() {
                 {loading ? (
                   Array.from({ length: 6 }).map((_, index) => (
                     <tr key={index} className="border-t border-slate-100/80">
-                      <td className="px-4 py-4" colSpan={5}>
+                      <td className="px-4 py-4" colSpan={6}>
                         <div className="h-12 animate-pulse rounded-[18px] bg-slate-100/80" />
                       </td>
                     </tr>
                   ))
                 ) : filteredRules.length === 0 ? (
                   <tr>
-                    <td colSpan={5} className="px-6 py-16 text-center text-sm text-slate-500">
+                    <td colSpan={6} className="px-6 py-16 text-center text-sm text-slate-500">
                       Không có luật phù hợp.
                     </td>
                   </tr>
@@ -349,6 +356,7 @@ export default function AdminRules() {
                   filteredRules.map((rule, index) => (
                     <tr key={rule.id} className="border-t border-slate-100/80 transition hover:bg-slate-50/70">
                       <td className="px-4 py-4 text-slate-500">{index + 1}</td>
+                      <td className="px-4 py-4 font-mono text-xs text-slate-600">{rule.rule_code || "--"}</td>
                       <td className="px-4 py-4">
                         <span className="inline-flex rounded-full bg-[#eff6ff] px-3 py-1 text-xs font-semibold text-[#2e77df]">
                           {rule.category}
@@ -399,6 +407,15 @@ export default function AdminRules() {
           </div>
 
           <div className="mt-5 space-y-4">
+            <label className="block space-y-2">
+              <span className="text-sm font-semibold text-slate-900">Mã nghiệp vụ</span>
+              <input
+                value={form.rule_code}
+                onChange={(e) => setForm((current) => ({ ...current, rule_code: e.target.value.toUpperCase() }))}
+                className="w-full rounded-[20px] border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 outline-none placeholder:text-slate-400 focus:border-[#2e77df]"
+                placeholder="AUTHORIZED_ABSENCE"
+              />
+            </label>
             <label className="block space-y-2">
               <span className="text-sm font-semibold text-slate-900">Nhóm</span>
               <input

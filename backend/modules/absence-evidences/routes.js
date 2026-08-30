@@ -15,6 +15,7 @@ const router = express.Router()
 const UPLOAD_DIRECTORY = path.join(__dirname, "..", "..", "assets", "absence-evidences")
 const MAX_FILES = 5
 const MAX_FILE_BYTES = 8 * 1024 * 1024
+const AUTHORIZED_ABSENCE_RULE_CODE = "AUTHORIZED_ABSENCE"
 const FILE_TYPES = new Map([
   ["image/jpeg", "jpg"],
   ["image/png", "png"],
@@ -31,8 +32,8 @@ function normalizeText(value) {
     .trim()
 }
 
-function isPermittedAbsenceRule(ruleName) {
-  return normalizeText(ruleName).includes("vang co phep")
+function isPermittedAbsenceRule(ruleCode) {
+  return String(ruleCode || "").trim().toUpperCase() === AUTHORIZED_ABSENCE_RULE_CODE
 }
 
 function isIsoDate(value) {
@@ -159,6 +160,7 @@ async function getDutyComparison(evidence) {
         sessions.id AS duty_session_id,
         sessions.date,
         rules.name AS absence_type,
+        rules.rule_code,
         violations.id AS duty_violation_id,
         COALESCE(violations.quantity, 0) AS absence_count,
         COALESCE(SUM(logs.approved_quantity), 0) AS absence_exempted
@@ -169,7 +171,7 @@ async function getDutyComparison(evidence) {
       WHERE sessions.week_id = $1
         AND sessions.duty_class = $2
         AND sessions.date BETWEEN $3 AND $4
-      GROUP BY sessions.id, sessions.date, rules.name, violations.id, violations.quantity
+      GROUP BY sessions.id, sessions.date, rules.name, rules.rule_code, violations.id, violations.quantity
       ORDER BY sessions.date ASC, violations.id ASC
     `,
     [evidence.week_id, evidence.class_name, evidence.start_date, evidence.end_date],
@@ -177,7 +179,7 @@ async function getDutyComparison(evidence) {
 
   const days = new Map()
   for (const row of result.rows) {
-    if (!isPermittedAbsenceRule(row.absence_type)) continue
+    if (!isPermittedAbsenceRule(row.rule_code)) continue
 
     const date = String(row.date)
     const current = days.get(date) || {
@@ -648,6 +650,7 @@ router.post(
                 violations.id AS duty_violation_id,
                 violations.quantity,
                 rules.name AS absence_type,
+                rules.rule_code,
                 rules.score_delta,
                 COALESCE(SUM(logs.approved_quantity), 0) AS already_exempted
               FROM duty_sessions sessions
@@ -657,7 +660,7 @@ router.post(
               WHERE sessions.week_id = $1
                 AND sessions.duty_class = $2
                 AND sessions.date BETWEEN $3 AND $4
-              GROUP BY sessions.id, sessions.date, violations.id, violations.quantity, rules.name, rules.score_delta
+              GROUP BY sessions.id, sessions.date, violations.id, violations.quantity, rules.name, rules.rule_code, rules.score_delta
               ORDER BY sessions.date ASC, violations.id ASC
             `,
             [evidence.week_id, evidence.class_name, evidence.start_date, evidence.end_date],
@@ -665,7 +668,7 @@ router.post(
 
           const perDate = new Map()
           for (const row of candidates.rows) {
-            if (!isPermittedAbsenceRule(row.absence_type)) continue
+            if (!isPermittedAbsenceRule(row.rule_code)) continue
             const available = Math.max(0, Number(row.quantity || 0) - Number(row.already_exempted || 0))
             if (!available) continue
             const dateRows = perDate.get(row.date) || []

@@ -143,6 +143,10 @@ export default function AdminSystemSettings() {
   const [baseScore, setBaseScore] = useState("100")
   const [schoolYear, setSchoolYear] = useState("2026-2027")
   const [useElectronicGradebook, setUseElectronicGradebook] = useState("1")
+  const [weeklyBonusEnabled, setWeeklyBonusEnabled] = useState("1")
+  const [weeklyBonusThreshold, setWeeklyBonusThreshold] = useState("10")
+  const [weeklyBonusRequireAll, setWeeklyBonusRequireAll] = useState("1")
+  const [weeklyBonusPoints, setWeeklyBonusPoints] = useState("30")
   const [lastTestFingerprint, setLastTestFingerprint] = useState("")
   const [testPassed, setTestPassed] = useState(false)
 
@@ -198,6 +202,10 @@ export default function AdminSystemSettings() {
       setBaseScore(settingsRes.data.settings.base_score?.value || "100")
       setSchoolYear(settingsRes.data.settings.school_year?.value || "2026-2027")
       setUseElectronicGradebook(settingsRes.data.settings.use_electronic_gradebook?.value === "0" ? "0" : "1")
+      setWeeklyBonusEnabled(settingsRes.data.settings.weekly_bonus_enabled?.value === "0" ? "0" : "1")
+      setWeeklyBonusThreshold(settingsRes.data.settings.weekly_bonus_score_threshold?.value || "10")
+      setWeeklyBonusRequireAll(settingsRes.data.settings.weekly_bonus_require_all_entries?.value === "0" ? "0" : "1")
+      setWeeklyBonusPoints(settingsRes.data.settings.weekly_bonus_points?.value || "30")
       applyAiConfig(aiRes.data.config)
     } catch (err: any) {
       console.error(err)
@@ -379,12 +387,20 @@ export default function AdminSystemSettings() {
           base_score: Number(baseScore),
           school_year: schoolYear.trim(),
           use_electronic_gradebook: useElectronicGradebook,
+          weekly_bonus_enabled: weeklyBonusEnabled,
+          weekly_bonus_score_threshold: Number(weeklyBonusThreshold),
+          weekly_bonus_require_all_entries: weeklyBonusRequireAll,
+          weekly_bonus_points: Number(weeklyBonusPoints),
         },
       })
 
       setBaseScore(res.data.settings.base_score?.value || baseScore)
       setSchoolYear(res.data.settings.school_year?.value || schoolYear)
       setUseElectronicGradebook(res.data.settings.use_electronic_gradebook?.value === "0" ? "0" : "1")
+      setWeeklyBonusEnabled(res.data.settings.weekly_bonus_enabled?.value === "0" ? "0" : "1")
+      setWeeklyBonusThreshold(res.data.settings.weekly_bonus_score_threshold?.value || weeklyBonusThreshold)
+      setWeeklyBonusRequireAll(res.data.settings.weekly_bonus_require_all_entries?.value === "0" ? "0" : "1")
+      setWeeklyBonusPoints(res.data.settings.weekly_bonus_points?.value || weeklyBonusPoints)
       setNotice("Đã lưu cấu hình hệ thống.")
       return true
     } catch (err: any) {
@@ -649,6 +665,32 @@ export default function AdminSystemSettings() {
               <div className="text-xs text-slate-500">
                 Nếu chọn Không, tổng kết tuần sẽ không bắt buộc upload đủ Excel sổ đầu bài khối 10, 11, 12.
               </div>
+            </label>
+
+            <label className="space-y-2">
+              <span className="text-sm font-semibold text-slate-900">Áp dụng thưởng sổ đầu bài tuần</span>
+              <select value={weeklyBonusEnabled} onChange={(e) => setWeeklyBonusEnabled(e.target.value)} className="w-full rounded-2xl border border-blue-100 bg-white px-4 py-3 text-sm outline-none focus:border-[#2e77df]">
+                <option value="1">Có</option>
+                <option value="0">Không</option>
+              </select>
+            </label>
+
+            <label className="space-y-2">
+              <span className="text-sm font-semibold text-slate-900">Ngưỡng điểm thưởng tuần</span>
+              <input type="number" min={0} step="0.1" value={weeklyBonusThreshold} onChange={(e) => setWeeklyBonusThreshold(e.target.value)} className="w-full rounded-2xl border border-blue-100 bg-white px-4 py-3 text-sm outline-none focus:border-[#2e77df]" />
+            </label>
+
+            <label className="space-y-2">
+              <span className="text-sm font-semibold text-slate-900">Yêu cầu mọi mục đều đạt ngưỡng</span>
+              <select value={weeklyBonusRequireAll} onChange={(e) => setWeeklyBonusRequireAll(e.target.value)} className="w-full rounded-2xl border border-blue-100 bg-white px-4 py-3 text-sm outline-none focus:border-[#2e77df]">
+                <option value="1">Có</option>
+                <option value="0">Không</option>
+              </select>
+            </label>
+
+            <label className="space-y-2">
+              <span className="text-sm font-semibold text-slate-900">Điểm thưởng tuần</span>
+              <input type="number" min={0} step="0.1" value={weeklyBonusPoints} onChange={(e) => setWeeklyBonusPoints(e.target.value)} className="w-full rounded-2xl border border-blue-100 bg-white px-4 py-3 text-sm outline-none focus:border-[#2e77df]" />
             </label>
           </div>
         </AdminSectionCard>
