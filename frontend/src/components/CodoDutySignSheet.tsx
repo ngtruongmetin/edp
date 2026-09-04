@@ -5,6 +5,7 @@ import toast from "react-hot-toast"
 import CameraCapture from "./CameraCapture"
 import { useDutyOffline } from "../offline/duty/DutyOfflineContext"
 import { offlinePinVerifier } from "../offline/duty/offlinePinVerifier"
+import { api } from "../api/api"
 
 type SignableDutySession = {
   id: number
@@ -71,6 +72,18 @@ export default function CodoDutySignSheet({
         signableSession = await repository.loadSessionById(activeSession.id)
       }
       if (!signableSession) throw new Error("DUTY_OFFLINE_SESSION_MISSING")
+      const offlineEnabled = await repository.isOfflineEnabled()
+      if (!offlineEnabled) {
+        const form = new FormData()
+        form.append("session_id", String(signableSession.serverId || signableSession.localId))
+        form.append("pin", pin.trim())
+        if (photoFile) form.append("photo", photoFile, photoFile.name)
+        await api.post("/duty/sign", form)
+        toast.success("Đã ký xác nhận")
+        await Promise.resolve(onSigned?.())
+        onClose()
+        return
+      }
       if (navigator.onLine && !signableSession.serverId) {
         await syncNow()
         signableSession = await repository.getSessionByRouteId(signableSession.localId) || signableSession

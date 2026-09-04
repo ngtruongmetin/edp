@@ -1,6 +1,7 @@
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from "react"
 import { useAuth } from "../../auth/AuthContext"
 import { getDutyRepository, type OfflineDutyRepository } from "./repository"
+import { api } from "../../api/api"
 import { DutySyncEngine } from "./syncEngine"
 import type { DutyOfflineReadiness, DutySyncStatus } from "./types"
 
@@ -8,6 +9,7 @@ type DutyOfflineContextValue = {
   repository: OfflineDutyRepository
   status: DutySyncStatus
   readiness: DutyOfflineReadiness
+  offlineEnabled: boolean
   syncNow: () => Promise<void>
 }
 
@@ -31,6 +33,7 @@ export function DutyOfflineProvider({ children }: { children: ReactNode }) {
   const [engine, setEngine] = useState<DutySyncEngine | null>(null)
   const [status, setStatus] = useState(initialStatus)
   const [readiness, setReadiness] = useState<DutyOfflineReadiness>({ ready: false, syncing: false })
+  const [offlineEnabled, setOfflineEnabled] = useState(false)
 
   useEffect(() => {
     if (!ownerClass) return
@@ -44,7 +47,23 @@ export function DutyOfflineProvider({ children }: { children: ReactNode }) {
   }, [ownerClass])
 
   useEffect(() => {
-    if (!ownerClass) {
+    if (!ownerClass) return
+    let active = true
+    void api.get<{ enabled: boolean }>("/system-settings/offline-duty")
+      .then(({ data }) => {
+        if (!active) return
+        setOfflineEnabled(data.enabled !== false)
+        return repository.setOfflineEnabled(data.enabled !== false)
+      })
+      .catch(async () => {
+        const cached = await repository.isOfflineEnabled()
+        if (active) setOfflineEnabled(cached)
+      })
+    return () => { active = false }
+  }, [ownerClass, repository])
+
+  useEffect(() => {
+    if (!ownerClass || !offlineEnabled) {
       setReadiness({ ready: false, syncing: false })
       return
     }
@@ -90,10 +109,10 @@ export function DutyOfflineProvider({ children }: { children: ReactNode }) {
       window.removeEventListener("online", handleOnline)
       document.removeEventListener("visibilitychange", handleVisibilityChange)
     }
-  }, [ownerClass, repository])
+  }, [offlineEnabled, ownerClass, repository])
 
   return (
-    <DutyOfflineContext.Provider value={{ repository, status, readiness, syncNow: () => engine?.sync() ?? Promise.resolve() }}>
+    <DutyOfflineContext.Provider value={{ repository, status, readiness: offlineEnabled ? readiness : { ready: false, syncing: false }, offlineEnabled, syncNow: () => offlineEnabled ? engine?.sync() ?? Promise.resolve() : Promise.resolve() }}>
       {children}
     </DutyOfflineContext.Provider>
   )

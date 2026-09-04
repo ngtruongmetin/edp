@@ -47,7 +47,7 @@ export default function CodoDuty() {
   const routeSessionId = params.id ? Number(params.id) : null
   const navigate = useNavigate()
   const { user: authUser } = useAuth()
-  const { repository, syncNow } = useDutyOffline()
+  const { repository, syncNow, offlineEnabled } = useDutyOffline()
 
   const [time, setTime] = useState(new Date())
 
@@ -165,12 +165,13 @@ export default function CodoDuty() {
 
   async function loadUserAndSchedule() {
     const cn = className || authUser?.class_name || ""
-    if (!navigator.onLine) {
+    if (!navigator.onLine && offlineEnabled) {
       const cached = await repository.getBootstrap()
       setWeek(cached?.week || null)
       setDutyClass(cached?.dutyClass || null)
       return
     }
+    if (!navigator.onLine) return
     const sch = await api.get("/schedule")
 
     setWeek(sch.data?.week || null)

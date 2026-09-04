@@ -17,6 +17,7 @@ const {
   writeDutyImage,
 } = require("./dutyFiles")
 const { httpError } = require("./pinVerification")
+const SystemSettingService = require("../system-settings/service")
 
 const router = express.Router()
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
@@ -33,6 +34,15 @@ const imageUpload = multer({
 })
 
 router.use(requireLogin, requireRole(["co_do"]))
+router.use(async (req, res, next) => {
+  try {
+    const enabled = SystemSettingService.isEnabled(await SystemSettingService.get("offline_duty_enabled", "1"), true)
+    if (!enabled) return res.status(403).json({ error: "Chế độ đi trực ngoại tuyến đang tắt." })
+    next()
+  } catch (error) {
+    next(error)
+  }
+})
 
 function assertUuid(value, fieldName) {
   const normalized = String(value || "").trim()
@@ -146,7 +156,7 @@ async function computeViolationHash(client, sessionId) {
   return crypto.createHash("sha256").update(JSON.stringify(normalized)).digest("hex")
 }
 
-async function markEdited(client, session, action) {
+async function markEdited(client, session, action, user, metadata = {}) {
   if (session.signed_snapshot_hash) {
     const currentHash = await computeViolationHash(client, session.id)
     if (currentHash !== session.signed_snapshot_hash) {
@@ -154,8 +164,8 @@ async function markEdited(client, session, action) {
     }
   }
   await client.query(
-    `INSERT INTO duty_revision_logs (session_id, action, created_at) VALUES ($1, $2, $3)`,
-    [session.id, action, time.now()],
+    `INSERT INTO duty_revision_logs (session_id, action, created_at, actor_id, actor_role, metadata) VALUES ($1, $2, $3, $4, $5, $6::jsonb)`,
+    [session.id, action, time.now(), user?.class_id || null, user?.role || null, JSON.stringify({ actor_name: user?.username || user?.class_name || null, ...metadata })],
   )
 }
 
@@ -202,18 +212,19 @@ async function buildOfflineSnapshot(ownerClass) {
   const week = weekResult.rows[0] || null
   const assignmentsResult = week
     ? await pool.query(
-      `SELECT red_class, duty_class FROM schedule_assignments WHERE week_id = $1 ORDER BY red_class ASC`,
-      [week.id],
+      `SELECT red_class, duty_class FROM schedule_assignments WHERE week_id = $1 AND red_class = $2 LIMIT 1`,
+      [week.id, ownerClass],
     )
     : { rows: [] }
 
-  const classes = classesResult.rows.map((row) => ({
+  const assignedDutyClass = assignmentsResult.rows[0]?.duty_class
+  const classes = classesResult.rows.filter((row) => assignedDutyClass && row.name === assignedDutyClass).map((row) => ({
     id: Number(row.id),
     name: row.name,
     grade: Number(row.grade || 0),
     is_active: Number(row.is_active || 0),
   }))
-  const committees = classesResult.rows.map((row) => ({
+  const committees = classesResult.rows.filter((row) => assignedDutyClass && row.name === assignedDutyClass).map((row) => ({
     account_id: Number(row.account_id || 0),
     class_id: Number(row.id),
     class_name: row.name,
@@ -426,8 +437,7 @@ router.post("/sessions/:clientId/violations", handleRoute(async (req, res) => {
     if (completed) return completed
     const session = await getOwnedSession(client, clientId, req.session.user.class_name)
     await ensureWeekOpen(client, session.week_id)
-
-    const ruleResult = await client.query(`SELECT id FROM rules WHERE id = $1 LIMIT 1`, [ruleId])
+    const ruleResult = await client.query(`SELECT id, name FROM rules WHERE id = $1 LIMIT 1`, [ruleId])
     if (!ruleResult.rows[0]) throw httpError(400, "Lỗi vi phạm không còn tồn tại.")
     const violationResult = await client.query(
       `
@@ -439,7 +449,7 @@ router.post("/sessions/:clientId/violations", handleRoute(async (req, res) => {
       [violationClientId, session.id, ruleId, quantity, note],
     )
     const result = { success: true, id: violationResult.rows[0].id, violation_client_id: violationClientId }
-    await markEdited(client, session, "offline:add_violation")
+    await markEdited(client, session, "offline:add_violation", req.session.user, { rule_id: ruleId, rule_name: ruleResult.rows[0].name, quantity, note, operation_id: operationId })
     await completeOperation(client, operationId, clientId, "add_violation", result)
     return result
   })
@@ -462,16 +472,20 @@ router.post("/sessions/:clientId/violations/delete", handleRoute(async (req, res
     await ensureWeekOpen(client, session.week_id)
     const deleted = await client.query(
       `
-        DELETE FROM duty_violations
+      DELETE FROM duty_violations
         WHERE session_id = $1
           AND (($2::integer > 0 AND id = $2) OR ($3::uuid IS NOT NULL AND client_id = $3))
-        RETURNING id
+      RETURNING id, rule_id, quantity, note
       `,
       [session.id, violationId, violationClientId],
     )
     const deletedId = Number(deleted.rows[0]?.id || violationId || 0)
     const result = { success: true, id: deletedId }
-    await markEdited(client, session, "offline:remove_violation")
+    const deletedViolation = deleted.rows[0]
+    const ruleNameResult = deletedViolation?.rule_id
+      ? await client.query(`SELECT name FROM rules WHERE id = $1 LIMIT 1`, [deletedViolation.rule_id])
+      : { rows: [] }
+    await markEdited(client, session, "offline:remove_violation", req.session.user, { violation_id: deletedId, rule_name: ruleNameResult.rows[0]?.name, quantity: deletedViolation?.quantity, note: deletedViolation?.note, operation_id: operationId })
     await completeOperation(client, operationId, clientId, "delete_violation", result)
     return result
   })
@@ -497,7 +511,12 @@ router.post("/sessions/:clientId/violations/update", handleRoute(async (req, res
     if (completed) return completed
     const session = await getOwnedSession(client, clientId, req.session.user.class_name)
     await ensureWeekOpen(client, session.week_id)
-    const ruleResult = await client.query(`SELECT id FROM rules WHERE id = $1 LIMIT 1`, [ruleId])
+    const previousResult = await client.query(
+      `SELECT v.rule_id, v.quantity, v.note, r.name AS rule_name FROM duty_violations v LEFT JOIN rules r ON r.id = v.rule_id WHERE v.session_id = $1 AND (($2::integer > 0 AND v.id = $2) OR ($3::uuid IS NOT NULL AND v.client_id = $3)) LIMIT 1`,
+      [session.id, violationId, violationClientId],
+    )
+    const previous = previousResult.rows[0]
+    const ruleResult = await client.query(`SELECT id, name FROM rules WHERE id = $1 LIMIT 1`, [ruleId])
     if (!ruleResult.rows[0]) throw httpError(400, "Lỗi vi phạm không còn tồn tại.")
     const updated = await client.query(
       `
@@ -511,7 +530,7 @@ router.post("/sessions/:clientId/violations/update", handleRoute(async (req, res
     )
     if (!updated.rows[0]) throw httpError(404, "Không tìm thấy vi phạm cần sửa.")
     const result = { success: true, id: Number(updated.rows[0].id) }
-    await markEdited(client, session, "offline:update_violation")
+    await markEdited(client, session, "offline:update_violation", req.session.user, { violation_id: Number(updated.rows[0].id), old_rule_id: previous?.rule_id, old_rule_name: previous?.rule_name, rule_id: ruleId, rule_name: ruleResult.rows[0].name, old_quantity: previous?.quantity, quantity, old_note: previous?.note, note, operation_id: operationId })
     await completeOperation(client, operationId, clientId, "update_violation", result)
     return result
   })
@@ -552,7 +571,7 @@ router.post(
           [session.id, written.fileName, sanitizeDutyEvidenceFileName(req.file.originalname), req.file.mimetype, req.file.size, Number(countResult.rows[0].count), time.now()],
         )
         const result = { success: true, id: imageResult.rows[0].id, url: `/api/duty/evidence/${imageResult.rows[0].id}/file` }
-        await markEdited(client, session, "offline:add_evidence")
+        await markEdited(client, session, "offline:add_evidence", req.session.user, { file_name: file.file_name, byte_size: file.byte_size, operation_id: operationId })
         await completeOperation(client, operationId, clientId, "upload_evidence", result)
         return result
       })
@@ -580,7 +599,7 @@ router.post("/sessions/:clientId/evidences/delete", handleRoute(async (req, res)
     filePath = imageResult.rows[0]?.file_path || null
     await client.query(`DELETE FROM duty_evidence_images WHERE id = $1 AND session_id = $2`, [imageId, session.id])
     const result = { success: true, id: imageId }
-    await markEdited(client, session, "offline:remove_evidence")
+    await markEdited(client, session, "offline:remove_evidence", req.session.user, { image_id: imageId, operation_id: operationId })
     await completeOperation(client, operationId, clientId, "delete_evidence", result)
     return result
   })

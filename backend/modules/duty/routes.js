@@ -1914,10 +1914,10 @@ function syncSignedStatusAfterChange(sessionId, action, cb) {
             db.run(
               `
                 INSERT INTO duty_revision_logs
-                (session_id,action,created_at)
-                VALUES(?,?,?)
+                (session_id,action,created_at,actor_role,metadata)
+                VALUES(?,?,?, ?, ?::jsonb)
               `,
-              [sessionId, action, time.now()],
+              [sessionId, action, time.now(), "co_do", JSON.stringify({ status: "signed -> draft" })],
               (err) => {
                 if (err) return cb(err)
                 cb(null, { changed: true })
@@ -2473,8 +2473,8 @@ router.post(
       }
 
       await client.query(
-        `INSERT INTO duty_revision_logs (session_id, action, created_at) VALUES ($1, $2, $3)`,
-        [sessionId, "edit:add_evidence", now],
+        `INSERT INTO duty_revision_logs (session_id, action, created_at, actor_id, actor_role, metadata) VALUES ($1, $2, $3, $4, $5, $6::jsonb)`,
+        [sessionId, "edit:add_evidence", now, req.session.user?.class_id || null, req.session.user?.role || null, JSON.stringify({ actor_name: req.session.user?.username || req.session.user?.class_name || null, count: uploadedFiles.length })],
       )
       await client.query("COMMIT")
       res.status(201).json({ images })
@@ -2521,8 +2521,8 @@ router.delete(
 
       await client.query(`DELETE FROM duty_evidence_images WHERE id = $1`, [imageId])
       await client.query(
-        `INSERT INTO duty_revision_logs (session_id, action, created_at) VALUES ($1, $2, $3)`,
-        [image.session_id, "edit:remove_evidence", time.now()],
+        `INSERT INTO duty_revision_logs (session_id, action, created_at, actor_id, actor_role, metadata) VALUES ($1, $2, $3, $4, $5, $6::jsonb)`,
+        [image.session_id, "edit:remove_evidence", time.now(), req.session.user?.class_id || null, req.session.user?.role || null, JSON.stringify({ actor_name: req.session.user?.username || req.session.user?.class_name || null, image_id: imageId })],
       )
       await client.query("COMMIT")
       removeDutyEvidenceFiles([{ filePath: image.file_path }])
@@ -2629,9 +2629,12 @@ router.post(
                 if (err) return res.status(500).json({ error: err.message })
 
                 const finalize = (payload) => {
-                  syncSignedStatusAfterChange(session_id, "edit:add_violation", (err) => {
-                    if (err) return res.status(500).json({ error: err.message })
-                    res.json(payload)
+                  recordRevision(session_id, "edit:add_violation", req, { rule_id, quantity: q, note: n, merged: Boolean(payload.merged), old_quantity: payload.old_quantity, new_quantity: payload.new_quantity }, (revisionErr) => {
+                    if (revisionErr) return res.status(500).json({ error: revisionErr.message })
+                    syncSignedStatusAfterChange(session_id, "edit:add_violation", (err) => {
+                      if (err) return res.status(500).json({ error: err.message })
+                      res.json(payload)
+                    })
                   })
                 }
 
@@ -2641,7 +2644,7 @@ router.post(
                     [Number(existing.quantity || 0) + q, existing.id],
                     (err) => {
                       if (err) return res.status(500).json({ error: err.message })
-                      finalize({ success: true, merged: true, id: existing.id })
+                      finalize({ success: true, merged: true, id: existing.id, old_quantity: Number(existing.quantity || 0), new_quantity: Number(existing.quantity || 0) + q })
                     },
                   )
                   return
@@ -2685,10 +2688,11 @@ router.delete(
 
     db.get(
       `
-      SELECT v.id, v.session_id, s.week_id
+      SELECT v.id, v.session_id, v.rule_id, v.quantity, v.note, r.name AS rule_name, s.week_id
       FROM duty_violations v
       JOIN duty_sessions s
         ON s.id = v.session_id
+      LEFT JOIN rules r ON r.id = v.rule_id
       WHERE v.id=?
         AND s.red_class=?
       LIMIT 1
@@ -2712,9 +2716,12 @@ router.delete(
               (err) => {
                 if (err) return res.status(500).json({ error: err.message })
 
-                syncSignedStatusAfterChange(row.session_id, "edit:remove_violation", (err) => {
-                  if (err) return res.status(500).json({ error: err.message })
-                  res.json({ success: true })
+                recordRevision(row.session_id, "edit:remove_violation", req, { violation_id: row.id, rule_id: row.rule_id, rule_name: row.rule_name, quantity: row.quantity, note: row.note }, (revisionErr) => {
+                  if (revisionErr) return res.status(500).json({ error: revisionErr.message })
+                  syncSignedStatusAfterChange(row.session_id, "edit:remove_violation", (err) => {
+                    if (err) return res.status(500).json({ error: err.message })
+                    res.json({ success: true })
+                  })
                 })
               },
             )
@@ -2761,13 +2768,51 @@ router.post(
             function (err) {
               if (err) return res.status(500).json({ error: err.message })
               db.run(
-                `INSERT INTO duty_revision_logs (session_id, action, created_at) VALUES(?,?,?)`,
-                [session_id, "edit:add_violation", time.now()],
+                `INSERT INTO duty_revision_logs (session_id, action, created_at, actor_role, metadata) VALUES(?,?,?, ?, ?::jsonb)`,
+                [session_id, "edit:add_violation", time.now(), req.session.user?.role || "admin", JSON.stringify({ actor_name: req.session.user?.username || null, rule_id, quantity: q, note: n })],
                 () => { },
               )
               res.json({ success: true, id: this.lastID })
             },
           )
+        })
+      },
+    )
+  },
+)
+
+router.put(
+  "/violation/:id",
+  requireLogin,
+  requireRole(["co_do"]),
+  (req, res) => {
+    const id = Number(req.params.id)
+    const ruleId = Number(req.body?.rule_id || 0)
+    const quantity = Number(req.body?.quantity || 0)
+    const note = String(req.body?.note || "").trim()
+    if (!id || !ruleId || !Number.isInteger(quantity) || quantity < 1 || !note) {
+      return res.status(400).json({ error: "Invalid violation" })
+    }
+    const redClass = req.session.user?.class_name
+    db.get(
+      `SELECT v.id, v.session_id, v.rule_id AS old_rule_id, v.quantity AS old_quantity, v.note AS old_note, s.week_id FROM duty_violations v JOIN duty_sessions s ON s.id=v.session_id WHERE v.id=? AND s.red_class=? LIMIT 1`,
+      [id, redClass],
+      (err, row) => {
+        if (err) return res.status(500).json({ error: err.message })
+        if (!row) return res.status(404).json({ error: "Violation not found" })
+        isWeekClosed(row.week_id, (closedErr, closed) => {
+          if (closedErr) return res.status(500).json({ error: closedErr.message })
+          if (closed) return res.status(403).json({ error: "Week closed" })
+          db.run(`UPDATE duty_violations SET rule_id=?, quantity=?, note=? WHERE id=?`, [ruleId, quantity, note, id], (updateErr) => {
+            if (updateErr) return res.status(500).json({ error: updateErr.message })
+            recordRevision(row.session_id, "edit:update_violation", req, { violation_id: id, old_rule_id: row.old_rule_id, new_rule_id: ruleId, old_quantity: row.old_quantity, new_quantity: quantity, old_note: row.old_note, new_note: note }, (revisionErr) => {
+              if (revisionErr) return res.status(500).json({ error: revisionErr.message })
+              syncSignedStatusAfterChange(row.session_id, "edit:update_violation", (statusErr) => {
+                if (statusErr) return res.status(500).json({ error: statusErr.message })
+                res.json({ success: true, id })
+              })
+            })
+          })
         })
       },
     )
@@ -2813,8 +2858,8 @@ router.put(
             (err) => {
               if (err) return res.status(500).json({ error: err.message })
               db.run(
-                `INSERT INTO duty_revision_logs (session_id, action, created_at) VALUES(?,?,?)`,
-                [row.session_id, "edit:update_violation", time.now()],
+                `INSERT INTO duty_revision_logs (session_id, action, created_at, actor_role, metadata) VALUES(?,?,?, ?, ?::jsonb)`,
+                [row.session_id, "edit:update_violation", time.now(), req.session.user?.role || "admin", JSON.stringify({ actor_name: req.session.user?.username || null, violation_id: id, rule_id, quantity: q, note: n })],
                 () => { },
               )
               res.json({ success: true })
@@ -2857,8 +2902,8 @@ router.delete(
             (err) => {
               if (err) return res.status(500).json({ error: err.message })
               db.run(
-                `INSERT INTO duty_revision_logs (session_id, action, created_at) VALUES(?,?,?)`,
-                [row.session_id, "edit:remove_violation", time.now()],
+                `INSERT INTO duty_revision_logs (session_id, action, created_at, actor_role, metadata) VALUES(?,?,?, ?, ?::jsonb)`,
+                [row.session_id, "edit:remove_violation", time.now(), req.session.user?.role || "admin", JSON.stringify({ actor_name: req.session.user?.username || null, violation_id: id })],
                 () => { },
               )
               res.json({ success: true })
@@ -2949,10 +2994,10 @@ router.post(
                           db.run(
                             `
                               INSERT INTO duty_revision_logs
-                              (session_id,action,created_at)
-                              VALUES(?,?,?)
+                              (session_id,action,created_at,actor_id,actor_role,metadata)
+                              VALUES(?,?,?,?,?,?::jsonb)
                             `,
-                            [session_id, "sign", time.now()],
+                            [session_id, "sign", time.now(), req.session.user?.class_id || null, req.session.user?.role || null, JSON.stringify({ actor_name: req.session.user?.class_name || null })],
                             () => {
                               res.json({ success: true, photo_path: photoPath })
                             },
@@ -3052,7 +3097,7 @@ router.get(
 
             db.all(
               `
-                SELECT id, action, created_at
+                SELECT id, action, created_at, actor_id, actor_role, metadata
                 FROM duty_revision_logs
                 WHERE session_id=?
                 ORDER BY id DESC
@@ -3411,10 +3456,10 @@ router.post(
                             db.run(
                               `
                                 INSERT INTO duty_revision_logs
-                                (session_id,action,created_at)
-                                VALUES(?,?,?)
+                                (session_id,action,created_at,actor_id,actor_role,metadata)
+                                VALUES(?,?,?,?,?,?::jsonb)
                               `,
-                              [sessionId, "sign:admin", now],
+                              [sessionId, "sign:admin", now, req.session.user?.class_id || null, req.session.user?.role || null, JSON.stringify({ actor_name: req.session.user?.username || null })],
                               () => {
                                 res.json({ success: true })
                               },
@@ -4803,6 +4848,15 @@ function sendClassWeekSummary(req, res) {
 
 function banCanSuPaths(path) {
   return [path, path.replace("/ban_can_su", "/bancansu")]
+}
+
+function recordRevision(sessionId, action, req, metadata, cb) {
+  const user = req.session.user || {}
+  db.run(
+    `INSERT INTO duty_revision_logs (session_id, action, created_at, actor_id, actor_role, metadata) VALUES (?, ?, ?, ?, ?, ?::jsonb)`,
+    [sessionId, action, time.now(), user.class_id || null, user.role || null, JSON.stringify({ actor_name: user.username || user.class_name || null, ...metadata })],
+    cb,
+  )
 }
 
 router.get(

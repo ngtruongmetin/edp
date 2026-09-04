@@ -5,7 +5,7 @@ import { api } from "../../api/api"
 import Navbar from "../../components/Navbar"
 import Footer from "../../components/Footer"
 import DutyEvidencePanel from "../../components/DutyEvidencePanel"
-import { formatDutyStatus, formatRevisionAction } from "../../utils/dutyFormat"
+import { formatDutyStatus, formatRevisionAction, formatRevisionDetails } from "../../utils/dutyFormat"
 import { violationQuantityLabel } from "../../utils/dutyViolations"
 import { usePageTitle } from "../../utils/usePageTitle"
 
@@ -300,9 +300,11 @@ export default function AdminDutyWeek() {
                           className="rounded-2xl border border-blue-100 bg-white px-4 py-3"
                         >
                           <div className="text-xs text-gray-500">{r.created_at}</div>
+                          <div className="text-xs text-gray-500">{r.actor_role === "unknown" ? "Chưa xác định (log cũ)" : r.actor_role || "Hệ thống"}</div>
                           <div className="text-sm font-semibold text-gray-900">
                             {formatRevisionAction(r.action)}
                           </div>
+                          {formatRevisionDetails(r) && <div className="mt-1 text-xs text-gray-600">{formatRevisionDetails(r)}</div>}
                         </div>
                       ))
                     ) : (

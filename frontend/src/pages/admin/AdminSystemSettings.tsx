@@ -147,6 +147,7 @@ export default function AdminSystemSettings() {
   const [weeklyBonusThreshold, setWeeklyBonusThreshold] = useState("10")
   const [weeklyBonusRequireAll, setWeeklyBonusRequireAll] = useState("1")
   const [weeklyBonusPoints, setWeeklyBonusPoints] = useState("30")
+  const [offlineDutyEnabled, setOfflineDutyEnabled] = useState("1")
   const [lastTestFingerprint, setLastTestFingerprint] = useState("")
   const [testPassed, setTestPassed] = useState(false)
 
@@ -206,6 +207,7 @@ export default function AdminSystemSettings() {
       setWeeklyBonusThreshold(settingsRes.data.settings.weekly_bonus_score_threshold?.value || "10")
       setWeeklyBonusRequireAll(settingsRes.data.settings.weekly_bonus_require_all_entries?.value === "0" ? "0" : "1")
       setWeeklyBonusPoints(settingsRes.data.settings.weekly_bonus_points?.value || "30")
+      setOfflineDutyEnabled(settingsRes.data.settings.offline_duty_enabled?.value === "0" ? "0" : "1")
       applyAiConfig(aiRes.data.config)
     } catch (err: any) {
       console.error(err)
@@ -391,6 +393,7 @@ export default function AdminSystemSettings() {
           weekly_bonus_score_threshold: Number(weeklyBonusThreshold),
           weekly_bonus_require_all_entries: weeklyBonusRequireAll,
           weekly_bonus_points: Number(weeklyBonusPoints),
+          offline_duty_enabled: offlineDutyEnabled,
         },
       })
 
@@ -401,6 +404,7 @@ export default function AdminSystemSettings() {
       setWeeklyBonusThreshold(res.data.settings.weekly_bonus_score_threshold?.value || weeklyBonusThreshold)
       setWeeklyBonusRequireAll(res.data.settings.weekly_bonus_require_all_entries?.value === "0" ? "0" : "1")
       setWeeklyBonusPoints(res.data.settings.weekly_bonus_points?.value || weeklyBonusPoints)
+      setOfflineDutyEnabled(res.data.settings.offline_duty_enabled?.value === "0" ? "0" : "1")
       setNotice("Đã lưu cấu hình hệ thống.")
       return true
     } catch (err: any) {
@@ -623,6 +627,15 @@ export default function AdminSystemSettings() {
           </div>
 
           <div className="grid gap-5 lg:grid-cols-2">
+            <label className="space-y-2 lg:col-span-2">
+              <span className="text-sm font-semibold text-slate-900">Cho phép Cờ đỏ đi trực ngoại tuyến</span>
+              <select value={offlineDutyEnabled} onChange={(e) => setOfflineDutyEnabled(e.target.value)} className="w-full rounded-2xl border border-blue-100 bg-white px-4 py-3 text-sm outline-none focus:border-[#2e77df]">
+                <option value="1">Bật</option>
+                <option value="0">Tắt</option>
+              </select>
+              <div className="text-xs text-slate-500">Khi tắt, Cờ đỏ vẫn đi trực trực tuyến bình thường.</div>
+            </label>
+
             <label className="space-y-2">
               <span className="text-sm font-semibold text-slate-900">Năm học đang dùng</span>
               <input

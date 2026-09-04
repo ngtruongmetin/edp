@@ -42,7 +42,7 @@ type DutySessionListItem = {
 export default function CoDoDashboard() {
   usePageTitle("EDP | Cờ đỏ")
   const { user: authUser, isOffline } = useAuth()
-  const { repository, syncNow } = useDutyOffline()
+  const { repository, syncNow, offlineEnabled } = useDutyOffline()
 
   const [time, setTime] = useState("")
   const [date, setDate] = useState("")
@@ -97,7 +97,7 @@ export default function CoDoDashboard() {
   }, [weekId, isOffline])
 
   useEffect(() => {
-    if (!isOffline) return
+    if (!isOffline || !offlineEnabled) return
     void repository.getBootstrap().then(async (cached) => {
       if (!cached) return
       setClassName(cached.ownerClass)
@@ -108,7 +108,7 @@ export default function CoDoDashboard() {
       setWeekId(cached.week.id)
       await loadCachedWeek(cached.week.id)
     })
-  }, [isOffline, repository])
+  }, [isOffline, offlineEnabled, repository])
 
   useEffect(() => {
     if (!className || !dutyClassCurrent || !week?.id) return

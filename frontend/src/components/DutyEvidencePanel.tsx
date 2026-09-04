@@ -44,7 +44,7 @@ export default function DutyEvidencePanel({ session, sessionId, readOnly = false
     try {
       setLoading(true)
       const activeServerId = session?.serverId || sessionId
-      if (session && dutyOffline) {
+      if (session && dutyOffline?.offlineEnabled) {
         if (navigator.onLine && activeServerId) {
           const response = await api.get<{ images: Array<Record<string, unknown>> }>(`/duty/session/${activeServerId}/evidences`)
           await dutyOffline.repository.cacheServerEvidence(session, Array.isArray(response.data?.images) ? response.data.images : [])
@@ -108,7 +108,7 @@ export default function DutyEvidencePanel({ session, sessionId, readOnly = false
 
     try {
       setUploading(true)
-      if (session && dutyOffline) {
+      if (session && dutyOffline?.offlineEnabled) {
         for (const file of selectedFiles) {
           await dutyOffline.repository.addEvidence(session, file)
         }
@@ -134,7 +134,7 @@ export default function DutyEvidencePanel({ session, sessionId, readOnly = false
 
     try {
       setRemovingId(image.id)
-      if (session && dutyOffline && image.attachment) {
+      if (session && dutyOffline?.offlineEnabled && image.attachment) {
         await dutyOffline.repository.removeEvidence(session, image.attachment)
         if (image.url.startsWith("blob:")) URL.revokeObjectURL(image.url)
         void dutyOffline.syncNow()

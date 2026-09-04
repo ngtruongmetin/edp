@@ -11,23 +11,27 @@ const SETTING_DEFINITIONS = {
   },
   use_electronic_gradebook: {
     key: "use_electronic_gradebook",
-    description: "Ap dung so dau bai dien tu khi tong ket tuan",
+    description: "Áp dụng sổ đầu bài điện tử khi tổng kết tuần",
   },
   weekly_bonus_enabled: {
     key: "weekly_bonus_enabled",
-    description: "Ap dung thuong tu so dau bai theo tuan",
+    description: "Áp dụng thưởng từ sổ đầu bài theo tuần",
   },
   weekly_bonus_score_threshold: {
     key: "weekly_bonus_score_threshold",
-    description: "Diem so dau bai toi thieu de xet thuong tuan",
+    description: "Điểm sổ đầu bài tối thiểu để xét thưởng tuần",
   },
   weekly_bonus_require_all_entries: {
     key: "weekly_bonus_require_all_entries",
-    description: "Yeu cau tat ca diem so dau bai dat nguong de thuong tuan",
+    description: "Yêu cầu tất cả điểm sổ đầu bài đạt ngưỡng để thưởng tuần",
   },
   weekly_bonus_points: {
     key: "weekly_bonus_points",
-    description: "So diem thuong so dau bai theo tuan",
+    description: "Số điểm thưởng sổ đầu bài theo tuần",
+  },
+  offline_duty_enabled: {
+    key: "offline_duty_enabled",
+    description: "Cho phép Cờ đỏ sử dụng chế độ đi trực ngoại tuyến",
   },
 }
 
@@ -135,6 +139,11 @@ async function getAdminSettingsView() {
   return output
 }
 
+function isEnabled(value, fallback = false) {
+  if (value === undefined || value === null || value === "") return fallback
+  return ["1", "true", "yes", "co", "có"].includes(String(value).trim().toLowerCase())
+}
+
 module.exports = {
   SETTING_DEFINITIONS,
   refreshCache,
@@ -145,4 +154,5 @@ module.exports = {
   update,
   findByKey,
   getAdminSettingsView,
+  isEnabled,
 }

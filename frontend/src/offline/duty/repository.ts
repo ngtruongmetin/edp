@@ -36,6 +36,7 @@ type ServerSession = {
 }
 
 const repositories = new Map<string, OfflineDutyRepository>()
+const OFFLINE_ENABLED_KEY = "offline-duty-enabled"
 
 function nowIso() {
   return new Date().toISOString()
@@ -67,6 +68,14 @@ export class OfflineDutyRepository {
     this.ownerClass = ownerClass
   }
 
+  async setOfflineEnabled(enabled: boolean) {
+    await dutyStorage.setMetadata(OFFLINE_ENABLED_KEY, enabled)
+  }
+
+  async isOfflineEnabled() {
+    return (await dutyStorage.getMetadata<boolean>(OFFLINE_ENABLED_KEY)) ?? false
+  }
+
   private bootstrapKey() {
     return `bootstrap:${this.ownerClass}`
   }
@@ -96,6 +105,7 @@ export class OfflineDutyRepository {
   }
 
   async syncOfflineData(force = false) {
+    if (!(await this.isOfflineEnabled())) throw new Error("OFFLINE_DUTY_DISABLED")
     const cached = await this.getOfflineData()
     if (!force && this.isValidOfflineData(cached) && cached.data_version) {
       const manifestResponse = await api.get<DutyOfflineManifest>("/duty/offline/manifest")
@@ -152,6 +162,10 @@ export class OfflineDutyRepository {
   }
 
   async loadRules() {
+    if (!(await this.isOfflineEnabled()) && navigator.onLine) {
+      const response = await api.get<DutyRuleSnapshot[]>("/rules")
+      return response.data || []
+    }
     const snapshot = await this.getOfflineData()
     if (this.isValidOfflineData(snapshot)) return snapshot.rules
     if (navigator.onLine) {
@@ -165,6 +179,13 @@ export class OfflineDutyRepository {
   }
 
   async createSession() {
+    if (!(await this.isOfflineEnabled())) {
+      if (!navigator.onLine) throw new Error("OFFLINE_DUTY_DISABLED")
+      const response = await api.post("/duty/create")
+      const session = await this.loadSessionById(Number(response.data.session_id))
+      if (!session) throw new Error("DUTY_SESSION_MISSING")
+      return session
+    }
     if (navigator.onLine) {
       try {
         await this.syncOfflineData()
@@ -196,8 +217,7 @@ export class OfflineDutyRepository {
       bonusPoints: 0,
       violations: [],
     }
-    await dutyStorage.putSession(session)
-    await dutyStorage.putOperation(operation(this.ownerClass, clientId, "create_session", {
+    await dutyStorage.putSessionAndOperation(session, operation(this.ownerClass, clientId, "create_session", {
       client_id: clientId,
       date: session.date,
       created_at: createdAt,
@@ -212,6 +232,7 @@ export class OfflineDutyRepository {
   }
 
   async getSessionByRouteId(routeId: number) {
+    if (!(await this.isOfflineEnabled()) && !navigator.onLine) return null
     return dutyStorage.findSessionByRouteId(this.ownerClass, routeId)
   }
 
@@ -221,6 +242,7 @@ export class OfflineDutyRepository {
   }
 
   async loadCurrentSession() {
+    if (!(await this.isOfflineEnabled()) && !navigator.onLine) return null
     if (navigator.onLine) {
       try {
         const response = await api.get("/duty/current")
@@ -235,6 +257,7 @@ export class OfflineDutyRepository {
   }
 
   async loadSessionById(routeId: number) {
+    if (!(await this.isOfflineEnabled()) && !navigator.onLine) return null
     const local = await this.getSessionByRouteId(routeId)
     if (!navigator.onLine || routeId < 0) return local
     try {
@@ -305,6 +328,10 @@ export class OfflineDutyRepository {
   }
 
   async addViolation(session: OfflineDutySession, rule: DutyRuleSnapshot, quantity: number, note: string) {
+    if (!(await this.isOfflineEnabled())) {
+      await api.post("/duty/violation", { session_id: session.serverId || session.localId, rule_id: rule.id, quantity, note })
+      return (await this.loadSessionById(Number(session.serverId || session.localId))) || session
+    }
     const violationClientId = crypto.randomUUID()
     const violation: OfflineDutyViolation = {
       id: localNumericId(),
@@ -327,6 +354,10 @@ export class OfflineDutyRepository {
   }
 
   async removeViolation(session: OfflineDutySession, violation: OfflineDutyViolation) {
+    if (!(await this.isOfflineEnabled())) {
+      await api.delete(`/duty/violation/${violation.serverId || violation.id}`)
+      return (await this.loadSessionById(Number(session.serverId || session.localId))) || session
+    }
     const storedSession = await dutyStorage.getSession(session.clientId)
     const storedViolation = storedSession?.violations.find((item) =>
       item.id === violation.id || (item.clientId && item.clientId === violation.clientId),
@@ -351,6 +382,10 @@ export class OfflineDutyRepository {
   }
 
   async updateViolation(session: OfflineDutySession, violation: OfflineDutyViolation, rule: DutyRuleSnapshot, quantity: number, note: string) {
+    if (!(await this.isOfflineEnabled())) {
+      await api.put(`/duty/violation/${violation.serverId || violation.id}`, { rule_id: rule.id, quantity, note })
+      return (await this.loadSessionById(Number(session.serverId || session.localId))) || session
+    }
     const storedSession = await dutyStorage.getSession(session.clientId)
     const storedViolation = storedSession?.violations.find((item) =>
       item.id === violation.id || (item.clientId && item.clientId === violation.clientId),
@@ -392,6 +427,12 @@ export class OfflineDutyRepository {
   }
 
   async addEvidence(session: OfflineDutySession, file: File) {
+    if (!(await this.isOfflineEnabled())) {
+      const form = new FormData()
+      form.append("files", file)
+      await api.post(`/duty/session/${session.serverId || session.localId}/evidences`, form)
+      return { id: crypto.randomUUID(), clientId: session.clientId, ownerClass: this.ownerClass, kind: "evidence" as const, blob: file, fileName: file.name, mimeType: file.type, byteSize: file.size, createdAt: nowIso() }
+    }
     const attachmentId = crypto.randomUUID()
     const attachment: DutyOfflineAttachment = {
       id: attachmentId,
@@ -441,6 +482,10 @@ export class OfflineDutyRepository {
   }
 
   async removeEvidence(session: OfflineDutySession, attachment: DutyOfflineAttachment) {
+    if (!(await this.isOfflineEnabled())) {
+      if (attachment.serverId) await api.delete(`/duty/evidence/${attachment.serverId}`)
+      return
+    }
     const storedAttachment = await dutyStorage.getAttachment(attachment.id) || attachment
     const operations = await dutyStorage.listOperations(this.ownerClass, true)
     const pendingUpload = operations.find((item) => item.kind === "upload_evidence" && item.attachmentIds.includes(attachment.id) && item.status === "pending")
@@ -452,6 +497,13 @@ export class OfflineDutyRepository {
   }
 
   async queueSignature(session: OfflineDutySession, photo: File | null) {
+    if (!(await this.isOfflineEnabled())) {
+      const form = new FormData()
+      form.append("session_id", String(session.serverId || session.localId))
+      form.append("pin", "")
+      if (photo) form.append("photo", photo, photo.name)
+      throw new Error("ONLINE_SIGNATURE_REQUIRES_PIN")
+    }
     const attachmentIds: string[] = []
     if (photo) {
       const attachment: DutyOfflineAttachment = {

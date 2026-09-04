@@ -129,6 +129,8 @@ export default function Navbar() {
   const authIcon = user ? <LogoutIcon /> : <LoginIcon />
   const dutySyncLabel = user?.role !== "co_do" || !dutyOffline
     ? null
+    : !dutyOffline.offlineEnabled
+      ? "Chế độ ngoại tuyến đang tắt"
     : dutyOffline.status.phase === "offline"
       ? !dutyOffline.readiness.ready
         ? "Thiết bị chưa sẵn sàng làm việc ngoại tuyến."

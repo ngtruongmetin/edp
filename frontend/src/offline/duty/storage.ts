@@ -136,6 +136,20 @@ export class OfflineStorage {
     notifyChanged()
   }
 
+  async putSessionAndOperation(session: OfflineDutySession, operation: DutyOfflineOperation) {
+    const db = await openDutyDb()
+    const tx = db.transaction([SESSION_STORE, OPERATION_STORE], "readwrite")
+    const done = transactionDone(tx)
+    try {
+      await requestResult(tx.objectStore(SESSION_STORE).put(session))
+      await requestResult(tx.objectStore(OPERATION_STORE).put(operation))
+      await done
+    } finally {
+      db.close()
+    }
+    notifyChanged()
+  }
+
   async putAttachment(attachment: DutyOfflineAttachment) {
     await accessStore(ATTACHMENT_STORE, "readwrite", async (store) => {
       await requestResult(store.put(attachment))
@@ -190,6 +204,14 @@ export class OfflineStorage {
         await requestResult(store.put(entry.value, entry.key))
       }
     })
+    notifyChanged()
+  }
+
+  async clearAll() {
+    await accessStore(SESSION_STORE, "readwrite", async (store) => { await requestResult(store.clear()) })
+    await accessStore(OPERATION_STORE, "readwrite", async (store) => { await requestResult(store.clear()) })
+    await accessStore(ATTACHMENT_STORE, "readwrite", async (store) => { await requestResult(store.clear()) })
+    await accessStore(METADATA_STORE, "readwrite", async (store) => { await requestResult(store.clear()) })
     notifyChanged()
   }
 

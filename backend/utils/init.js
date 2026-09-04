@@ -23,27 +23,32 @@ const DEFAULT_SYSTEM_SETTINGS = [
   {
     key: "use_electronic_gradebook",
     value: "1",
-    description: "Ap dung so dau bai dien tu khi tong ket tuan",
+    description: "Áp dụng sổ đầu bài điện tử khi tổng kết tuần",
   },
   {
     key: "weekly_bonus_enabled",
     value: "1",
-    description: "Ap dung thuong tu so dau bai theo tuan",
+    description: "Áp dụng thưởng từ sổ đầu bài theo tuần",
   },
   {
     key: "weekly_bonus_score_threshold",
     value: "10",
-    description: "Diem so dau bai toi thieu de xet thuong tuan",
+    description: "Điểm sổ đầu bài tối thiểu để xét thưởng tuần",
   },
   {
     key: "weekly_bonus_require_all_entries",
     value: "1",
-    description: "Yeu cau tat ca diem so dau bai dat nguong de thuong tuan",
+    description: "Yêu cầu tất cả điểm sổ đầu bài đạt ngưỡng để thưởng tuần",
   },
   {
     key: "weekly_bonus_points",
     value: "30",
-    description: "So diem thuong so dau bai theo tuan",
+    description: "Số điểm thưởng sổ đầu bài theo tuần",
+  },
+  {
+    key: "offline_duty_enabled",
+    value: "1",
+    description: "Cho phép Cờ đỏ sử dụng chế độ đi trực ngoại tuyến",
   },
 ]
 
@@ -304,6 +309,24 @@ async function initDb() {
   await pool.query(`
     ALTER TABLE accounts
     ADD COLUMN IF NOT EXISTS pin_locked_until BIGINT NOT NULL DEFAULT 0
+  `)
+
+  await pool.query(`ALTER TABLE duty_revision_logs ADD COLUMN IF NOT EXISTS actor_id INTEGER`)
+  await pool.query(`ALTER TABLE duty_revision_logs ADD COLUMN IF NOT EXISTS actor_role TEXT`)
+  await pool.query(`ALTER TABLE duty_revision_logs ADD COLUMN IF NOT EXISTS metadata JSONB NOT NULL DEFAULT '{}'::jsonb`)
+  await pool.query(`
+    UPDATE duty_revision_logs
+    SET actor_role = CASE
+          WHEN action = 'sign:admin' OR action LIKE 'bonus:%' THEN 'admin'
+          WHEN action = 'sign' OR action LIKE 'offline:%' THEN 'co_do'
+          ELSE 'unknown'
+        END,
+        metadata = COALESCE(metadata, '{}'::jsonb) || jsonb_build_object(
+          'legacy', true,
+          'reconstruction', 'Chỉ suy ra được từ action cũ; actor và giá trị trước/sau không còn trong dữ liệu gốc.'
+        )
+    WHERE actor_role IS NULL
+      AND (metadata IS NULL OR metadata = '{}'::jsonb)
   `)
 
   await pool.query(`

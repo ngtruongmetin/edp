@@ -43,6 +43,15 @@ function normalizeBooleanSetting(value) {
   return null
 }
 
+router.get("/offline-duty", requireLogin, requireRole(["admin", "co_do"]), async (req, res) => {
+  try {
+    const value = await SystemSettingService.get("offline_duty_enabled", "1")
+    res.json({ enabled: SystemSettingService.isEnabled(value, true) })
+  } catch (err) {
+    res.status(err.status || 500).json({ error: err.message || "Internal error" })
+  }
+})
+
 function buildAdminAiErrorResponse(err, fallbackProvider = "custom") {
   const provider = String(err?.provider || fallbackProvider || "custom").trim().toLowerCase()
   const label = getProviderLabel(provider)
@@ -118,6 +127,16 @@ function validateGeneralSettingsPayload(payload) {
       throw error
     }
     normalized[key] = enabled
+  }
+
+  if ("offline_duty_enabled" in settings) {
+    const enabled = normalizeBooleanSetting(settings.offline_duty_enabled)
+    if (enabled === null) {
+      const error = new Error("Cấu hình trực ngoại tuyến không hợp lệ")
+      error.status = 400
+      throw error
+    }
+    normalized.offline_duty_enabled = enabled
   }
 
   for (const key of ["weekly_bonus_score_threshold", "weekly_bonus_points"]) {

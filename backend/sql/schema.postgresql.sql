@@ -163,6 +163,9 @@ CREATE TABLE IF NOT EXISTS duty_revision_logs (
   session_id INTEGER NOT NULL,
   action TEXT,
   created_at TEXT,
+  actor_id INTEGER,
+  actor_role TEXT,
+  metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
   CONSTRAINT fk_duty_revision_logs_session_id FOREIGN KEY (session_id) REFERENCES duty_sessions(id) ON DELETE CASCADE
 );
 

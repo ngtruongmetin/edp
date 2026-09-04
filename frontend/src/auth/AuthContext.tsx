@@ -8,6 +8,7 @@ import {
   setCachedUser,
   type CachedUser,
 } from "../utils/offlineCache"
+import { dutyStorage } from "../offline/duty/storage"
 
 export type User = {
   role: string
@@ -81,6 +82,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     try {
       const res = await api.get("/auth/me")
       const currentUser = { ...res.data, role: normalizeRole(res.data.role) }
+      if (user?.role === "co_do" && (currentUser.role !== "co_do" || user.class_name !== currentUser.class_name)) {
+        await dutyStorage.clearAll()
+      }
       setUser(currentUser)
       setIsOffline(false)
       await setCachedUser(toCachedUser(currentUser))
@@ -89,6 +93,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const isAuthFailure = status === 401 || status === 403
 
       if (isAuthFailure) {
+        if (user?.role === "co_do") await dutyStorage.clearAll()
         setUser(null)
         await clearCachedUser()
         setIsOffline(false)
@@ -110,6 +115,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     if (currentUser) {
       await clearCachedDashboard(buildDashboardCacheKey(currentUser))
+      if (currentUser.role === "co_do") await dutyStorage.clearAll()
     }
 
     await clearCachedUser()

@@ -25,3 +25,19 @@ export function formatRevisionAction(action: string | null | undefined) {
 
   return "Cập nhật phiếu"
 }
+
+export function formatRevisionDetails(revision: { action?: string; metadata?: Record<string, unknown> | string | null; actor_role?: string | null }) {
+  let metadata: Record<string, unknown> = {}
+  if (typeof revision.metadata === "string") {
+    try { metadata = JSON.parse(revision.metadata) } catch { metadata = {} }
+  } else if (revision.metadata && typeof revision.metadata === "object") {
+    metadata = revision.metadata
+  }
+  const parts: string[] = []
+  if (metadata.actor_name) parts.push(String(metadata.actor_name))
+  if (metadata.rule_name) parts.push(`Lỗi: ${String(metadata.rule_name)}`)
+  if (metadata.quantity !== undefined) parts.push(`Số lượng: ${String(metadata.quantity)}`)
+  if (metadata.note) parts.push(`Ghi chú: ${String(metadata.note)}`)
+  if (metadata.old_quantity !== undefined && metadata.new_quantity !== undefined) parts.push(`Số lượng: ${metadata.old_quantity} -> ${metadata.new_quantity}`)
+  return parts.join(" · ")
+}
