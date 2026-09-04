@@ -191,11 +191,18 @@ export class OfflineStorage {
     )
   }
 
-  async setMetadata<T>(key: string, value: T) {
+  async deleteMetadata(key: string, notify = true) {
+    await accessStore(METADATA_STORE, "readwrite", async (store) => {
+      await requestResult(store.delete(key))
+    })
+    if (notify) notifyChanged()
+  }
+
+  async setMetadata<T>(key: string, value: T, notify = true) {
     await accessStore(METADATA_STORE, "readwrite", async (store) => {
       await requestResult(store.put(value, key))
     })
-    notifyChanged()
+    if (notify) notifyChanged()
   }
 
   async setMetadataEntries(entries: Array<{ key: string; value: unknown }>) {

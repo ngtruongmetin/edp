@@ -18,6 +18,7 @@ const {
 } = require("./dutyFiles")
 const { httpError } = require("./pinVerification")
 const SystemSettingService = require("../system-settings/service")
+const { effectiveViolationScoreSql } = require("../../utils/absenceEvidenceScoring")
 
 const router = express.Router()
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
@@ -530,7 +531,7 @@ router.post("/sessions/:clientId/violations/update", handleRoute(async (req, res
     )
     if (!updated.rows[0]) throw httpError(404, "Không tìm thấy vi phạm cần sửa.")
     const result = { success: true, id: Number(updated.rows[0].id) }
-    await markEdited(client, session, "offline:update_violation", req.session.user, { violation_id: Number(updated.rows[0].id), old_rule_id: previous?.rule_id, old_rule_name: previous?.rule_name, rule_id: ruleId, rule_name: ruleResult.rows[0].name, old_quantity: previous?.quantity, quantity, old_note: previous?.note, note, operation_id: operationId })
+    await markEdited(client, session, "offline:update_violation", req.session.user, { violation_id: Number(updated.rows[0].id), old_rule_id: previous?.rule_id, old_rule_name: previous?.rule_name, rule_id: ruleId, rule_name: ruleResult.rows[0].name, old_quantity: previous?.quantity, new_quantity: quantity, old_note: previous?.note, new_note: note, operation_id: operationId })
     await completeOperation(client, operationId, clientId, "update_violation", result)
     return result
   })
@@ -571,7 +572,7 @@ router.post(
           [session.id, written.fileName, sanitizeDutyEvidenceFileName(req.file.originalname), req.file.mimetype, req.file.size, Number(countResult.rows[0].count), time.now()],
         )
         const result = { success: true, id: imageResult.rows[0].id, url: `/api/duty/evidence/${imageResult.rows[0].id}/file` }
-        await markEdited(client, session, "offline:add_evidence", req.session.user, { file_name: file.file_name, byte_size: file.byte_size, operation_id: operationId })
+        await markEdited(client, session, "offline:add_evidence", req.session.user, { file_name: req.file.originalname, byte_size: req.file.size, operation_id: operationId })
         await completeOperation(client, operationId, clientId, "upload_evidence", result)
         return result
       })
@@ -629,6 +630,16 @@ router.post(
         if (completed) return completed
         const session = await getOwnedSession(client, clientId, redClass)
         await ensureWeekOpen(client, session.week_id)
+        const scoreResult = await client.query(
+          `SELECT COALESCE(${effectiveViolationScoreSql("v", "r")}, 0) AS violation_score,
+                  COALESCE((SELECT points FROM daily_bonus WHERE week_id = $1 AND date = $2 AND class_name = $3 LIMIT 1), 0) AS bonus_points
+           FROM duty_violations v
+           LEFT JOIN rules r ON r.id = v.rule_id
+           WHERE v.session_id = $4`,
+          [session.week_id, session.date, session.duty_class, session.id],
+        )
+        const violationScore = Number(scoreResult.rows[0]?.violation_score || 0)
+        const bonusPoints = Number(scoreResult.rows[0]?.bonus_points || 0)
         const signedAt = time.now()
         const photoPath = written ? `/assets/duty-signatures/${written.fileName}` : null
         const signatureResult = await client.query(
@@ -640,7 +651,7 @@ router.post(
           `UPDATE duty_sessions SET status = 'signed', signed_at = $1, signed_snapshot_hash = $2 WHERE id = $3`,
           [signedAt, hash, session.id],
         )
-        await client.query(`INSERT INTO duty_revision_logs (session_id, action, created_at) VALUES ($1, 'offline:sign', $2)`, [session.id, signedAt])
+        await markEdited(client, session, "offline:sign", req.session.user, { violation_score: violationScore, bonus_points: bonusPoints, total_points: violationScore + bonusPoints, operation_id: operationId })
         const result = { success: true, signature_id: signatureResult.rows[0].id, photo_path: photoPath, signed_at: signedAt }
         await completeOperation(client, operationId, clientId, "sign", result)
         return result

@@ -23,6 +23,7 @@ const MAX_RETRY_MS = 60_000
 export class DutySyncEngine {
   readonly ownerClass: string
   private running = false
+  private enabled: boolean
   private stopped = false
   private retryTimer: number | null = null
   private listeners = new Set<StatusListener>()
@@ -52,8 +53,9 @@ export class DutySyncEngine {
     this.setStatus({ isOnline: false, phase: "offline" })
   }
 
-  constructor(ownerClass: string) {
+  constructor(ownerClass: string, enabled = false) {
     this.ownerClass = ownerClass
+    this.enabled = enabled
     window.addEventListener(DUTY_STORAGE_CHANGED_EVENT, this.handleStorageChanged)
     this.networkMonitor = new NetworkMonitor()
     this.unsubscribeNetwork = this.networkMonitor.subscribe((online) => {
@@ -81,7 +83,7 @@ export class DutySyncEngine {
   }
 
   async sync() {
-    if (this.running || this.stopped || !navigator.onLine) return
+    if (!this.enabled || this.running || this.stopped || !navigator.onLine) return
     this.running = true
     this.clearRetryTimer()
 

@@ -11,6 +11,7 @@
     "seed:accounts": "node scripts/seed_account.js",
     "seed:admin": "node scripts/seed_admin.js",
     "test:offline": "node scripts/qa-duty-offline.js",
+    "test:online": "node scripts/qa-duty-online.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],

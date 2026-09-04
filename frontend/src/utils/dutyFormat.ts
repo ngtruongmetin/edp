@@ -35,9 +35,19 @@ export function formatRevisionDetails(revision: { action?: string; metadata?: Re
   }
   const parts: string[] = []
   if (metadata.actor_name) parts.push(String(metadata.actor_name))
-  if (metadata.rule_name) parts.push(`Lỗi: ${String(metadata.rule_name)}`)
+  if (metadata.old_rule_name || metadata.new_rule_name) {
+    parts.push(`Lỗi: ${String(metadata.old_rule_name || "Không có")} -> ${String(metadata.new_rule_name || "Không có")}`)
+  } else if (metadata.rule_name) {
+    parts.push(`Lỗi: ${String(metadata.rule_name)}`)
+  }
   if (metadata.quantity !== undefined) parts.push(`Số lượng: ${String(metadata.quantity)}`)
   if (metadata.note) parts.push(`Ghi chú: ${String(metadata.note)}`)
   if (metadata.old_quantity !== undefined && metadata.new_quantity !== undefined) parts.push(`Số lượng: ${metadata.old_quantity} -> ${metadata.new_quantity}`)
+  if (metadata.old_note !== undefined || metadata.new_note !== undefined) parts.push(`Ghi chú: ${String(metadata.old_note || "Không có")} -> ${String(metadata.new_note || "Không có")}`)
+  if (metadata.violation_score !== undefined || metadata.total_points !== undefined) parts.push(`Điểm phiếu: ${String(metadata.total_points ?? metadata.violation_score)}`)
+  if (metadata.status_changed && metadata.previous_status && metadata.new_status) {
+    const statusLabel = (value: unknown) => String(value) === "signed" ? "Đã ký" : String(value) === "draft" ? "Nháp" : String(value)
+    parts.push(`Trạng thái: ${statusLabel(metadata.previous_status)} -> ${statusLabel(metadata.new_status)}`)
+  }
   return parts.join(" · ")
 }

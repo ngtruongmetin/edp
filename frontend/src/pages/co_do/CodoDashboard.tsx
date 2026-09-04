@@ -207,7 +207,9 @@ export default function CoDoDashboard() {
       console.error(err)
       const msg = err instanceof Error && err.message === "OFFLINE_DATA_NOT_READY"
         ? "Thiết bị chưa sẵn sàng làm việc ngoại tuyến."
-        : err?.response?.data?.error || "Không thể bắt đầu ca trực"
+        : err instanceof Error && err.message === "OFFLINE_DUTY_DISABLED"
+          ? "Chế độ ngoại tuyến đang tắt. Hãy kết nối mạng để đi trực trực tuyến."
+          : err?.response?.data?.error || "Không thể bắt đầu ca trực"
       toast.error(msg)
     }
   }

@@ -69,11 +69,20 @@ export class OfflineDutyRepository {
   }
 
   async setOfflineEnabled(enabled: boolean) {
-    await dutyStorage.setMetadata(OFFLINE_ENABLED_KEY, enabled)
+    await dutyStorage.setMetadata(OFFLINE_ENABLED_KEY, enabled, false)
   }
 
   async isOfflineEnabled() {
     return (await dutyStorage.getMetadata<boolean>(OFFLINE_ENABLED_KEY)) ?? false
+  }
+
+  async clearOfflinePreload() {
+    const snapshot = await this.getOfflineData()
+    const bootstrap = await this.getBootstrap()
+    const keys = [this.offlineDataKey(), this.rulesKey(), this.bootstrapKey()]
+    const dutyClass = snapshot?.assignments.find((item) => item.red_class === this.ownerClass)?.duty_class || bootstrap?.dutyClass
+    if (dutyClass) keys.push(`pin-attempts:${this.ownerClass}:${dutyClass}`)
+    for (const key of keys) await dutyStorage.deleteMetadata(key, false)
   }
 
   private bootstrapKey() {
@@ -162,7 +171,8 @@ export class OfflineDutyRepository {
   }
 
   async loadRules() {
-    if (!(await this.isOfflineEnabled()) && navigator.onLine) {
+    if (!(await this.isOfflineEnabled())) {
+      if (!navigator.onLine) return []
       const response = await api.get<DutyRuleSnapshot[]>("/rules")
       return response.data || []
     }
@@ -282,9 +292,9 @@ export class OfflineDutyRepository {
     const hasPendingSignature = Boolean(local && activeOperations.some((item) =>
       item.clientId === local.clientId && item.kind === "sign",
     ))
-    let clientId = local?.clientId || String(raw.client_id || "")
-    if (!clientId) {
-      clientId = crypto.randomUUID()
+    const offlineEnabled = await this.isOfflineEnabled()
+    let clientId = local?.clientId || String(raw.client_id || "") || crypto.randomUUID()
+    if (offlineEnabled && !raw.client_id) {
       await api.post("/duty/offline/sessions/claim", { session_id: raw.id, client_id: clientId })
     }
 

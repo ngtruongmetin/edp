@@ -330,6 +330,42 @@ async function initDb() {
   `)
 
   await pool.query(`
+    UPDATE duty_revision_logs detail
+    SET metadata = COALESCE(detail.metadata, '{}'::jsonb) || jsonb_build_object(
+      'status_changed', true,
+      'previous_status', 'signed',
+      'new_status', 'draft'
+    )
+    FROM duty_revision_logs status_log
+    WHERE status_log.metadata ->> 'status' = 'signed -> draft'
+      AND status_log.action = detail.action
+      AND detail.id > status_log.id
+      AND NOT EXISTS (
+        SELECT 1
+        FROM duty_revision_logs between_logs
+        WHERE between_logs.id > status_log.id
+          AND between_logs.id < detail.id
+      )
+  `)
+
+  await pool.query(`
+    DELETE FROM duty_revision_logs status_log
+    WHERE status_log.metadata ->> 'status' = 'signed -> draft'
+      AND EXISTS (
+        SELECT 1
+        FROM duty_revision_logs detail
+        WHERE detail.id > status_log.id
+          AND detail.action = status_log.action
+          AND NOT EXISTS (
+            SELECT 1
+            FROM duty_revision_logs between_logs
+            WHERE between_logs.id > status_log.id
+              AND between_logs.id < detail.id
+          )
+      )
+  `)
+
+  await pool.query(`
     ALTER TABLE admins
     DROP COLUMN IF EXISTS is_super_admin
   `)

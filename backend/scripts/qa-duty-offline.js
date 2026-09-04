@@ -11,11 +11,14 @@ const { pool } = require("../config/database")
 const BASE_URL = process.env.QA_BASE_URL || "http://127.0.0.1:3000"
 const PASSWORD = process.env.CLASS_DEFAULT_PASSWORD || "Nt@12345"
 const PIN = process.env.CLASS_DEFAULT_PIN || "032026"
+const ADMIN_USERNAME = process.env.QA_ADMIN_USERNAME || process.env.SEED_ADMIN_USERNAME || "admin"
+const ADMIN_PASSWORD = process.env.QA_ADMIN_PASSWORD || process.env.SEED_ADMIN_PASSWORD || "admin123"
 
 let cookie = ""
 let redClass = ""
 let dutyClass = ""
 let signatureDiskPath = ""
+let originalOfflineSetting = null
 const clientIds = []
 const classIds = []
 
@@ -61,6 +64,15 @@ async function cleanup() {
   if (signatureDiskPath) {
     await fs.promises.rm(signatureDiskPath, { force: true })
   }
+  if (originalOfflineSetting) {
+    try {
+      cookie = ""
+      await request("POST", "/api/auth/admin/login", { username: ADMIN_USERNAME, password: ADMIN_PASSWORD })
+      await request("PUT", "/api/system-settings", { settings: { offline_duty_enabled: originalOfflineSetting.setting_value } })
+    } catch (error) {
+      console.warn("Could not restore offline setting through admin API:", error.message)
+    }
+  }
 }
 
 async function setupFixture() {
@@ -100,6 +112,10 @@ async function setupFixture() {
 }
 
 async function main() {
+  originalOfflineSetting = (await pool.query(`SELECT setting_value, description, updated_at, updated_by FROM system_settings WHERE setting_key='offline_duty_enabled' LIMIT 1`)).rows[0] || null
+  await request("POST", "/api/auth/admin/login", { username: ADMIN_USERNAME, password: ADMIN_PASSWORD })
+  await request("PUT", "/api/system-settings", { settings: { offline_duty_enabled: "1" } })
+  cookie = ""
   await setupFixture()
   await request("POST", "/api/auth/login", {
     role: "co_do",

@@ -37,29 +37,45 @@ export function DutyOfflineProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     if (!ownerClass) return
-    const nextEngine = new DutySyncEngine(ownerClass)
+    const nextEngine = new DutySyncEngine(ownerClass, offlineEnabled)
     const unsubscribe = nextEngine.subscribe(setStatus)
     setEngine(nextEngine)
     return () => {
       unsubscribe()
       nextEngine.destroy()
     }
-  }, [ownerClass])
+  }, [offlineEnabled, ownerClass])
 
   useEffect(() => {
     if (!ownerClass) return
     let active = true
-    void api.get<{ enabled: boolean }>("/system-settings/offline-duty")
-      .then(({ data }) => {
+    const refreshSetting = async () => {
+      try {
+        const { data } = await api.get<{ enabled: boolean }>("/system-settings/offline-duty")
         if (!active) return
-        setOfflineEnabled(data.enabled !== false)
-        return repository.setOfflineEnabled(data.enabled !== false)
-      })
-      .catch(async () => {
+        const nextEnabled = data.enabled !== false
+        setOfflineEnabled(nextEnabled)
+        await repository.setOfflineEnabled(nextEnabled)
+        if (!nextEnabled) await repository.clearOfflinePreload()
+      } catch {
         const cached = await repository.isOfflineEnabled()
         if (active) setOfflineEnabled(cached)
-      })
-    return () => { active = false }
+      }
+    }
+    const intervalId = window.setInterval(() => void refreshSetting(), 60_000)
+    const handleOnline = () => void refreshSetting()
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "visible") void refreshSetting()
+    }
+    void refreshSetting()
+    window.addEventListener("online", handleOnline)
+    document.addEventListener("visibilitychange", handleVisibilityChange)
+    return () => {
+      active = false
+      window.clearInterval(intervalId)
+      window.removeEventListener("online", handleOnline)
+      document.removeEventListener("visibilitychange", handleVisibilityChange)
+    }
   }, [ownerClass, repository])
 
   useEffect(() => {
