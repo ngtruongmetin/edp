@@ -6,6 +6,7 @@ import CameraCapture from "./CameraCapture"
 import { useDutyOffline } from "../offline/duty/DutyOfflineContext"
 import { offlinePinVerifier } from "../offline/duty/offlinePinVerifier"
 import { api } from "../api/api"
+import { getApiErrorDebugMessage } from "../utils/getApiErrorMessage"
 
 type SignableDutySession = {
   id: number
@@ -120,7 +121,7 @@ export default function CodoDutySignSheet({
           : code === "INVALID_OFFLINE_PIN" || err?.response?.data?.error === "Invalid pin"
             ? "PIN không đúng"
             : "Không thể ký xác nhận"
-      toast.error(message)
+      toast.error(`${message}\n${getApiErrorDebugMessage(err)}`, { duration: 6000 })
     } finally {
       setSigning(false)
     }

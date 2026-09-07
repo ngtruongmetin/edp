@@ -19,6 +19,8 @@ const {
 const { httpError } = require("./pinVerification")
 const SystemSettingService = require("../system-settings/service")
 const { effectiveViolationScoreSql } = require("../../utils/absenceEvidenceScoring")
+const { getLimitedEditCategories } = require("../../utils/limitedEditCategories")
+const { statusForWeek } = require("../../utils/weekState")
 
 const router = express.Router()
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
@@ -101,15 +103,35 @@ async function getOwnedSession(client, clientId, redClass) {
   )
   const session = result.rows[0]
   if (!session) throw httpError(404, "Không tìm thấy Phiếu trực.")
+  if (session.status === "signed" && !session.signed_snapshot_hash) {
+    session.signed_snapshot_hash = await computeViolationHash(client, session.id)
+    await client.query(`UPDATE duty_sessions SET signed_snapshot_hash = $1 WHERE id = $2`, [session.signed_snapshot_hash, session.id])
+  }
   return session
 }
 
 async function ensureWeekOpen(client, weekId) {
   const result = await client.query(
-    `SELECT 1 FROM week_closings WHERE week_id = $1 AND closed_at IS NOT NULL LIMIT 1`,
+    `SELECT w.status, w.end_datetime, w.end_date, c.closed_at FROM schedule_weeks w LEFT JOIN week_closings c ON c.week_id = w.id WHERE w.id = $1 LIMIT 1`,
     [weekId],
   )
-  if (result.rows[0]) throw httpError(403, "Tuần đã được khóa.")
+  const week = result.rows[0]
+  if (!week) throw httpError(404, "Week not found")
+  if (week.closed_at || week.status === "summarized") throw httpError(403, "Week closed")
+  if (week.status !== "limited_edit" && (week.end_datetime || `${week.end_date} 23:59:59`) <= time.now()) {
+    await client.query(`UPDATE schedule_weeks SET status='limited_edit' WHERE id=$1 AND status <> 'summarized'`, [weekId])
+  }
+}
+
+async function ensureAttendanceCategory(client, weekId, ruleId, previousRuleId = null) {
+  const weekResult = await client.query(`SELECT status FROM schedule_weeks WHERE id=$1 LIMIT 1`, [weekId])
+  if (weekResult.rows[0]?.status !== "limited_edit") return
+  const ids = [...new Set([Number(ruleId), previousRuleId ? Number(previousRuleId) : null].filter(Boolean))]
+  const rules = await client.query(`SELECT id, category FROM rules WHERE id = ANY($1::integer[])`, [ids])
+  const categories = await getLimitedEditCategories()
+  if (rules.rows.length !== ids.length || rules.rows.some((row) => !categories.includes(String(row.category || "").trim()))) {
+    throw httpError(403, "Only attendance rules can be edited after the duty period")
+  }
 }
 
 async function findCompletedOperation(client, operationId, clientId, operationType) {
@@ -154,7 +176,20 @@ async function computeViolationHash(client, sessionId) {
     quantity: Number(row.quantity || 0),
     note: String(row.note || ""),
   }))
-  return crypto.createHash("sha256").update(JSON.stringify(normalized)).digest("hex")
+  const evidenceResult = await client.query(
+    `SELECT file_path, file_name, mime_type, byte_size, sort_order FROM duty_evidence_images WHERE session_id=$1 ORDER BY sort_order ASC, id ASC`,
+    [sessionId],
+  )
+  return crypto.createHash("sha256").update(JSON.stringify({
+    violations: normalized,
+    evidences: evidenceResult.rows.map((row) => ({
+      file_path: String(row.file_path || ""),
+      file_name: String(row.file_name || ""),
+      mime_type: String(row.mime_type || ""),
+      byte_size: Number(row.byte_size || 0),
+      sort_order: Number(row.sort_order || 0),
+    })),
+  })).digest("hex")
 }
 
 async function markEdited(client, session, action, user, metadata = {}) {
@@ -175,21 +210,26 @@ function offlineDataVersion(snapshot) {
 }
 
 function snapshotValidUntil(week) {
-  return week?.end_date ? `${week.end_date}T23:59:59+07:00` : null
+  return week?.end_datetime
+    ? `${String(week.end_datetime).replace(" ", "T")}+07:00`
+    : week?.end_date
+      ? `${week.end_date}T23:59:59+07:00`
+      : null
 }
 
 async function buildOfflineSnapshot(ownerClass) {
-  const today = time.today()
+  const now = time.now()
   const [weekResult, classesResult, rulesResult] = await Promise.all([
     pool.query(
       `
-        SELECT id, week_number, start_date, end_date
+        SELECT id, week_number, start_date, end_date, start_datetime, end_datetime, status
         FROM schedule_weeks
-        WHERE start_date <= $1 AND end_date >= $1
+        WHERE COALESCE(start_datetime, start_date || ' 00:00:00') <= $1
+          AND COALESCE(end_datetime, end_date || ' 23:59:59') >= $1
         ORDER BY week_number DESC
         LIMIT 1
       `,
-      [today],
+      [now],
     ),
     pool.query(
       `
@@ -210,7 +250,8 @@ async function buildOfflineSnapshot(ownerClass) {
     pool.query(`SELECT id, category, name, score_delta FROM rules ORDER BY category ASC, id ASC`),
   ])
 
-  const week = weekResult.rows[0] || null
+  const rawWeek = weekResult.rows[0] || null
+  const week = rawWeek ? { ...rawWeek, status: statusForWeek(rawWeek) } : null
   const assignmentsResult = week
     ? await pool.query(
       `SELECT red_class, duty_class FROM schedule_assignments WHERE week_id = $1 AND red_class = $2 LIMIT 1`,
@@ -346,10 +387,11 @@ router.post("/sessions", handleRoute(async (req, res) => {
     const weekResult = await client.query(
       `
         SELECT * FROM schedule_weeks
-        WHERE start_date <= $1 AND end_date >= $1
+        WHERE COALESCE(start_datetime, start_date || ' 00:00:00') <= $1
+          AND COALESCE(end_datetime, end_date || ' 23:59:59') >= $1
         ORDER BY week_number DESC LIMIT 1
       `,
-      [date],
+      [`${date} 23:59:59`],
     )
     const week = weekResult.rows[0]
     if (!week) throw httpError(400, "Không có tuần học cho ngày trực.")
@@ -438,6 +480,7 @@ router.post("/sessions/:clientId/violations", handleRoute(async (req, res) => {
     if (completed) return completed
     const session = await getOwnedSession(client, clientId, req.session.user.class_name)
     await ensureWeekOpen(client, session.week_id)
+    await ensureAttendanceCategory(client, session.week_id, ruleId)
     const ruleResult = await client.query(`SELECT id, name FROM rules WHERE id = $1 LIMIT 1`, [ruleId])
     if (!ruleResult.rows[0]) throw httpError(400, "Lỗi vi phạm không còn tồn tại.")
     const violationResult = await client.query(
@@ -471,6 +514,8 @@ router.post("/sessions/:clientId/violations/delete", handleRoute(async (req, res
     if (completed) return completed
     const session = await getOwnedSession(client, clientId, req.session.user.class_name)
     await ensureWeekOpen(client, session.week_id)
+    const existingRule = await client.query(`SELECT rule_id FROM duty_violations WHERE session_id=$1 AND (($2::integer > 0 AND id=$2) OR ($3::uuid IS NOT NULL AND client_id=$3)) LIMIT 1`, [session.id, violationId, violationClientId])
+    await ensureAttendanceCategory(client, session.week_id, existingRule.rows[0]?.rule_id)
     const deleted = await client.query(
       `
       DELETE FROM duty_violations
@@ -517,6 +562,7 @@ router.post("/sessions/:clientId/violations/update", handleRoute(async (req, res
       [session.id, violationId, violationClientId],
     )
     const previous = previousResult.rows[0]
+    await ensureAttendanceCategory(client, session.week_id, ruleId, previous?.rule_id)
     const ruleResult = await client.query(`SELECT id, name FROM rules WHERE id = $1 LIMIT 1`, [ruleId])
     if (!ruleResult.rows[0]) throw httpError(400, "Lỗi vi phạm không còn tồn tại.")
     const updated = await client.query(

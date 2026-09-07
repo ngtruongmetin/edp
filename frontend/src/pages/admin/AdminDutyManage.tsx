@@ -16,6 +16,8 @@ type Week = {
   week_number: number
   start_date: string
   end_date: string
+  start_datetime?: string
+  end_datetime?: string
 }
 
 type SessionRow = {
@@ -90,8 +92,6 @@ export default function AdminDutyManage() {
   const [editViolationNote, setEditViolationNote] = useState("")
   const [violationSaving, setViolationSaving] = useState(false)
 
-  const today = useMemo(() => localISODate(new Date()), [])
-
   useEffect(() => {
     boot()
   }, [])
@@ -144,7 +144,12 @@ export default function AdminDutyManage() {
       const weekList: Week[] = w.data || []
       setWeeks(weekList)
 
-      const current = weekList.find((x) => x.start_date <= today && x.end_date >= today)
+      const now = new Date()
+      const current = weekList.find((x) => {
+        const start = new Date((x.start_datetime || `${x.start_date}T00:00:00`).replace(" ", "T"))
+        const end = new Date((x.end_datetime || `${x.end_date}T23:59:59`).replace(" ", "T"))
+        return start <= now && now <= end
+      })
       const defaultWeekId = current?.id ?? (weekList.length ? weekList[0].id : null)
       setWeekId(defaultWeekId)
 

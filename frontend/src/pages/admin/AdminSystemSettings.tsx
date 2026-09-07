@@ -148,6 +148,7 @@ export default function AdminSystemSettings() {
   const [weeklyBonusRequireAll, setWeeklyBonusRequireAll] = useState("1")
   const [weeklyBonusPoints, setWeeklyBonusPoints] = useState("30")
   const [offlineDutyEnabled, setOfflineDutyEnabled] = useState("1")
+  const [limitedEditCategories, setLimitedEditCategories] = useState("Chuyên cần")
   const [lastTestFingerprint, setLastTestFingerprint] = useState("")
   const [testPassed, setTestPassed] = useState(false)
 
@@ -208,6 +209,12 @@ export default function AdminSystemSettings() {
       setWeeklyBonusRequireAll(settingsRes.data.settings.weekly_bonus_require_all_entries?.value === "0" ? "0" : "1")
       setWeeklyBonusPoints(settingsRes.data.settings.weekly_bonus_points?.value || "30")
       setOfflineDutyEnabled(settingsRes.data.settings.offline_duty_enabled?.value === "0" ? "0" : "1")
+      try {
+        const parsed = JSON.parse(settingsRes.data.settings.limited_edit_categories?.value || "[\"Chuyên cần\"]")
+        setLimitedEditCategories(Array.isArray(parsed) ? parsed.join("\n") : "Chuyên cần")
+      } catch {
+        setLimitedEditCategories("Chuyên cần")
+      }
       applyAiConfig(aiRes.data.config)
     } catch (err: any) {
       console.error(err)
@@ -384,6 +391,11 @@ export default function AdminSystemSettings() {
       setError(null)
       setNotice(null)
 
+      const categories = [...new Set(limitedEditCategories.split(/[,\n]/).map((item) => item.trim()).filter(Boolean))]
+      if (!categories.length) {
+        setError("Phải cấu hình ít nhất một category")
+        return false
+      }
       const res = await api.put<SettingsResponse>("/system-settings", {
         settings: {
           base_score: Number(baseScore),
@@ -394,6 +406,7 @@ export default function AdminSystemSettings() {
           weekly_bonus_require_all_entries: weeklyBonusRequireAll,
           weekly_bonus_points: Number(weeklyBonusPoints),
           offline_duty_enabled: offlineDutyEnabled,
+          limited_edit_categories: categories,
         },
       })
 
@@ -405,6 +418,12 @@ export default function AdminSystemSettings() {
       setWeeklyBonusRequireAll(res.data.settings.weekly_bonus_require_all_entries?.value === "0" ? "0" : "1")
       setWeeklyBonusPoints(res.data.settings.weekly_bonus_points?.value || weeklyBonusPoints)
       setOfflineDutyEnabled(res.data.settings.offline_duty_enabled?.value === "0" ? "0" : "1")
+      try {
+        const parsed = JSON.parse(res.data.settings.limited_edit_categories?.value || "[\"Chuyên cần\"]")
+        setLimitedEditCategories(Array.isArray(parsed) ? parsed.join("\n") : limitedEditCategories)
+      } catch {
+        // Keep the current editor value if an old server response omits the setting.
+      }
       setNotice("Đã lưu cấu hình hệ thống.")
       return true
     } catch (err: any) {
@@ -634,6 +653,18 @@ export default function AdminSystemSettings() {
                 <option value="0">Tắt</option>
               </select>
               <div className="text-xs text-slate-500">Khi tắt, Cờ đỏ vẫn đi trực trực tuyến bình thường.</div>
+            </label>
+
+            <label className="space-y-2 lg:col-span-2">
+              <span className="text-sm font-semibold text-slate-900">Category được CRUD khi chỉnh sửa giới hạn</span>
+              <textarea
+                rows={3}
+                value={limitedEditCategories}
+                onChange={(e) => setLimitedEditCategories(e.target.value)}
+                className="w-full rounded-2xl border border-blue-100 bg-white px-4 py-3 text-sm outline-none focus:border-[#2e77df]"
+                placeholder="Mỗi dòng một category, ví dụ: Chuyên cần"
+              />
+              <div className="text-xs text-slate-500">Nhập mỗi category trên một dòng hoặc ngăn cách bằng dấu phẩy.</div>
             </label>
 
             <label className="space-y-2">

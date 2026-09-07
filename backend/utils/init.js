@@ -50,6 +50,11 @@ const DEFAULT_SYSTEM_SETTINGS = [
     value: "1",
     description: "Cho phép Cờ đỏ sử dụng chế độ đi trực ngoại tuyến",
   },
+  {
+    key: "limited_edit_categories",
+    value: '["Chuyên cần"]',
+    description: "Các category mà Cờ đỏ được CRUD khi tuần ở trạng thái chỉnh sửa giới hạn",
+  },
 ]
 
 function detectProviderFromApiKey(apiKey) {

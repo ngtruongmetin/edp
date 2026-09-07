@@ -21,6 +21,12 @@ const {
 
 const time = require("../../utils/time")
 const {
+  WEEK_STATUSES,
+  syncWeekStatus,
+  syncAllWeekStatuses,
+} = require("../../utils/weekState")
+const { getLimitedEditCategories } = require("../../utils/limitedEditCategories")
+const {
   DUTY_EVIDENCE_DIRECTORY,
   DUTY_EVIDENCE_LIMIT,
   DUTY_EVIDENCE_MAX_BYTES,
@@ -31,6 +37,9 @@ const {
 const { verifyClassPin } = require("./pinVerification")
 
 const router = express.Router()
+router.use((req, res, next) => {
+  syncAllWeekStatuses((error) => next(error || undefined))
+})
 
 function dutyEvidenceError(status, message) {
   const error = new Error(message)
@@ -268,14 +277,21 @@ function getWeekForDate(date, cb) {
     `
       SELECT *
       FROM schedule_weeks
-      WHERE start_date <= ?
-        AND end_date >= ?
+      WHERE COALESCE(start_datetime, start_date || ' 00:00:00') <= ?
+        AND COALESCE(end_datetime, end_date || ' 23:59:59') >= ?
       ORDER BY week_number DESC
       LIMIT 1
     `,
-    [date, date],
+    [time.now(), time.now()],
     cb,
   )
+}
+
+function isWeekCurrent(week) {
+  const now = time.now()
+  const start = week?.start_datetime || `${week?.start_date || ""} 00:00:00`
+  const end = week?.end_datetime || `${week?.end_date || ""} 23:59:59`
+  return Boolean(start && end && start <= now && now <= end)
 }
 
 function isSunday(dateStr) {
@@ -286,14 +302,10 @@ function isSunday(dateStr) {
 }
 
 function isWeekClosed(weekId, cb) {
-  db.get(
-    `SELECT week_id, closed_at FROM week_closings WHERE week_id=? LIMIT 1`,
-    [weekId],
-    (err, row) => {
-      if (err) return cb(err)
-      cb(null, !!row?.closed_at, row?.closed_at || null)
-    },
-  )
+  syncWeekStatus(weekId, (err, week) => {
+    if (err) return cb(err)
+    cb(null, week?.status === WEEK_STATUSES.SUMMARIZED, week?.closed_at || null)
+  })
 }
 
 function ensureDailySessionsForDate({ weekId, date }, cb) {
@@ -543,9 +555,10 @@ function ensureGradebookUploadsForWeek(weekId, cb) {
 }
 
 function ensureWeekUnlocked(weekId, cb) {
-  isWeekClosed(weekId, (err, closed) => {
+  syncWeekStatus(weekId, (err, week) => {
     if (err) return cb(err)
-    if (closed) {
+    if (!week) return cb(Object.assign(new Error("Week not found"), { status: 404 }))
+    if (week.status === WEEK_STATUSES.SUMMARIZED) {
       const error = new Error("Week closed")
       error.status = 403
       return cb(error)
@@ -1834,9 +1847,24 @@ function computeViolationHash(sessionId, cb) {
         quantity: Number(r.quantity || 0),
         note: String(r.note || ""),
       }))
-      const json = JSON.stringify(normalized)
-      const hash = crypto.createHash("sha256").update(json).digest("hex")
-      cb(null, hash)
+      db.all(
+        `SELECT file_path, file_name, mime_type, byte_size, sort_order FROM duty_evidence_images WHERE session_id=? ORDER BY sort_order ASC, id ASC`,
+        [sessionId],
+        (evidenceErr, evidenceRows) => {
+          if (evidenceErr) return cb(evidenceErr)
+          const snapshot = {
+            violations: normalized,
+            evidences: (evidenceRows || []).map((item) => ({
+              file_path: String(item.file_path || ""),
+              file_name: String(item.file_name || ""),
+              mime_type: String(item.mime_type || ""),
+              byte_size: Number(item.byte_size || 0),
+              sort_order: Number(item.sort_order || 0),
+            })),
+          }
+          cb(null, crypto.createHash("sha256").update(JSON.stringify(snapshot)).digest("hex"))
+        },
+      )
     },
   )
 }
@@ -2209,7 +2237,7 @@ router.get(
   (req, res) => {
     db.all(
       `
-        SELECT w.id, w.week_number, w.start_date, w.end_date, c.closed_at
+        SELECT w.id, w.week_number, w.start_date, w.end_date, w.start_datetime, w.end_datetime, w.status, c.closed_at
         FROM schedule_weeks w
         LEFT JOIN week_closings c
           ON c.week_id = w.id
@@ -2245,7 +2273,7 @@ router.get(
         if (!week) return res.status(404).json({ error: "Week not found" })
 
         const today = time.today()
-        const isCurrentWeek = week.start_date <= today && today <= week.end_date
+        const isCurrentWeek = isWeekCurrent(week)
 
         isWeekClosed(week.id, (err, closed) => {
           if (!err && !closed && isCurrentWeek && !isSunday(today)) {
@@ -2323,7 +2351,7 @@ router.get(
         if (!session) return res.status(404).json({ error: "Session not found" })
 
         db.get(
-          `SELECT id,week_number,start_date,end_date FROM schedule_weeks WHERE id=? LIMIT 1`,
+          `SELECT id,week_number,start_date,end_date,start_datetime,end_datetime,status FROM schedule_weeks WHERE id=? LIMIT 1`,
           [session.week_id],
           (err, week) => {
             if (err) return res.status(500).json({ error: err.message })
@@ -2407,6 +2435,7 @@ router.post(
     try {
       const sessionId = Number(req.params.id)
       const redClass = req.session.user?.class_name
+      await ensureSignedSnapshotAsync(sessionId)
       client = await pool.connect()
       await client.query("BEGIN")
 
@@ -2466,6 +2495,7 @@ router.post(
         [sessionId, "edit:add_evidence", now, req.session.user?.class_id || null, req.session.user?.role || null, JSON.stringify({ actor_name: req.session.user?.username || req.session.user?.class_name || null, count: uploadedFiles.length })],
       )
       await client.query("COMMIT")
+      await syncSignedStatusAfterChangeAsync(sessionId, "edit:add_evidence")
       res.status(201).json({ images })
     } catch (error) {
       if (client) await client.query("ROLLBACK")
@@ -2486,6 +2516,8 @@ router.delete(
     try {
       const imageId = Number(req.params.id)
       const redClass = req.session.user?.class_name
+      const ownerImage = await pool.query(`SELECT image.session_id FROM duty_evidence_images image JOIN duty_sessions session ON session.id = image.session_id WHERE image.id = $1 AND session.red_class = $2 LIMIT 1`, [imageId, redClass])
+      if (ownerImage.rows[0]) await ensureSignedSnapshotAsync(ownerImage.rows[0].session_id)
       client = await pool.connect()
       await client.query("BEGIN")
 
@@ -2514,6 +2546,7 @@ router.delete(
         [image.session_id, "edit:remove_evidence", time.now(), req.session.user?.class_id || null, req.session.user?.role || null, JSON.stringify({ actor_name: req.session.user?.username || req.session.user?.class_name || null, image_id: imageId })],
       )
       await client.query("COMMIT")
+      await syncSignedStatusAfterChangeAsync(image.session_id, "edit:remove_evidence")
       removeDutyEvidenceFiles([{ filePath: image.file_path }])
       res.json({ success: true })
     } catch (error) {
@@ -2587,10 +2620,8 @@ router.post(
         if (err) return res.status(500).json({ error: err.message })
         if (!row) return res.status(404).json({ error: "Session not found" })
 
-        isWeekClosed(row.week_id, (err, closed) => {
-          if (err) return res.status(500).json({ error: err.message })
-          if (closed) return res.status(403).json({ error: "Week closed" })
-
+        ensureCoDoViolationPermission(row.week_id, rule_id, null, (permissionErr) => {
+          if (permissionErr) return res.status(permissionErr.status || 500).json({ error: permissionErr.message })
           const q = Number(quantity || 1)
           const n = String(note || "").trim()
 
@@ -2694,10 +2725,8 @@ router.delete(
         if (err) return res.status(500).json({ error: err.message })
         if (!row) return res.status(404).json({ error: "Violation not found" })
 
-        isWeekClosed(row.week_id, (err, closed) => {
-          if (err) return res.status(500).json({ error: err.message })
-          if (closed) return res.status(403).json({ error: "Week closed" })
-
+        ensureCoDoViolationPermission(row.week_id, row.rule_id, null, (permissionErr) => {
+          if (permissionErr) return res.status(permissionErr.status || 500).json({ error: permissionErr.message })
           ensureSignedSnapshot(row.session_id, (err) => {
             if (err) return res.status(500).json({ error: err.message })
 
@@ -2749,6 +2778,8 @@ router.post(
 
         ensureWeekUnlocked(session.week_id, (lockErr) => {
           if (lockErr) return res.status(lockErr.status || 500).json({ error: lockErr.message })
+          ensureSignedSnapshot(session_id, (snapshotErr) => {
+            if (snapshotErr) return res.status(500).json({ error: snapshotErr.message })
           db.run(
             `
             INSERT INTO duty_violations
@@ -2761,17 +2792,21 @@ router.post(
               const violationId = this.lastID
               db.get(`SELECT name FROM rules WHERE id=? LIMIT 1`, [rule_id], (ruleErr, rule) => {
                 if (ruleErr) return res.status(500).json({ error: ruleErr.message })
-                db.run(
-                  `INSERT INTO duty_revision_logs (session_id, action, created_at, actor_role, metadata) VALUES(?,?,?, ?, ?::jsonb)`,
-                  [session_id, "edit:add_violation", time.now(), req.session.user?.role || "admin", JSON.stringify({ actor_name: req.session.user?.username || null, violation_id: violationId, rule_id, rule_name: rule?.name, quantity: q, note: n })],
-                  (revisionErr) => {
-                    if (revisionErr) return res.status(500).json({ error: revisionErr.message })
-                    res.json({ success: true, id: violationId })
-                  },
-                )
+                syncSignedStatusAfterChange(session_id, "edit:add_violation", (statusErr, statusResult) => {
+                  if (statusErr) return res.status(500).json({ error: statusErr.message })
+                  db.run(
+                    `INSERT INTO duty_revision_logs (session_id, action, created_at, actor_role, metadata) VALUES(?,?,?, ?, ?::jsonb)`,
+                    [session_id, "edit:add_violation", time.now(), req.session.user?.role || "admin", JSON.stringify({ actor_name: req.session.user?.username || null, violation_id: violationId, rule_id, rule_name: rule?.name, quantity: q, note: n, status_changed: Boolean(statusResult?.changed), previous_status: statusResult?.previousStatus, new_status: statusResult?.nextStatus })],
+                    (revisionErr) => {
+                      if (revisionErr) return res.status(500).json({ error: revisionErr.message })
+                      res.json({ success: true, id: violationId })
+                    },
+                  )
+                })
               })
             },
           )
+          })
         })
       },
     )
@@ -2797,9 +2832,8 @@ router.put(
       (err, row) => {
         if (err) return res.status(500).json({ error: err.message })
         if (!row) return res.status(404).json({ error: "Violation not found" })
-        isWeekClosed(row.week_id, (closedErr, closed) => {
-          if (closedErr) return res.status(500).json({ error: closedErr.message })
-          if (closed) return res.status(403).json({ error: "Week closed" })
+        ensureCoDoViolationPermission(row.week_id, ruleId, row.old_rule_id, (permissionErr) => {
+          if (permissionErr) return res.status(permissionErr.status || 500).json({ error: permissionErr.message })
           db.run(`UPDATE duty_violations SET rule_id=?, quantity=?, note=? WHERE id=?`, [ruleId, quantity, note, id], (updateErr) => {
             if (updateErr) return res.status(500).json({ error: updateErr.message })
             syncSignedStatusAfterChange(row.session_id, "edit:update_violation", (statusErr, statusResult) => {
@@ -2847,6 +2881,8 @@ router.put(
 
         ensureWeekUnlocked(row.week_id, (lockErr) => {
           if (lockErr) return res.status(lockErr.status || 500).json({ error: lockErr.message })
+          ensureSignedSnapshot(row.session_id, (snapshotErr) => {
+            if (snapshotErr) return res.status(500).json({ error: snapshotErr.message })
           db.run(
             `
             UPDATE duty_violations
@@ -2856,16 +2892,20 @@ router.put(
             [rule_id, q, n, id],
             (err) => {
               if (err) return res.status(500).json({ error: err.message })
-              db.run(
-                `INSERT INTO duty_revision_logs (session_id, action, created_at, actor_role, metadata) VALUES(?,?,?, ?, ?::jsonb)`,
-                [row.session_id, "edit:update_violation", time.now(), req.session.user?.role || "admin", JSON.stringify({ actor_name: req.session.user?.username || null, violation_id: id, old_rule_id: row.old_rule_id, old_rule_name: row.old_rule_name, new_rule_id: rule_id, new_rule_name: row.new_rule_name, old_quantity: row.old_quantity, new_quantity: q, old_note: row.old_note, new_note: n })],
-                (revisionErr) => {
-                  if (revisionErr) return res.status(500).json({ error: revisionErr.message })
-                  res.json({ success: true })
-                },
-              )
+              syncSignedStatusAfterChange(row.session_id, "edit:update_violation", (statusErr, statusResult) => {
+                if (statusErr) return res.status(500).json({ error: statusErr.message })
+                db.run(
+                  `INSERT INTO duty_revision_logs (session_id, action, created_at, actor_role, metadata) VALUES(?,?,?, ?, ?::jsonb)`,
+                  [row.session_id, "edit:update_violation", time.now(), req.session.user?.role || "admin", JSON.stringify({ actor_name: req.session.user?.username || null, violation_id: id, old_rule_id: row.old_rule_id, old_rule_name: row.old_rule_name, new_rule_id: rule_id, new_rule_name: row.new_rule_name, old_quantity: row.old_quantity, new_quantity: q, old_note: row.old_note, new_note: n, status_changed: Boolean(statusResult?.changed), previous_status: statusResult?.previousStatus, new_status: statusResult?.nextStatus })],
+                  (revisionErr) => {
+                    if (revisionErr) return res.status(500).json({ error: revisionErr.message })
+                    res.json({ success: true })
+                  },
+                )
+              })
             },
           )
+          })
         })
       },
     )
@@ -2898,21 +2938,27 @@ router.delete(
 
         ensureWeekUnlocked(row.week_id, (lockErr) => {
           if (lockErr) return res.status(lockErr.status || 500).json({ error: lockErr.message })
+          ensureSignedSnapshot(row.session_id, (snapshotErr) => {
+            if (snapshotErr) return res.status(500).json({ error: snapshotErr.message })
           db.run(
             `DELETE FROM duty_violations WHERE id=?`,
             [id],
             (err) => {
               if (err) return res.status(500).json({ error: err.message })
-              db.run(
-                `INSERT INTO duty_revision_logs (session_id, action, created_at, actor_role, metadata) VALUES(?,?,?, ?, ?::jsonb)`,
-                [row.session_id, "edit:remove_violation", time.now(), req.session.user?.role || "admin", JSON.stringify({ actor_name: req.session.user?.username || null, violation_id: id, rule_id: row.rule_id, rule_name: row.rule_name, quantity: row.quantity, note: row.note })],
-                (revisionErr) => {
-                  if (revisionErr) return res.status(500).json({ error: revisionErr.message })
-                  res.json({ success: true })
-                },
-              )
+              syncSignedStatusAfterChange(row.session_id, "edit:remove_violation", (statusErr, statusResult) => {
+                if (statusErr) return res.status(500).json({ error: statusErr.message })
+                db.run(
+                  `INSERT INTO duty_revision_logs (session_id, action, created_at, actor_role, metadata) VALUES(?,?,?, ?, ?::jsonb)`,
+                  [row.session_id, "edit:remove_violation", time.now(), req.session.user?.role || "admin", JSON.stringify({ actor_name: req.session.user?.username || null, violation_id: id, rule_id: row.rule_id, rule_name: row.rule_name, quantity: row.quantity, note: row.note, status_changed: Boolean(statusResult?.changed), previous_status: statusResult?.previousStatus, new_status: statusResult?.nextStatus })],
+                  (revisionErr) => {
+                    if (revisionErr) return res.status(500).json({ error: revisionErr.message })
+                    res.json({ success: true })
+                  },
+                )
+              })
             },
           )
+          })
         })
       },
     )
@@ -3194,14 +3240,20 @@ router.get(
             [weekId],
             (scoreErr, scores) => {
               if (scoreErr) return res.status(500).json({ error: scoreErr.message })
-              res.json({ week, closed_at: closedAt || null, scores: scores || [] })
+          syncWeekStatus(weekId, (stateErr, state) => {
+            if (stateErr) return res.status(500).json({ error: stateErr.message })
+            res.json({ week: { ...week, status: state?.status || WEEK_STATUSES.SUMMARIZED }, status: state?.status || WEEK_STATUSES.SUMMARIZED, closed_at: closedAt || null, scores: scores || [] })
+          })
             },
           )
         }
 
         computeWeekScores(weekId, (scoreErr, scores) => {
           if (scoreErr) return res.status(500).json({ error: scoreErr.message })
-          res.json({ week, closed_at: null, scores: scores || [] })
+          syncWeekStatus(weekId, (stateErr, state) => {
+            if (stateErr) return res.status(500).json({ error: stateErr.message })
+            res.json({ week: { ...week, status: state?.status || WEEK_STATUSES.NOT_SUMMARIZED }, status: state?.status || WEEK_STATUSES.NOT_SUMMARIZED, closed_at: null, scores: scores || [] })
+          })
         })
       })
     })
@@ -3240,7 +3292,10 @@ router.post(
               [weekId, closedAt],
               (closeErr) => {
                 if (closeErr) return res.status(500).json({ error: closeErr.message })
-                res.json({ success: true, week_id: weekId, closed_at: closedAt })
+                db.run(`UPDATE schedule_weeks SET status=? WHERE id=?`, [WEEK_STATUSES.SUMMARIZED, weekId], (statusErr) => {
+                  if (statusErr) return res.status(500).json({ error: statusErr.message })
+                  res.json({ success: true, week_id: weekId, status: WEEK_STATUSES.SUMMARIZED, closed_at: closedAt })
+                })
               },
             )
           })
@@ -3263,7 +3318,10 @@ router.post(
       [weekId],
       function (err) {
         if (err) return res.status(500).json({ error: err.message })
-        res.json({ success: true, reopened: this.changes })
+        db.run(`UPDATE schedule_weeks SET status=? WHERE id=?`, [WEEK_STATUSES.LIMITED_EDIT, weekId], (statusErr) => {
+          if (statusErr) return res.status(500).json({ error: statusErr.message })
+          res.json({ success: true, status: WEEK_STATUSES.LIMITED_EDIT, reopened: this.changes })
+        })
       },
     )
   },
@@ -4869,6 +4927,39 @@ function banCanSuPaths(path) {
   return [path, path.replace("/ban_can_su", "/bancansu")]
 }
 
+function ensureSignedSnapshotAsync(sessionId) {
+  return new Promise((resolve, reject) => ensureSignedSnapshot(sessionId, (error, result) => error ? reject(error) : resolve(result)))
+}
+
+function syncSignedStatusAfterChangeAsync(sessionId, action) {
+  return new Promise((resolve, reject) => syncSignedStatusAfterChange(sessionId, action, (error, result) => error ? reject(error) : resolve(result)))
+}
+
+function ensureCoDoViolationPermission(weekId, ruleId, previousRuleId, cb) {
+  syncWeekStatus(weekId, (stateErr, week) => {
+    if (stateErr) return cb(stateErr)
+    if (!week) return cb(Object.assign(new Error("Week not found"), { status: 404 }))
+    if (week.status === WEEK_STATUSES.SUMMARIZED) {
+      return cb(Object.assign(new Error("Week closed"), { status: 403 }))
+    }
+
+    const ids = [...new Set([Number(ruleId), previousRuleId ? Number(previousRuleId) : null].filter(Boolean))]
+    const placeholders = ids.map(() => "?").join(",")
+    db.all(`SELECT id, category FROM rules WHERE id IN (${placeholders})`, ids, (ruleErr, rows) => {
+      if (ruleErr) return cb(ruleErr)
+      if (rows.length !== ids.length) return cb(Object.assign(new Error("Rule not found"), { status: 404 }))
+      getLimitedEditCategories()
+        .then((categories) => {
+          if (week.status === WEEK_STATUSES.LIMITED_EDIT && rows.some((row) => !categories.includes(String(row.category || "").trim()))) {
+            return cb(Object.assign(new Error("Chỉ được chỉnh sửa lỗi thuộc category được cấu hình sau thời điểm kết thúc tuần"), { status: 403 }))
+          }
+          cb(null, week)
+        })
+        .catch(cb)
+    })
+  })
+}
+
 function recordRevision(sessionId, action, req, metadata, cb) {
   const user = req.session.user || {}
   db.run(
@@ -4987,7 +5078,7 @@ router.get(
   (req, res) => {
     db.all(
       `
-        SELECT w.id, w.week_number, w.start_date, w.end_date, c.closed_at
+        SELECT w.id, w.week_number, w.start_date, w.end_date, w.start_datetime, w.end_datetime, w.status, c.closed_at
         FROM schedule_weeks w
         LEFT JOIN week_closings c
           ON c.week_id = w.id
@@ -5023,7 +5114,7 @@ router.get(
         if (!week) return res.status(404).json({ error: "Week not found" })
 
         const today = time.today()
-        const isCurrentWeek = week.start_date <= today && today <= week.end_date
+        const isCurrentWeek = isWeekCurrent(week)
 
         isWeekClosed(week.id, (err, closed) => {
           if (!err && !closed && isCurrentWeek && !isSunday(today)) {
@@ -5084,7 +5175,7 @@ router.get(
         if (!session) return res.status(404).json({ error: "Session not found" })
 
         db.get(
-          `SELECT id,week_number,start_date,end_date FROM schedule_weeks WHERE id=? LIMIT 1`,
+          `SELECT id,week_number,start_date,end_date,start_datetime,end_datetime,status FROM schedule_weeks WHERE id=? LIMIT 1`,
           [session.week_id],
           (err, week) => {
             if (err) return res.status(500).json({ error: err.message })
@@ -5154,7 +5245,7 @@ router.get(
   (req, res) => {
     db.all(
       `
-        SELECT w.id, w.week_number, w.start_date, w.end_date, c.closed_at
+        SELECT w.id, w.week_number, w.start_date, w.end_date, w.start_datetime, w.end_datetime, w.status, c.closed_at
         FROM schedule_weeks w
         LEFT JOIN week_closings c
           ON c.week_id = w.id
@@ -5190,7 +5281,7 @@ router.get(
         if (!week) return res.status(404).json({ error: "Week not found" })
 
         const today = time.today()
-        const isCurrentWeek = week.start_date <= today && today <= week.end_date
+        const isCurrentWeek = isWeekCurrent(week)
 
         isWeekClosed(week.id, (err, closed) => {
           if (!err && !closed && isCurrentWeek && !isSunday(today)) {

@@ -33,6 +33,10 @@ const SETTING_DEFINITIONS = {
     key: "offline_duty_enabled",
     description: "Cho phép Cờ đỏ sử dụng chế độ đi trực ngoại tuyến",
   },
+  limited_edit_categories: {
+    key: "limited_edit_categories",
+    description: "Các category mà Cờ đỏ được CRUD khi tuần ở trạng thái chỉnh sửa giới hạn",
+  },
 }
 
 let settingsCache = null

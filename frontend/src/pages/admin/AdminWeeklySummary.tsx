@@ -5,7 +5,6 @@ import { api } from "../../api/api"
 
 import Navbar from "../../components/Navbar"
 import Footer from "../../components/Footer"
-import { localISODate } from "../../utils/dateLocal"
 import { getApiErrorMessage } from "../../utils/getApiErrorMessage"
 import { effectiveViolationScore } from "../../utils/dutyViolations"
 import { usePageTitle } from "../../utils/usePageTitle"
@@ -15,6 +14,8 @@ type Week = {
   week_number: number
   start_date: string
   end_date: string
+  start_datetime?: string
+  end_datetime?: string
 }
 
 export default function AdminWeeklySummary() {
@@ -27,8 +28,6 @@ export default function AdminWeeklySummary() {
   const [detailClass, setDetailClass] = useState<string | null>(null)
   const [detail, setDetail] = useState<any>(null)
 
-  const today = useMemo(() => localISODate(new Date()), [])
-
   useEffect(() => {
     boot()
   }, [])
@@ -39,7 +38,12 @@ export default function AdminWeeklySummary() {
       const res = await api.get("/schedule/admin")
       const list: Week[] = res.data || []
       setWeeks(list)
-      const current = list.find((x) => x.start_date <= today && x.end_date >= today)
+      const now = new Date()
+      const current = list.find((x) => {
+        const start = new Date((x.start_datetime || `${x.start_date}T00:00:00`).replace(" ", "T"))
+        const end = new Date((x.end_datetime || `${x.end_date}T23:59:59`).replace(" ", "T"))
+        return start <= now && now <= end
+      })
       const id = current?.id ?? (list.length ? list[0].id : null)
       setWeekId(id)
       if (id) await load(id)

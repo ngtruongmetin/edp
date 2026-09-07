@@ -11,12 +11,12 @@ function getWeekForDate(date, cb) {
     `
       SELECT *
       FROM schedule_weeks
-      WHERE start_date <= ?
-        AND end_date >= ?
+      WHERE COALESCE(start_datetime, start_date || ' 00:00:00') <= ?
+        AND COALESCE(end_datetime, end_date || ' 23:59:59') >= ?
       ORDER BY week_number DESC
       LIMIT 1
     `,
-    [date, date],
+    [`${date} 23:59:59`, `${date} 23:59:59`],
     cb,
   )
 }

@@ -139,6 +139,24 @@ function validateGeneralSettingsPayload(payload) {
     normalized.offline_duty_enabled = enabled
   }
 
+  if ("limited_edit_categories" in settings) {
+    let categories
+    try {
+      categories = Array.isArray(settings.limited_edit_categories)
+        ? settings.limited_edit_categories
+        : JSON.parse(String(settings.limited_edit_categories || ""))
+    } catch {
+      categories = null
+    }
+    categories = [...new Set((categories || []).map((item) => String(item || "").trim()).filter(Boolean))]
+    if (!categories.length) {
+      const error = new Error("Phải cấu hình ít nhất một category cho chỉnh sửa giới hạn")
+      error.status = 400
+      throw error
+    }
+    normalized.limited_edit_categories = JSON.stringify(categories)
+  }
+
   for (const key of ["weekly_bonus_score_threshold", "weekly_bonus_points"]) {
     if (!(key in settings)) continue
     const value = toNumber(settings[key])

@@ -1,5 +1,6 @@
 const db = require("../db")
 const time = require("./time")
+const { syncAllWeekStatuses } = require("./weekState")
 
 function isSunday(dateStr) {
   const dt = new Date(String(dateStr) + "T00:00:00")
@@ -11,12 +12,12 @@ function getWeekForDate(date, cb) {
     `
       SELECT *
       FROM schedule_weeks
-      WHERE start_date <= ?
-        AND end_date >= ?
+      WHERE COALESCE(start_datetime, start_date || ' 00:00:00') <= ?
+        AND COALESCE(end_datetime, end_date || ' 23:59:59') >= ?
       ORDER BY week_number DESC
       LIMIT 1
     `,
-    [date, date],
+    [`${date} 23:59:59`, `${date} 23:59:59`],
     cb,
   )
 }
@@ -122,6 +123,13 @@ function startDutyAutoCreateScheduler({ repairOnStart = true } = {}) {
     runMidnightJob()
     setInterval(runMidnightJob, 24 * 60 * 60 * 1000)
   }, delay)
+
+  // Persist the limited-edit transition close to each configured end time.
+  setInterval(() => {
+    syncAllWeekStatuses((error) => {
+      if (error) console.error("[dutyAutoCreate] sync week statuses error:", error.message)
+    })
+  }, 60 * 1000)
 
   console.log(`[dutyAutoCreate] scheduler armed (next run in ${Math.round(delay / 1000)}s)`)
 }

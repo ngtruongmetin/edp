@@ -31,6 +31,9 @@ type Week = {
   week_number: number
   start_date: string
   end_date: string
+  start_datetime?: string
+  end_datetime?: string
+  status?: "not_summarized" | "limited_edit" | "summarized"
 }
 
 type Assignment = {
@@ -44,6 +47,8 @@ type WeekForm = {
   week_number: string
   start_date: string
   end_date: string
+  start_datetime: string
+  end_datetime: string
   month_id: string
 }
 
@@ -57,6 +62,12 @@ function formatDate(date: string) {
   if (!date) return ""
   const [y, m, d] = date.split("-")
   return `${d}/${m}/${y}`
+}
+
+function formatDateTime(value?: string) {
+  if (!value) return ""
+  const [date, time] = value.replace("T", " ").split(" ")
+  return `${formatDate(date)} ${String(time || "").slice(0, 5)}`
 }
 
 function toInputDate(date: string) {
@@ -88,6 +99,8 @@ function emptyWeekForm(monthId = ""): WeekForm {
     week_number: "",
     start_date: "",
     end_date: "",
+    start_datetime: "",
+    end_datetime: "",
     month_id: monthId,
   }
 }
@@ -234,6 +247,8 @@ export default function AdminSchedule() {
         week_number: String(res.data.week?.week_number || ""),
         start_date: res.data.week?.start_date || "",
         end_date: res.data.week?.end_date || "",
+        start_datetime: res.data.week?.start_datetime || `${res.data.week?.start_date || ""}T00:00`,
+        end_datetime: res.data.week?.end_datetime || `${res.data.week?.end_date || ""}T23:59`,
         month_id: String(res.data.week?.month_id || ""),
       })
 
@@ -288,6 +303,8 @@ export default function AdminSchedule() {
       month_id: Number(form.month_id),
       start_date: form.start_date,
       end_date: form.end_date,
+      start_datetime: form.start_datetime,
+      end_datetime: form.end_datetime,
     }
   }
 
@@ -554,6 +571,8 @@ export default function AdminSchedule() {
                 ...form,
                 start_date: start,
                 end_date: autoEndDate(e.target.value),
+                start_datetime: `${e.target.value}T06:50`,
+                end_datetime: `${toInputDate(autoEndDate(e.target.value))}T17:00`,
               })
             }}
             className="w-full rounded-[20px] border border-white/70 bg-white/84 px-4 py-3 text-sm outline-none focus:border-[#2e77df]"
@@ -566,6 +585,26 @@ export default function AdminSchedule() {
             type="date"
             value={toInputDate(form.end_date)}
             onChange={(e) => setForm({ ...form, end_date: fromInputDate(e.target.value) })}
+            className="w-full rounded-[20px] border border-white/70 bg-white/84 px-4 py-3 text-sm outline-none focus:border-[#2e77df]"
+          />
+        </label>
+
+        <label className="block space-y-2">
+          <span className="text-sm font-semibold text-slate-900">Thời điểm bắt đầu</span>
+          <input
+            type="datetime-local"
+            value={String(form.start_datetime || "").replace(" ", "T").slice(0, 16)}
+            onChange={(e) => setForm({ ...form, start_datetime: e.target.value })}
+            className="w-full rounded-[20px] border border-white/70 bg-white/84 px-4 py-3 text-sm outline-none focus:border-[#2e77df]"
+          />
+        </label>
+
+        <label className="block space-y-2">
+          <span className="text-sm font-semibold text-slate-900">Thời điểm kết thúc</span>
+          <input
+            type="datetime-local"
+            value={String(form.end_datetime || "").replace(" ", "T").slice(0, 16)}
+            onChange={(e) => setForm({ ...form, end_datetime: e.target.value })}
             className="w-full rounded-[20px] border border-white/70 bg-white/84 px-4 py-3 text-sm outline-none focus:border-[#2e77df]"
           />
         </label>
@@ -645,8 +684,9 @@ export default function AdminSchedule() {
                       <div className="text-xs text-slate-500">{week.month_key}</div>
                     </div>
                     <div className="mt-1 text-xs text-slate-500">
-                      {formatDate(week.start_date)} → {formatDate(week.end_date)}
+                      {formatDateTime(week.start_datetime || week.start_date)} → {formatDateTime(week.end_datetime || week.end_date)}
                     </div>
+                    <div className="mt-1 text-[11px] font-semibold text-slate-400">{week.status === "summarized" ? "Đã tổng kết" : week.status === "limited_edit" ? "Chỉnh sửa giới hạn" : "Chưa tổng kết"}</div>
                   </button>
                 ))
               )}

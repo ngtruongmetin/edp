@@ -22,6 +22,8 @@ type Week = {
   week_number: number
   start_date: string
   end_date: string
+  start_datetime?: string
+  end_datetime?: string
   closed_at?: string | null
   base_points?: number
   month_key?: string
@@ -386,14 +388,12 @@ export default function GvcnDashboard() {
       setPeriodTree(tree)
       setWeeks(list)
 
-      const today = new Date()
-      const todayIso = [
-        today.getFullYear(),
-        String(today.getMonth() + 1).padStart(2, "0"),
-        String(today.getDate()).padStart(2, "0"),
-      ].join("-")
-
-      const current = list.find((w) => w.start_date <= todayIso && todayIso <= w.end_date)
+      const now = new Date()
+      const current = list.find((w) => {
+        const start = new Date((w.start_datetime || `${w.start_date}T00:00:00`).replace(" ", "T"))
+        const end = new Date((w.end_datetime || `${w.end_date}T23:59:59`).replace(" ", "T"))
+        return start <= now && now <= end
+      })
       const defaultWeekId = current?.id ?? list[0]?.id ?? null
       const defaultWeek = list.find((item) => item.id === defaultWeekId) || null
       const firstSemester = tree.semesters?.[0] || null

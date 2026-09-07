@@ -7,8 +7,17 @@ const requireRole = require("../../middleware/requireRole")
 const SystemSettingService = require("../system-settings/service")
 
 const time = require("../../utils/time")
+const {
+  WEEK_STATUSES,
+  normalizeDateTime,
+  datePart,
+  syncAllWeekStatuses,
+} = require("../../utils/weekState")
 
 const router = express.Router()
+router.use((req, res, next) => {
+  syncAllWeekStatuses((error) => next(error || undefined))
+})
 function convertDate(input){
 
   if(!input) return null
@@ -30,6 +39,14 @@ function normalizeDate(input){
   if(/^\d{4}-\d{2}-\d{2}$/.test(input)) return input
   if(String(input).includes("/")) return convertDate(String(input))
   return null
+}
+
+function normalizeWeekTimes({ start_date, end_date, start_datetime, end_datetime }) {
+  const startDate = normalizeDate(start_date) || datePart(normalizeDateTime(start_datetime))
+  const endDate = normalizeDate(end_date) || datePart(normalizeDateTime(end_datetime))
+  const startDateTime = normalizeDateTime(start_datetime, startDate, "00:00:00")
+  const endDateTime = normalizeDateTime(end_datetime, endDate, "23:59:59")
+  return { startDate, endDate, startDateTime, endDateTime }
 }
 
 function isPositiveInteger(value) {
@@ -262,15 +279,15 @@ PUBLIC CURRENT WEEK
 */
 router.get("/",(req,res)=>{
 
-  const today = time.today()
+  const now = time.now()
 
   db.get(`
     ${weekSelectSql()}
-    WHERE start_date <= ?
-      AND end_date >= ?
+    WHERE COALESCE(start_datetime, start_date || ' 00:00:00') <= ?
+      AND COALESCE(end_datetime, end_date || ' 23:59:59') >= ?
     ORDER BY week_number DESC
     LIMIT 1
-  `,[today, today],(err,week)=>{
+  `,[now, now],(err,week)=>{
 
     if(err) return res.status(500).json({error:err.message})
     if(!week) return res.json({})
@@ -354,15 +371,18 @@ requireLogin,
 requireRole(["admin"]),
 (req,res)=>{
 
-  db.all(`
-    ${weekSelectSql()}
-    ORDER BY week_number DESC
-  `,[],(err,rows)=>{
+  syncAllWeekStatuses((syncErr) => {
+    if (syncErr) return res.status(500).json({ error: syncErr.message })
+    db.all(`
+      ${weekSelectSql()}
+      ORDER BY week_number DESC
+    `,[],(err,rows)=>{
 
-    if(err) return res.status(500).json({error:err.message})
+      if(err) return res.status(500).json({error:err.message})
 
-    res.json(rows)
+      res.json(rows)
 
+    })
   })
 
 })
@@ -417,17 +437,17 @@ requireLogin,
 requireRole(["admin"]),
 (req,res)=>{
 
-  const {week_number,start_date,end_date,month_id} = req.body
-
-  const start = convertDate(start_date)
-  const end = convertDate(end_date)
+  const {week_number,start_date,end_date,start_datetime,end_datetime,month_id} = req.body
+  const times = normalizeWeekTimes({ start_date, end_date, start_datetime, end_datetime })
+  const start = times.startDate
+  const end = times.endDate
   const monthId = Number(month_id)
   const weekNumber = Number(week_number)
 
-  if(!Number.isInteger(weekNumber) || weekNumber <= 0 || !start || !end || !monthId){
+  if(!Number.isInteger(weekNumber) || weekNumber <= 0 || !start || !end || !times.startDateTime || !times.endDateTime || !monthId){
     return res.status(400).json({error:"Invalid date"})
   }
-  if(start > end){
+  if(times.startDateTime >= times.endDateTime){
     return res.status(400).json({error:"Start date must be before end date"})
   }
 
@@ -438,10 +458,10 @@ requireRole(["admin"]),
         const ins = await run(
           `
           INSERT INTO schedule_weeks
-          (month_id,week_number,start_date,end_date,created_at)
-          VALUES(?,?,?,?,?)
+          (month_id,week_number,start_date,end_date,start_datetime,end_datetime,status,created_at)
+          VALUES(?,?,?,?,?,?,?,?)
         `,
-          [monthId, weekNumber, start, end, time.now()],
+          [monthId, weekNumber, start, end, times.startDateTime, times.endDateTime, WEEK_STATUSES.NOT_SUMMARIZED, time.now()],
         )
 
         const newWeekId = ins.lastID
@@ -504,19 +524,20 @@ router.post(
   requireRole(["admin"]),
   (req,res)=>{
 
-    const { week_id, start_date, end_date, month_id, week_number } = req.body
-    const start = normalizeDate(start_date)
-    const end = normalizeDate(end_date)
+    const { week_id, start_date, end_date, start_datetime, end_datetime, month_id, week_number } = req.body
+    const times = normalizeWeekTimes({ start_date, end_date, start_datetime, end_datetime })
+    const start = times.startDate
+    const end = times.endDate
     const monthId = month_id ? Number(month_id) : null
     const weekNumber =
       week_number === undefined || week_number === null || week_number === ""
         ? null
         : Number(week_number)
 
-    if(!week_id || !start || !end){
+    if(!week_id || !start || !end || !times.startDateTime || !times.endDateTime){
       return res.status(400).json({error:"Invalid date"})
     }
-    if(start > end){
+    if(times.startDateTime >= times.endDateTime){
       return res.status(400).json({error:"Start date must be before end date"})
     }
     if(weekNumber !== null && (!Number.isInteger(weekNumber) || weekNumber <= 0)){
@@ -534,10 +555,12 @@ router.post(
               SET month_id=?,
                   week_number=COALESCE(?, week_number),
                   start_date=?,
-                  end_date=?
+                  end_date=?,
+                  start_datetime=?,
+                  end_datetime=?
               WHERE id=?
             `,
-            [monthId, weekNumber, start, end, week_id],
+            [monthId, weekNumber, start, end, times.startDateTime, times.endDateTime, week_id],
           )
         } else {
           await run(
@@ -545,10 +568,12 @@ router.post(
               UPDATE schedule_weeks
               SET week_number=COALESCE(?, week_number),
                   start_date=?,
-                  end_date=?
+                  end_date=?,
+                  start_datetime=?,
+                  end_datetime=?
               WHERE id=?
             `,
-            [weekNumber, start, end, week_id],
+            [weekNumber, start, end, times.startDateTime, times.endDateTime, week_id],
           )
         }
         res.json({ success: true })

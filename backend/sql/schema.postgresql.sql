@@ -78,6 +78,9 @@ CREATE TABLE IF NOT EXISTS schedule_weeks (
   week_number INTEGER,
   start_date TEXT,
   end_date TEXT,
+  start_datetime TEXT,
+  end_datetime TEXT,
+  status TEXT NOT NULL DEFAULT 'not_summarized' CHECK (status IN ('not_summarized', 'limited_edit', 'summarized')),
   created_at TEXT,
   CONSTRAINT fk_schedule_weeks_month_id FOREIGN KEY (month_id) REFERENCES months(id) ON DELETE RESTRICT
 );
@@ -515,6 +518,19 @@ ALTER TABLE duty_sessions ADD COLUMN IF NOT EXISTS signed_snapshot_hash TEXT;
 ALTER TABLE duty_sessions ADD COLUMN IF NOT EXISTS client_id UUID;
 ALTER TABLE duty_violations ADD COLUMN IF NOT EXISTS client_id UUID;
 ALTER TABLE schedule_weeks ADD COLUMN IF NOT EXISTS month_id INTEGER;
+ALTER TABLE schedule_weeks ADD COLUMN IF NOT EXISTS start_datetime TEXT;
+ALTER TABLE schedule_weeks ADD COLUMN IF NOT EXISTS end_datetime TEXT;
+ALTER TABLE schedule_weeks ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'not_summarized';
+UPDATE schedule_weeks SET start_datetime = COALESCE(start_datetime, start_date || ' 00:00:00');
+UPDATE schedule_weeks SET end_datetime = COALESCE(end_datetime, end_date || ' 23:59:59');
+UPDATE schedule_weeks w
+SET status = CASE
+  WHEN EXISTS (SELECT 1 FROM week_closings c WHERE c.week_id = w.id AND c.closed_at IS NOT NULL) THEN 'summarized'
+  WHEN COALESCE(w.end_datetime, w.end_date || ' 23:59:59') <= to_char(NOW() AT TIME ZONE 'Asia/Ho_Chi_Minh', 'YYYY-MM-DD HH24:MI:SS') THEN 'limited_edit'
+  ELSE 'not_summarized'
+END;
+ALTER TABLE schedule_weeks DROP CONSTRAINT IF EXISTS schedule_weeks_status_check;
+ALTER TABLE schedule_weeks ADD CONSTRAINT schedule_weeks_status_check CHECK (status IN ('not_summarized', 'limited_edit', 'summarized'));
 ALTER TABLE rules ADD COLUMN IF NOT EXISTS rule_code TEXT;
 CREATE UNIQUE INDEX IF NOT EXISTS idx_rules_rule_code_unique
   ON rules (rule_code)
