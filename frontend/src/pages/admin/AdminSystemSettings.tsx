@@ -143,6 +143,7 @@ export default function AdminSystemSettings() {
   const [baseScore, setBaseScore] = useState("100")
   const [schoolYear, setSchoolYear] = useState("2026-2027")
   const [useElectronicGradebook, setUseElectronicGradebook] = useState("1")
+  const [diaryScheduleBindingEnabled, setDiaryScheduleBindingEnabled] = useState("1")
   const [weeklyBonusEnabled, setWeeklyBonusEnabled] = useState("1")
   const [weeklyBonusThreshold, setWeeklyBonusThreshold] = useState("10")
   const [weeklyBonusRequireAll, setWeeklyBonusRequireAll] = useState("1")
@@ -204,6 +205,7 @@ export default function AdminSystemSettings() {
       setBaseScore(settingsRes.data.settings.base_score?.value || "100")
       setSchoolYear(settingsRes.data.settings.school_year?.value || "2026-2027")
       setUseElectronicGradebook(settingsRes.data.settings.use_electronic_gradebook?.value === "0" ? "0" : "1")
+      setDiaryScheduleBindingEnabled(settingsRes.data.settings.diary_schedule_binding_enabled?.value === "0" ? "0" : "1")
       setWeeklyBonusEnabled(settingsRes.data.settings.weekly_bonus_enabled?.value === "0" ? "0" : "1")
       setWeeklyBonusThreshold(settingsRes.data.settings.weekly_bonus_score_threshold?.value || "10")
       setWeeklyBonusRequireAll(settingsRes.data.settings.weekly_bonus_require_all_entries?.value === "0" ? "0" : "1")
@@ -401,6 +403,7 @@ export default function AdminSystemSettings() {
           base_score: Number(baseScore),
           school_year: schoolYear.trim(),
           use_electronic_gradebook: useElectronicGradebook,
+          diary_schedule_binding_enabled: diaryScheduleBindingEnabled,
           weekly_bonus_enabled: weeklyBonusEnabled,
           weekly_bonus_score_threshold: Number(weeklyBonusThreshold),
           weekly_bonus_require_all_entries: weeklyBonusRequireAll,
@@ -413,6 +416,7 @@ export default function AdminSystemSettings() {
       setBaseScore(res.data.settings.base_score?.value || baseScore)
       setSchoolYear(res.data.settings.school_year?.value || schoolYear)
       setUseElectronicGradebook(res.data.settings.use_electronic_gradebook?.value === "0" ? "0" : "1")
+      setDiaryScheduleBindingEnabled(res.data.settings.diary_schedule_binding_enabled?.value === "0" ? "0" : "1")
       setWeeklyBonusEnabled(res.data.settings.weekly_bonus_enabled?.value === "0" ? "0" : "1")
       setWeeklyBonusThreshold(res.data.settings.weekly_bonus_score_threshold?.value || weeklyBonusThreshold)
       setWeeklyBonusRequireAll(res.data.settings.weekly_bonus_require_all_entries?.value === "0" ? "0" : "1")
@@ -708,6 +712,21 @@ export default function AdminSystemSettings() {
               </select>
               <div className="text-xs text-slate-500">
                 Nếu chọn Không, tổng kết tuần sẽ không bắt buộc upload đủ Excel sổ đầu bài khối 10, 11, 12.
+              </div>
+            </label>
+
+            <label className="space-y-2 lg:col-span-2">
+              <span className="text-sm font-semibold text-slate-900">Bám theo thời khóa biểu khi tính Sổ đầu bài</span>
+              <select
+                value={diaryScheduleBindingEnabled}
+                onChange={(e) => setDiaryScheduleBindingEnabled(e.target.value)}
+                className="w-full rounded-2xl border border-blue-100 bg-white px-4 py-3 text-sm outline-none focus:border-[#2e77df]"
+              >
+                <option value="1">Bật</option>
+                <option value="0">Tắt</option>
+              </select>
+              <div className="text-xs text-slate-500">
+                Bật: chỉ tính tiết trong Sổ đầu bài khớp Thời khóa biểu. Tắt: tính tiết hợp lệ trong Sổ đầu bài, không yêu cầu khớp Thời khóa biểu. Chào cờ và SHDC luôn không tính; Thể dục vẫn tính.
               </div>
             </label>
 

@@ -37,6 +37,10 @@ const SETTING_DEFINITIONS = {
     key: "limited_edit_categories",
     description: "Các category mà Cờ đỏ được CRUD khi tuần ở trạng thái chỉnh sửa giới hạn",
   },
+  diary_schedule_binding_enabled: {
+    key: "diary_schedule_binding_enabled",
+    description: "Bám theo thời khóa biểu khi tính điểm Sổ đầu bài điện tử",
+  },
 }
 
 let settingsCache = null

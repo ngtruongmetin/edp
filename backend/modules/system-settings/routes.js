@@ -157,6 +157,16 @@ function validateGeneralSettingsPayload(payload) {
     normalized.limited_edit_categories = JSON.stringify(categories)
   }
 
+  if ("diary_schedule_binding_enabled" in settings) {
+    const enabled = normalizeBooleanSetting(settings.diary_schedule_binding_enabled)
+    if (enabled === null) {
+      const error = new Error("Cấu hình bám thời khóa biểu không hợp lệ")
+      error.status = 400
+      throw error
+    }
+    normalized.diary_schedule_binding_enabled = enabled
+  }
+
   for (const key of ["weekly_bonus_score_threshold", "weekly_bonus_points"]) {
     if (!(key in settings)) continue
     const value = toNumber(settings[key])

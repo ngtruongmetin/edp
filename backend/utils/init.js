@@ -55,6 +55,11 @@ const DEFAULT_SYSTEM_SETTINGS = [
     value: '["Chuyên cần"]',
     description: "Các category mà Cờ đỏ được CRUD khi tuần ở trạng thái chỉnh sửa giới hạn",
   },
+  {
+    key: "diary_schedule_binding_enabled",
+    value: "1",
+    description: "Bám theo thời khóa biểu khi tính điểm Sổ đầu bài điện tử",
+  },
 ]
 
 function detectProviderFromApiKey(apiKey) {

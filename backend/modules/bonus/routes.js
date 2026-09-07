@@ -9,6 +9,7 @@ const requireRole = require("../../middleware/requireRole")
 
 const time = require("../../utils/time")
 const { mapDatabaseError, get, all, run, withTransaction } = require("../../utils/dbp")
+const SystemSettingService = require("../system-settings/service")
 
 const router = express.Router()
 const WEEKLY_GRADEBOOK_BONUS_REASON = "weekly_bonus:gradebook"
@@ -109,14 +110,18 @@ function normalizeSession(text) {
 }
 
 function isIgnoredSubject(text) {
-  const s = String(text || "").trim().toLowerCase()
+  const s = String(text || "")
+    .trim()
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim()
   if (!s) return false
   return (
-    s === "giáo dục thể chất" ||
-    s === "giao duc the chat" ||
-    s === "thể dục" ||
-    s === "the duc" ||
-    s === "gdtc"
+    s === "chao co" ||
+    s === "shdc" ||
+    s.includes("sinh hoat duoi co")
   )
 }
 
@@ -204,6 +209,9 @@ function parseSoDauBaiBuffer(buf) {
         cell(sheet, `F${rowIndex}`) ??
         cell(sheet, `G${rowIndex}`) ??
         ""
+      const subject = String(subjectRaw || "").trim()
+      // A numeric period/score alone is not a diary lesson. Subject/content is authoritative.
+      if (!subject) continue
       if (isIgnoredSubject(subjectRaw)) {
         continue
       }
@@ -212,7 +220,7 @@ function parseSoDauBaiBuffer(buf) {
       const n = toNumber(v)
       if (periodNum != null) {
         periods.push({
-          subject: String(subjectRaw || "").trim() || "Tiết",
+          subject,
           score: n,
           period: periodNum,
           session,
@@ -585,6 +593,10 @@ router.post(
         [weekId],
       )
       if (!week) return res.status(404).json({ error: "Week not found" })
+      const diaryScheduleBindingEnabled = SystemSettingService.isEnabled(
+        await SystemSettingService.get("diary_schedule_binding_enabled", "1"),
+        true,
+      )
 
       const [closed] = await new Promise((resolve, reject) => {
         isWeekClosed(weekId, (err, isClosed) => {
@@ -594,9 +606,9 @@ router.post(
       })
       if (closed) return res.status(403).json({ error: "Week closed" })
 
-      const timetableHeaders = await all(
-        `SELECT id, effective_date FROM timetables ORDER BY effective_date ASC, id ASC`,
-      )
+      const timetableHeaders = diaryScheduleBindingEnabled
+        ? await all(`SELECT id, effective_date FROM timetables ORDER BY effective_date ASC, id ASC`)
+        : []
       const timetableCache = new Map()
 
       async function getTimetableMap(dateIso) {
@@ -699,7 +711,7 @@ router.post(
           const dayNum = dayNumberFromISO(day.date)
           if (!dayNum) continue
 
-          const timetable = await getTimetableMap(day.date)
+          const timetable = diaryScheduleBindingEnabled ? await getTimetableMap(day.date) : null
           const classMap = timetable?.get(String(className).toUpperCase()) || null
 
         const periodRows = Array.isArray(day.periods) ? day.periods : []
@@ -708,19 +720,20 @@ router.post(
           const session = normalizeSession(p.session) || null
           const periodNo = Number(p.period)
           if (!session || !Number.isFinite(periodNo)) continue
-          if (isIgnoredSubject(p.subject)) continue
+          const subject = String(p.subject || "").trim()
+          if (!subject || isIgnoredSubject(subject)) continue
           if (!sdbMap.has(session)) sdbMap.set(session, new Map())
           const sessionMap = sdbMap.get(session)
           if (!sessionMap.has(periodNo)) {
             sessionMap.set(periodNo, {
-              subject: String(p.subject || "").trim(),
+              subject,
               score: toNumber(p.score),
             })
           }
         }
 
         const usable = []
-        if (classMap) {
+        if (diaryScheduleBindingEnabled && classMap) {
           const dayMap = classMap.get(dayNum)
           if (dayMap) {
             for (const [session, periodMap] of dayMap.entries()) {
@@ -776,7 +789,7 @@ router.post(
               }
             }
           }
-        } else {
+        } else if (!diaryScheduleBindingEnabled) {
           for (const [session, periodMap] of sdbMap.entries()) {
             for (const [periodNo, sdb] of periodMap.entries()) {
               let score = sdb.score ?? 10
