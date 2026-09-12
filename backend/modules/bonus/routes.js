@@ -73,6 +73,61 @@ function getWeeklyBonusEligibility(weekId, className, cb) {
   })
 }
 
+// Removing a correction/extra-lesson day must not revoke an already earned
+// gradebook bonus while the remaining recorded days still meet the threshold.
+function preserveWeeklyBonusAfterDayDelete(weekId, className, cb) {
+  getWeeklyBonusConfig((configErr, config) => {
+    if (configErr) return cb(configErr)
+
+    db.get(
+      `
+        SELECT COUNT(*) AS bonus_count, MIN(min_score) AS min_score
+        FROM daily_bonus
+        WHERE week_id=? AND class_name=? AND min_score IS NOT NULL
+      `,
+      [weekId, className],
+      (scoreErr, scoreRow) => {
+        if (scoreErr) return cb(scoreErr)
+
+        db.get(
+          `SELECT reason FROM weekly_bonus WHERE week_id=? AND class_name=? LIMIT 1`,
+          [weekId, className],
+          (bonusErr, existingBonus) => {
+            if (bonusErr) return cb(bonusErr)
+
+            const reason = String(existingBonus?.reason || "")
+            const isAutomaticBonus =
+              reason === WEEKLY_GRADEBOOK_BONUS_REASON || reason.startsWith("Thuong tu so dau bai:")
+            const bonusCount = Number(scoreRow?.bonus_count || 0)
+            const minScore = Number(scoreRow?.min_score)
+            const keepBonus =
+              Boolean(existingBonus) &&
+              isAutomaticBonus &&
+              config.enabled &&
+              bonusCount > 0 &&
+              Number.isFinite(minScore) &&
+              minScore >= config.threshold
+
+            if (keepBonus || !isAutomaticBonus) {
+              return cb(null, { eligible: keepBonus })
+            }
+
+            db.run(
+              `
+                DELETE FROM weekly_bonus
+                WHERE week_id=? AND class_name=?
+                  AND (reason=? OR reason LIKE 'Thuong tu so dau bai:%')
+              `,
+              [weekId, className, WEEKLY_GRADEBOOK_BONUS_REASON],
+              (deleteErr) => (deleteErr ? cb(deleteErr) : cb(null, { eligible: false })),
+            )
+          },
+        )
+      },
+    )
+  })
+}
+
 function isWeekClosed(weekId, cb) {
   db.get(
     `SELECT week_id, closed_at FROM week_closings WHERE week_id=? LIMIT 1`,
@@ -1250,7 +1305,14 @@ router.post(
                 const out = mapDatabaseError(err, err.message)
                 return res.status(out.status).json({ error: out.error })
               }
-              finalizeWeeklyBonus()
+              preserveWeeklyBonusAfterDayDelete(weekId, className, (bonusErr, result) => {
+                if (bonusErr) return res.status(500).json({ error: bonusErr.message })
+                res.json({
+                  success: true,
+                  eligible: Boolean(result?.eligible),
+                  complete: Boolean(result?.eligible),
+                })
+              })
             },
           )
         }
