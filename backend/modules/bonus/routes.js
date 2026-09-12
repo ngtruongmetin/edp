@@ -120,6 +120,7 @@ function isIgnoredSubject(text) {
   if (!s) return false
   return (
     s === "chao co" ||
+    s === "chaoco" ||
     s === "shdc" ||
     s.includes("sinh hoat duoi co")
   )
@@ -1120,6 +1121,48 @@ router.get(
     res.json({ week_id: weekId, grades: rows || [] })
   },
 )
+
+/*
+ADMIN: clear all electronic gradebook data for a week
+Removes daily gradebook scores, weekly gradebook bonuses, and upload markers.
+Duty sessions, violations, signatures, and timetables are preserved.
+*/
+router.delete(
+  "/admin/week/:weekId",
+  requireLogin,
+  requireRole(["admin"]),
+  async (req, res) => {
+    const weekId = Number(req.params.weekId)
+    if (!weekId) return res.status(400).json({ error: "Invalid week" })
+
+    try {
+      const week = await get(`SELECT id FROM schedule_weeks WHERE id=? LIMIT 1`, [weekId])
+      if (!week) return res.status(404).json({ error: "Week not found" })
+
+      const closed = await new Promise((resolve, reject) => {
+        isWeekClosed(weekId, (err, value) => (err ? reject(err) : resolve(value)))
+      })
+      if (closed) return res.status(403).json({ error: "Week closed" })
+
+      const deleted = await withTransaction(async () => {
+        const daily = await run(`DELETE FROM daily_bonus WHERE week_id=?`, [weekId])
+        const weekly = await run(`DELETE FROM weekly_bonus WHERE week_id=?`, [weekId])
+        const uploads = await run(`DELETE FROM bonus_uploads WHERE week_id=?`, [weekId])
+        return {
+          daily_bonus: Number(daily?.changes || 0),
+          weekly_bonus: Number(weekly?.changes || 0),
+          upload_markers: Number(uploads?.changes || 0),
+        }
+      })
+
+      res.json({ success: true, week_id: weekId, deleted })
+    } catch (err) {
+      console.error(err)
+      res.status(err?.status || 500).json({ error: err?.message || "Cannot clear gradebook" })
+    }
+  },
+)
+
 /*
 ADMIN: apply a day bonus to a class in a week (only within week range)
 body: { week_id, class_name, date, points, min_score?, all_above_9?, source, session_id? }

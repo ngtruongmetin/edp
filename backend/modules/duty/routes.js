@@ -2329,6 +2329,7 @@ router.get(
           COALESCE(b.points, 0) as bonus_points,
           b.min_score as bonus_min_score,
           b.source as bonus_source,
+          b.periods_json as bonus_periods_json,
           ds.photo_path as signature_photo_path,
           ds.signed_at as signature_signed_at
         FROM duty_sessions s
@@ -3122,6 +3123,7 @@ router.get(
           COALESCE(b.points, 0) as bonus_points,
           b.min_score as bonus_min_score,
           b.source as bonus_source,
+          b.periods_json as bonus_periods_json,
           ds.photo_path as signature_photo_path,
           ds.signed_at as signature_signed_at
         FROM duty_sessions s
