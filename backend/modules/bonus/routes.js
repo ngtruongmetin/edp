@@ -73,8 +73,8 @@ function getWeeklyBonusEligibility(weekId, className, cb) {
   })
 }
 
-// Removing a correction/extra-lesson day must not revoke an already earned
-// gradebook bonus while the remaining recorded days still meet the threshold.
+// Manual gradebook changes must not revoke an earned bonus while the remaining
+// recorded days still meet the configured score threshold.
 function preserveWeeklyBonusAfterDayDelete(weekId, className, cb) {
   getWeeklyBonusConfig((configErr, config) => {
     if (configErr) return cb(configErr)
@@ -1288,8 +1288,15 @@ router.post(
                   (writeErr) => writeErr ? res.status(500).json({ error: writeErr.message }) : res.json({ success: true, eligible: true, complete: eligibility.complete }),
                 )
               }
-              if (!eligibility.eligible && isAutomaticBonus) {
-                return db.run(`DELETE FROM weekly_bonus WHERE week_id=? AND class_name=? AND reason=?`, [weekId, className, WEEKLY_GRADEBOOK_BONUS_REASON], (writeErr) => writeErr ? res.status(500).json({ error: writeErr.message }) : res.json({ success: true, eligible: false, complete: eligibility.complete }))
+              if (!eligibility.eligible) {
+                return preserveWeeklyBonusAfterDayDelete(weekId, className, (preserveErr, preserved) => {
+                  if (preserveErr) return res.status(500).json({ error: preserveErr.message })
+                  res.json({
+                    success: true,
+                    eligible: Boolean(preserved?.eligible),
+                    complete: eligibility.complete,
+                  })
+                })
               }
               res.json({ success: true, eligible: eligibility.eligible, complete: eligibility.complete })
             })
