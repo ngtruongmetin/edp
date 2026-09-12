@@ -3365,42 +3365,68 @@ router.get(
         [weekId, className],
         (dayErr, days) => {
           if (dayErr) return res.status(500).json({ error: dayErr.message })
-          const sessionIds = (days || []).map((day) => Number(day.id)).filter(Boolean)
-          if (!sessionIds.length) {
-            return res.json({ week_id: weekId, class_name: className, breakdown: row, days: [] })
-          }
-
-          const placeholders = sessionIds.map(() => "?").join(",")
-          db.all(
+          db.get(
             `
-              SELECT v.session_id, v.id, v.rule_id, v.quantity, v.note,
-                     ${exemptedViolationQuantitySql("v")} AS exempted_quantity,
-                     ${effectiveViolationQuantitySql("v")} AS effective_quantity,
-                     r.category, r.name, r.score_delta
-              FROM duty_violations v
-              LEFT JOIN rules r
-                ON r.id = v.rule_id
-              WHERE v.session_id IN (${placeholders})
-              ORDER BY v.id ASC
+              SELECT
+                (SELECT MIN(min_score) FROM daily_bonus WHERE week_id=? AND class_name=?) AS gradebook_min_score,
+                (SELECT COUNT(*) FROM daily_bonus WHERE week_id=? AND class_name=?) AS gradebook_day_count,
+                (SELECT points FROM weekly_bonus WHERE week_id=? AND class_name=? LIMIT 1) AS weekly_bonus_points,
+                (SELECT reason FROM weekly_bonus WHERE week_id=? AND class_name=? LIMIT 1) AS weekly_bonus_reason,
+                (SELECT setting_value FROM system_settings WHERE setting_key='weekly_bonus_points' LIMIT 1) AS weekly_bonus_cap,
+                (SELECT setting_value FROM system_settings WHERE setting_key='weekly_bonus_score_threshold' LIMIT 1) AS weekly_bonus_threshold
             `,
-            sessionIds,
-            (violationErr, violations) => {
-              if (violationErr) return res.status(500).json({ error: violationErr.message })
-              const bySession = new Map()
-              for (const violation of violations || []) {
-                const key = Number(violation.session_id)
-                if (!bySession.has(key)) bySession.set(key, [])
-                bySession.get(key).push(violation)
+            [weekId, className, weekId, className, weekId, className, weekId, className],
+            (bonusErr, bonusMeta) => {
+              if (bonusErr) return res.status(500).json({ error: bonusErr.message })
+              const breakdown = {
+                ...row,
+                gradebook_min_score:
+                  bonusMeta?.gradebook_min_score == null ? null : Number(bonusMeta.gradebook_min_score),
+                gradebook_day_count: Number(bonusMeta?.gradebook_day_count || 0),
+                weekly_bonus_points:
+                  bonusMeta?.weekly_bonus_points == null ? 0 : Number(bonusMeta.weekly_bonus_points),
+                weekly_bonus_reason: bonusMeta?.weekly_bonus_reason || null,
+                weekly_bonus_cap: Number(bonusMeta?.weekly_bonus_cap || 30),
+                weekly_bonus_threshold: Number(bonusMeta?.weekly_bonus_threshold || 10),
               }
-              res.json({
-                week_id: weekId,
-                class_name: className,
-                breakdown: row,
-                days: (days || []).map((day) => ({
-                  ...day,
-                  violations: bySession.get(Number(day.id)) || [],
-                })),
-              })
+              const sessionIds = (days || []).map((day) => Number(day.id)).filter(Boolean)
+              if (!sessionIds.length) {
+                return res.json({ week_id: weekId, class_name: className, breakdown, days: [] })
+              }
+
+              const placeholders = sessionIds.map(() => "?").join(",")
+              db.all(
+                `
+                  SELECT v.session_id, v.id, v.rule_id, v.quantity, v.note,
+                         ${exemptedViolationQuantitySql("v")} AS exempted_quantity,
+                         ${effectiveViolationQuantitySql("v")} AS effective_quantity,
+                         r.category, r.name, r.score_delta
+                  FROM duty_violations v
+                  LEFT JOIN rules r
+                    ON r.id = v.rule_id
+                  WHERE v.session_id IN (${placeholders})
+                  ORDER BY v.id ASC
+                `,
+                sessionIds,
+                (violationErr, violations) => {
+                  if (violationErr) return res.status(500).json({ error: violationErr.message })
+                  const bySession = new Map()
+                  for (const violation of violations || []) {
+                    const key = Number(violation.session_id)
+                    if (!bySession.has(key)) bySession.set(key, [])
+                    bySession.get(key).push(violation)
+                  }
+                  res.json({
+                    week_id: weekId,
+                    class_name: className,
+                    breakdown,
+                    days: (days || []).map((day) => ({
+                      ...day,
+                      violations: bySession.get(Number(day.id)) || [],
+                    })),
+                  })
+                },
+              )
             },
           )
         },

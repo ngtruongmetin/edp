@@ -128,6 +128,37 @@ function preserveWeeklyBonusAfterDayDelete(weekId, className, cb) {
   })
 }
 
+async function clearGradebookData(weekId, grade = null) {
+  return withTransaction(async () => {
+    const scoped = grade != null
+    const daily = scoped
+      ? await run(
+          `DELETE FROM daily_bonus
+           WHERE week_id=?
+             AND class_name IN (SELECT name FROM classes WHERE grade=?)`,
+          [weekId, grade],
+        )
+      : await run(`DELETE FROM daily_bonus WHERE week_id=?`, [weekId])
+    const weekly = scoped
+      ? await run(
+          `DELETE FROM weekly_bonus
+           WHERE week_id=?
+             AND class_name IN (SELECT name FROM classes WHERE grade=?)`,
+          [weekId, grade],
+        )
+      : await run(`DELETE FROM weekly_bonus WHERE week_id=?`, [weekId])
+    const uploads = scoped
+      ? await run(`DELETE FROM bonus_uploads WHERE week_id=? AND grade=?`, [weekId, grade])
+      : await run(`DELETE FROM bonus_uploads WHERE week_id=?`, [weekId])
+
+    return {
+      daily_bonus: Number(daily?.changes || 0),
+      weekly_bonus: Number(weekly?.changes || 0),
+      upload_markers: Number(uploads?.changes || 0),
+    }
+  })
+}
+
 function isWeekClosed(weekId, cb) {
   db.get(
     `SELECT week_id, closed_at FROM week_closings WHERE week_id=? LIMIT 1`,
@@ -574,6 +605,35 @@ router.get(
       res.json({ timetables: rows || [] })
     } catch (err) {
       res.status(500).json({ error: err?.message || "DB error" })
+    }
+  },
+)
+
+router.delete(
+  "/admin/timetable/:id",
+  requireLogin,
+  requireRole(["admin"]),
+  async (req, res) => {
+    const timetableId = Number(req.params.id)
+    if (!timetableId) return res.status(400).json({ error: "Invalid timetable" })
+
+    try {
+      const timetable = await get(
+        `SELECT id, effective_date, file_name FROM timetables WHERE id=? LIMIT 1`,
+        [timetableId],
+      )
+      if (!timetable) return res.status(404).json({ error: "Timetable not found" })
+
+      const deleted = await withTransaction(async () => {
+        const entries = await run(`DELETE FROM timetable_entries WHERE timetable_id=?`, [timetableId])
+        await run(`DELETE FROM timetables WHERE id=?`, [timetableId])
+        return Number(entries?.changes || 0)
+      })
+
+      res.json({ success: true, timetable, deleted_entries: deleted })
+    } catch (err) {
+      console.error(err)
+      res.status(err?.status || 500).json({ error: err?.message || "Cannot delete timetable" })
     }
   },
 )
@@ -1200,18 +1260,38 @@ router.delete(
       })
       if (closed) return res.status(403).json({ error: "Week closed" })
 
-      const deleted = await withTransaction(async () => {
-        const daily = await run(`DELETE FROM daily_bonus WHERE week_id=?`, [weekId])
-        const weekly = await run(`DELETE FROM weekly_bonus WHERE week_id=?`, [weekId])
-        const uploads = await run(`DELETE FROM bonus_uploads WHERE week_id=?`, [weekId])
-        return {
-          daily_bonus: Number(daily?.changes || 0),
-          weekly_bonus: Number(weekly?.changes || 0),
-          upload_markers: Number(uploads?.changes || 0),
-        }
-      })
+      const deleted = await clearGradebookData(weekId)
 
       res.json({ success: true, week_id: weekId, deleted })
+    } catch (err) {
+      console.error(err)
+      res.status(err?.status || 500).json({ error: err?.message || "Cannot clear gradebook" })
+    }
+  },
+)
+
+router.delete(
+  "/admin/week/:weekId/grade/:grade",
+  requireLogin,
+  requireRole(["admin"]),
+  async (req, res) => {
+    const weekId = Number(req.params.weekId)
+    const grade = String(req.params.grade || "").trim()
+    if (!weekId || !["10", "11", "12"].includes(grade)) {
+      return res.status(400).json({ error: "Invalid week or grade" })
+    }
+
+    try {
+      const week = await get(`SELECT id FROM schedule_weeks WHERE id=? LIMIT 1`, [weekId])
+      if (!week) return res.status(404).json({ error: "Week not found" })
+
+      const closed = await new Promise((resolve, reject) => {
+        isWeekClosed(weekId, (err, value) => (err ? reject(err) : resolve(value)))
+      })
+      if (closed) return res.status(403).json({ error: "Week closed" })
+
+      const deleted = await clearGradebookData(weekId, grade)
+      res.json({ success: true, week_id: weekId, grade, deleted })
     } catch (err) {
       console.error(err)
       res.status(err?.status || 500).json({ error: err?.message || "Cannot clear gradebook" })
@@ -1653,6 +1733,77 @@ router.post(
         },
       )
     })
+  },
+)
+
+router.post(
+  "/admin/week/:weekId/class/:className/apply-weekly-bonus",
+  requireLogin,
+  requireRole(["admin"]),
+  async (req, res) => {
+    const weekId = Number(req.params.weekId)
+    const className = String(req.params.className || "").trim().toUpperCase()
+    if (!weekId || !className) return res.status(400).json({ error: "Invalid week or class" })
+
+    try {
+      const week = await get(`SELECT id FROM schedule_weeks WHERE id=? LIMIT 1`, [weekId])
+      if (!week) return res.status(404).json({ error: "Week not found" })
+
+      const closed = await new Promise((resolve, reject) => {
+        isWeekClosed(weekId, (err, value) => (err ? reject(err) : resolve(value)))
+      })
+      if (closed) return res.status(403).json({ error: "Week closed" })
+
+      const config = await new Promise((resolve, reject) => {
+        getWeeklyBonusConfig((err, value) => (err ? reject(err) : resolve(value)))
+      })
+      if (!config.enabled) return res.status(400).json({ error: "Weekly gradebook bonus is disabled" })
+
+      const score = await get(
+        `
+          SELECT COUNT(*) AS day_count, MIN(min_score) AS min_score
+          FROM daily_bonus
+          WHERE week_id=? AND class_name=? AND min_score IS NOT NULL
+        `,
+        [weekId, className],
+      )
+      const dayCount = Number(score?.day_count || 0)
+      const minScore = Number(score?.min_score)
+      if (!dayCount || !Number.isFinite(minScore) || minScore < config.threshold) {
+        return res.status(400).json({
+          error: `Min tiết hiện tại chưa đạt ${config.threshold} điểm`,
+          min_score: Number.isFinite(minScore) ? minScore : null,
+          threshold: config.threshold,
+        })
+      }
+
+      const now = time.now()
+      await run(
+        `
+          INSERT INTO weekly_bonus
+          (week_id,class_name,points,reason,created_at,updated_at)
+          VALUES(?,?,?,?,?,?)
+          ON CONFLICT(week_id,class_name)
+          DO UPDATE SET
+            points=excluded.points,
+            reason=excluded.reason,
+            updated_at=excluded.updated_at
+        `,
+        [weekId, className, config.points, WEEKLY_GRADEBOOK_BONUS_REASON, now, now],
+      )
+
+      res.json({
+        success: true,
+        week_id: weekId,
+        class_name: className,
+        points: config.points,
+        min_score: minScore,
+        threshold: config.threshold,
+      })
+    } catch (err) {
+      console.error(err)
+      res.status(err?.status || 500).json({ error: err?.message || "Cannot apply weekly bonus" })
+    }
   },
 )
 

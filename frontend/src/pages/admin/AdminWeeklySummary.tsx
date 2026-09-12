@@ -103,6 +103,19 @@ export default function AdminWeeklySummary() {
     }
   }
 
+  async function applyWeeklyBonus() {
+    if (!weekId || !detailClass) return
+    try {
+      await api.post(
+        `/bonus/admin/week/${weekId}/class/${encodeURIComponent(detailClass)}/apply-weekly-bonus`,
+      )
+      toast.success("Đã cộng thưởng tuần theo cấu hình")
+      await Promise.all([openDetail(detailClass), load(weekId)])
+    } catch (err) {
+      toast.error(getApiErrorMessage(err, "Không thể cộng thưởng tuần"))
+    }
+  }
+
   async function closeWeek() {
     if (!weekId) return
     try {
@@ -364,6 +377,52 @@ export default function AdminWeeklySummary() {
                     >
                       {Number(detail.breakdown?.total_score || 0)}
                     </div>
+                  </div>
+
+                  <div className="rounded-2xl bg-white p-4 ring-1 ring-blue-50">
+                    <div className="text-sm font-semibold text-gray-900">Thưởng sổ đầu bài tuần</div>
+                    <div className="mt-3 grid grid-cols-2 gap-3">
+                      <div className="rounded-2xl bg-slate-50 p-3">
+                        <div className="text-[11px] text-gray-500">Min tiết</div>
+                        <div className="mt-0.5 text-lg font-semibold text-[#2e77df]">
+                          {detail.breakdown?.gradebook_min_score == null
+                            ? "-"
+                            : Number(detail.breakdown.gradebook_min_score)}
+                        </div>
+                        <div className="mt-0.5 text-[11px] text-gray-500">
+                          Ngưỡng: {Number(detail.breakdown?.weekly_bonus_threshold || 10)}
+                        </div>
+                      </div>
+                      <div className="rounded-2xl bg-slate-50 p-3">
+                        <div className="text-[11px] text-gray-500">Thưởng tuần</div>
+                        <div className="mt-0.5 text-lg font-semibold text-emerald-700">
+                          {Number(detail.breakdown?.weekly_bonus_points || 0)} / {Number(detail.breakdown?.weekly_bonus_cap || 30)}
+                        </div>
+                        <div className="mt-0.5 text-[11px] text-gray-500">
+                          {Number(detail.breakdown?.weekly_bonus_points || 0) > 0
+                            ? "Đã cộng"
+                            : "Chưa cộng"}
+                        </div>
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => void applyWeeklyBonus()}
+                      disabled={
+                        !!summary?.closed_at ||
+                        Number(detail.breakdown?.weekly_bonus_points || 0) > 0 ||
+                        detail.breakdown?.gradebook_min_score == null ||
+                        Number(detail.breakdown.gradebook_min_score) <
+                          Number(detail.breakdown?.weekly_bonus_threshold || 10)
+                      }
+                      className="mt-3 w-full rounded-2xl bg-[#2e77df] px-4 py-2.5 text-sm font-semibold text-white shadow-sm disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      {Number(detail.breakdown?.weekly_bonus_points || 0) > 0
+                        ? "Đã cộng thưởng tuần"
+                        : "Cộng thưởng tuần theo cấu hình"}
+                    </button>
+                    {summary?.closed_at ? (
+                      <div className="mt-2 text-[11px] text-gray-500">Tuần đã khóa, không thể chỉnh thưởng.</div>
+                    ) : null}
                   </div>
 
                   <div className="rounded-2xl bg-white p-4 ring-1 ring-blue-50">

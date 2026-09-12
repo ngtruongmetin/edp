@@ -53,7 +53,7 @@ export default function AdminDutyManage() {
   const [uploadGrade, setUploadGrade] = useState("10")
   const [uploadFiles, setUploadFiles] = useState<File[]>([])
   const [uploading, setUploading] = useState(false)
-  const [deletingGradebook, setDeletingGradebook] = useState(false)
+  const [deletingGradebook, setDeletingGradebook] = useState<string | null>(null)
   const [useElectronicGradebook, setUseElectronicGradebook] = useState(true)
   const [uploadStatus, setUploadStatus] = useState<Record<
     string,
@@ -196,25 +196,25 @@ export default function AdminDutyManage() {
     }
   }
 
-  async function clearGradebook() {
+  async function clearGradebook(gradeToDelete: string) {
     if (!weekId) return
-    if (!confirm("Xóa toàn bộ sổ đầu bài và điểm sổ đầu bài của cả 3 khối trong tuần này? Các phiếu trực và vi phạm sẽ được giữ lại.")) {
+    if (!confirm(`Xóa toàn bộ sổ đầu bài và điểm sổ đầu bài của khối ${gradeToDelete} trong tuần này? Các phiếu trực và vi phạm sẽ được giữ lại.`)) {
       return
     }
 
-    setDeletingGradebook(true)
+    setDeletingGradebook(gradeToDelete)
     try {
-      const res = await api.delete(`/bonus/admin/week/${weekId}`)
+      const res = await api.delete(`/bonus/admin/week/${weekId}/grade/${gradeToDelete}`)
       const deleted = res.data?.deleted || {}
       alert(
-        `Đã xóa ${Number(deleted.daily_bonus || 0)} điểm ngày, ${Number(deleted.weekly_bonus || 0)} thưởng tuần và ${Number(deleted.upload_markers || 0)} lượt upload.`,
+        `Đã xóa sổ đầu bài khối ${gradeToDelete}: ${Number(deleted.daily_bonus || 0)} điểm ngày, ${Number(deleted.weekly_bonus || 0)} thưởng tuần và ${Number(deleted.upload_markers || 0)} lượt upload.`,
       )
       setMissingLogs([])
       await Promise.all([loadUploadStatus(weekId), load(weekId, date, grade)])
     } catch (err: any) {
       alert(err?.response?.data?.error || "Không thể xóa sổ đầu bài")
     } finally {
-      setDeletingGradebook(false)
+      setDeletingGradebook(null)
     }
   }
 
@@ -845,15 +845,21 @@ export default function AdminDutyManage() {
             </div>
 
             <div className="mt-4 border-t border-slate-200 pt-3">
-              <button
-                onClick={clearGradebook}
-                disabled={deletingGradebook || !weekId || !!closedAt}
-                className="rounded-2xl bg-red-50 px-4 py-2.5 text-sm font-semibold text-red-700 ring-1 ring-red-200 disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                {deletingGradebook ? "Đang xóa sổ đầu bài..." : "Xóa sổ đầu bài cả 3 khối"}
-              </button>
+              <div className="mb-2 text-xs font-semibold text-gray-600">Xóa sổ đầu bài theo khối</div>
+              <div className="flex flex-wrap gap-2">
+                {(["10", "11", "12"] as const).map((g) => (
+                  <button
+                    key={g}
+                    onClick={() => void clearGradebook(g)}
+                    disabled={deletingGradebook !== null || !weekId || !!closedAt}
+                    className="rounded-2xl bg-red-50 px-4 py-2.5 text-sm font-semibold text-red-700 ring-1 ring-red-200 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    {deletingGradebook === g ? `Đang xóa khối ${g}...` : `Xóa sổ khối ${g}`}
+                  </button>
+                ))}
+              </div>
               {!!closedAt ? (
-                <span className="ml-3 text-xs text-gray-500">Mở khóa tuần trước khi xóa.</span>
+                <div className="mt-2 text-xs text-gray-500">Mở khóa tuần trước khi xóa.</div>
               ) : null}
             </div>
 

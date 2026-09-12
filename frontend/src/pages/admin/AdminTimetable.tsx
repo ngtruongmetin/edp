@@ -17,6 +17,7 @@ export default function AdminTimetable() {
 
   const [file, setFile] = useState<File | null>(null)
   const [uploading, setUploading] = useState(false)
+  const [deletingId, setDeletingId] = useState<number | null>(null)
   const [rows, setRows] = useState<TimetableRow[]>([])
   const [selectedId, setSelectedId] = useState<number | null>(null)
   const [className, setClassName] = useState("")
@@ -82,6 +83,24 @@ export default function AdminTimetable() {
     } catch (err: any) {
       const msg = err?.response?.data?.error || "Không tải được file mẫu"
       alert(msg)
+    }
+  }
+
+  async function deleteTimetable(row: TimetableRow) {
+    if (!confirm(`Xóa TKB áp dụng từ ${formatDateVN(row.effective_date)} (${row.file_name})? Các TKB khác và sổ đầu bài không bị ảnh hưởng.`)) {
+      return
+    }
+
+    setDeletingId(row.id)
+    try {
+      const res = await api.delete(`/bonus/admin/timetable/${row.id}`)
+      alert(`Đã xóa TKB và ${Number(res.data?.deleted_entries || 0)} dòng chi tiết.`)
+      setLookup([])
+      await load()
+    } catch (err: any) {
+      alert(err?.response?.data?.error || "Không thể xóa TKB")
+    } finally {
+      setDeletingId(null)
     }
   }
 
@@ -180,12 +199,13 @@ export default function AdminTimetable() {
                   <th className="p-3 border-b text-left">Ngày áp dụng</th>
                   <th className="p-3 border-b text-left">File</th>
                   <th className="p-3 border-b text-left">Tạo lúc</th>
+                  <th className="p-3 border-b text-right">Thao tác</th>
                 </tr>
               </thead>
               <tbody>
                 {rows.length === 0 ? (
                   <tr>
-                    <td colSpan={4} className="p-6 text-center text-gray-500">
+                    <td colSpan={5} className="p-6 text-center text-gray-500">
                       Chưa có thời khóa biểu
                     </td>
                   </tr>
@@ -197,6 +217,15 @@ export default function AdminTimetable() {
                       <td className="p-3 border-b">{r.file_name}</td>
                       <td className="p-3 border-b">
                         {r.created_at ? r.created_at.replace("T", " ").slice(0, 19) : ""}
+                      </td>
+                      <td className="p-3 border-b text-right">
+                        <button
+                          onClick={() => void deleteTimetable(r)}
+                          disabled={deletingId !== null}
+                          className="rounded-xl bg-red-50 px-3 py-1.5 text-xs font-semibold text-red-700 ring-1 ring-red-200 disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                          {deletingId === r.id ? "Đang xóa..." : "Xóa"}
+                        </button>
                       </td>
                     </tr>
                   ))
