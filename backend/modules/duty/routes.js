@@ -1351,6 +1351,122 @@ function exportExcelWorkbookForPeriod(res, opts) {
     })
 }
 
+function exportExcelWorkbookForWeek(res, { fileName, week, rowsByGrade }) {
+  const workbook = new ExcelJS.Workbook()
+  const baseFont = { name: "Times New Roman", size: 13 }
+  const formatDDMM = (iso) => {
+    const parts = String(iso || "").split("-")
+    return parts.length === 3 ? `${parts[2]}/${parts[1]}` : ""
+  }
+
+  ;[10, 11, 12].forEach((grade) => {
+    const rows = (rowsByGrade[grade] || []).slice().sort((a, b) => {
+      const aa = parseClassNatural(a.class_name)
+      const bb = parseClassNatural(b.class_name)
+      if (aa.g !== bb.g) return aa.g - bb.g
+      if (aa.num !== bb.num) return aa.num - bb.num
+      return aa.name.localeCompare(bb.name)
+    })
+
+    const ws = workbook.addWorksheet(`Khối ${grade}`)
+    ws.columns = [
+      { width: 10 },
+      { width: 14 },
+      { width: 14 },
+      { width: 14 },
+      { width: 10 },
+      { width: 20 },
+    ]
+
+    ws.mergeCells("A1:F2")
+    ws.getCell("A1").value = `KẾT QUẢ THI ĐUA CỜ ĐỎ KHỐI ${grade}`
+    ws.getCell("A1").font = { ...baseFont, bold: true }
+    ws.getCell("A1").alignment = { horizontal: "center", vertical: "middle" }
+    ws.getCell("A1").fill = {
+      type: "pattern",
+      pattern: "solid",
+      fgColor: { argb: "FFFFA500" },
+    }
+
+    ws.mergeCells("A3:F3")
+    ws.getCell("A3").value = `Tuần ${week.week_number}: Từ ngày ${formatDDMM(week.start_date)} đến ngày ${formatDDMM(week.end_date)}`
+    ws.getCell("A3").font = { ...baseFont, bold: true }
+    ws.getCell("A3").alignment = { horizontal: "center", vertical: "middle" }
+    ws.getCell("A3").fill = {
+      type: "pattern",
+      pattern: "solid",
+      fgColor: { argb: "FF91D14E" },
+    }
+
+    const headerRow = ws.getRow(4)
+    headerRow.values = ["Lớp", "Điểm cộng", "Điểm trừ", "Tổng điểm", "Xếp hạng", "Ghi chú"]
+    headerRow.font = { ...baseFont, bold: true }
+    headerRow.alignment = { horizontal: "center", vertical: "middle" }
+    headerRow.height = 18
+
+    let rowIndex = 5
+    for (const item of rows) {
+      const row = ws.getRow(rowIndex++)
+      row.getCell(1).value = String(item.class_name || "")
+      row.getCell(2).value = Number(item.plus_points || 0)
+      row.getCell(3).value = Number(item.minus_points || 0)
+      row.getCell(4).value = Number(item.total_score || 0)
+      row.getCell(5).value = Number(item.rank || 0)
+      const note = String(item.note || "")
+      row.getCell(6).value = note
+      row.height = 16
+
+      const noteUpper = note.toUpperCase()
+      let fill = null
+      if (noteUpper.includes("HẠNG NHẤT")) {
+        fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFFF0000" } }
+      } else if (noteUpper.includes("HẠNG NHÌ")) {
+        fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF0170C1" } }
+      } else if (noteUpper.includes("HẠNG BA")) {
+        fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF0FAFED" } }
+      } else if (noteUpper.includes("HẠNG CHÓT")) {
+        fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFFFFF00" } }
+      }
+      if (fill) {
+        for (let column = 1; column <= 6; column += 1) {
+          row.getCell(column).fill = fill
+          row.getCell(column).font = { ...baseFont, bold: true }
+        }
+      }
+    }
+
+    ws.eachRow({ includeEmpty: false }, (row) => {
+      row.eachCell((cell) => {
+        if (!cell.font) cell.font = { ...baseFont }
+        else cell.font = { ...baseFont, bold: Boolean(cell.font.bold) }
+        if (!cell.alignment) {
+          cell.alignment = { horizontal: "center", vertical: "middle", wrapText: true }
+        } else {
+          cell.alignment = { ...cell.alignment, wrapText: true }
+        }
+        cell.border = {
+          top: { style: "thin", color: { argb: "FF000000" } },
+          left: { style: "thin", color: { argb: "FF000000" } },
+          bottom: { style: "thin", color: { argb: "FF000000" } },
+          right: { style: "thin", color: { argb: "FF000000" } },
+        }
+      })
+    })
+  })
+
+  workbook.xlsx
+    .writeBuffer()
+    .then((buffer) => {
+      res.setHeader(
+        "Content-Type",
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      )
+      res.setHeader("Content-Disposition", `attachment; filename="${fileName}"`)
+      res.send(Buffer.from(buffer))
+    })
+    .catch((err) => res.status(500).json({ error: err?.message || "Export failed" }))
+}
+
 function exportExcelWorkbookForMonth(res, opts) {
   const { fileName, periodTitleByGrade, periodLine2, rowsByGrade } = opts
   const workbook = new ExcelJS.Workbook()
@@ -3439,52 +3555,23 @@ router.get(
   "/admin/week/:id/export",
   requireLogin,
   requireRole(["admin"]),
-  async (req, res) => {
+  (req, res) => {
     const weekId = Number(req.params.id)
     if (!weekId) return res.status(400).json({ error: "Invalid week" })
 
-    try {
-      const week = await db.get(`SELECT * FROM schedule_weeks WHERE id=? LIMIT 1`, [weekId])
+    db.get(`SELECT * FROM schedule_weeks WHERE id=? LIMIT 1`, [weekId], (weekErr, week) => {
+      if (weekErr) return res.status(500).json({ error: weekErr.message })
       if (!week) return res.status(404).json({ error: "Week not found" })
 
-      const scores = await db.all(
-        `
-          SELECT class_name, score, updated_at
-          FROM weekly_scores
-          WHERE week_id=?
-          ORDER BY score DESC, class_name ASC
-        `,
-        [weekId],
-      )
-      const rows = scores?.length
-        ? scores
-        : await new Promise((resolve, reject) => {
-          computeWeekScores(weekId, (err, computedRows) => (err ? reject(err) : resolve(computedRows || [])))
+      weekBreakdowns(weekId, (breakdownErr, rows) => {
+        if (breakdownErr) return res.status(500).json({ error: breakdownErr.message })
+        exportExcelWorkbookForWeek(res, {
+          fileName: `ket_qua_thi_dua_tuan_${week.week_number || weekId}.xlsx`,
+          week,
+          rowsByGrade: periodToRowsByGrade(rows || []),
         })
-
-      const workbook = new ExcelJS.Workbook()
-      const ws = workbook.addWorksheet("Weekly Scores")
-      ws.columns = [
-        { header: "Lớp", key: "class_name", width: 18 },
-        { header: "Tổng điểm", key: "score", width: 14 },
-        { header: "Cập nhật", key: "updated_at", width: 28 },
-      ]
-      for (const row of rows || []) {
-        ws.addRow({
-          class_name: row.class_name,
-          score: Number(row.score || 0),
-          updated_at: row.updated_at || "",
-        })
-      }
-      ws.getRow(1).font = { bold: true }
-
-      const buffer = await workbook.xlsx.writeBuffer()
-      res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
-      res.setHeader("Content-Disposition", `attachment; filename="ket_qua_thi_dua_tuan_${week.week_number || weekId}.xlsx"`)
-      res.send(Buffer.from(buffer))
-    } catch (err) {
-      res.status(500).json({ error: err?.message || "Cannot export week scores" })
-    }
+      })
+    })
   },
 )
 
