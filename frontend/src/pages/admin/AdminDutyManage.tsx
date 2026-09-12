@@ -1345,7 +1345,7 @@ export default function AdminDutyManage() {
                     </div>
 
                     <div className="mt-1 text-[11px] text-gray-500">
-                      Không cộng tiết Giáo dục thể chất.
+                      Tạm thời vẫn tính tiết Giáo dục thể chất.
                     </div>
                   </div>
 
