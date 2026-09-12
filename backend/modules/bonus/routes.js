@@ -122,6 +122,8 @@ function isIgnoredSubject(text) {
     s === "chao co" ||
     s === "chaoco" ||
     s === "shdc" ||
+    s === "sinh hoat" ||
+    s.startsWith("sinh hoat ") ||
     s.includes("sinh hoat duoi co")
   )
 }
