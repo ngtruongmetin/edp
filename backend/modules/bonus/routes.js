@@ -871,7 +871,9 @@ router.post(
         }
 
         appliedClasses.add(className)
-        for (const day of parsed.days || []) {
+        let physicalEducationCount = 0
+        const parsedDays = [...(parsed.days || [])].sort((a, b) => a.date.localeCompare(b.date))
+        for (const day of parsedDays) {
           if (!(week.start_date <= day.date && day.date <= week.end_date)) {
             continue
           }
@@ -914,6 +916,10 @@ router.post(
 
                   const periodKey = `${session}\u0000${periodNo}`
                   const sdb = sdbMap.get(session)?.get(periodNo)
+                  if (sdb && isPhysicalEducationSubject(sdb.subject)) {
+                    if (physicalEducationCount >= 2) continue
+                    physicalEducationCount += 1
+                  }
                   if (sdb && sdb.score != null) {
                     let score = sdb.score
                     if (score > 10) {
@@ -969,6 +975,8 @@ router.post(
               if (countedPeriodKeys.has(periodKey) || !isPhysicalEducationSubject(sdb.subject)) {
                 continue
               }
+              if (physicalEducationCount >= 2) continue
+              physicalEducationCount += 1
 
               let score = sdb.score ?? 10
               const ddmmyy = formatDateVN(day.date)
