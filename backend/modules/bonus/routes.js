@@ -14,6 +14,11 @@ const SystemSettingService = require("../system-settings/service")
 const router = express.Router()
 const WEEKLY_GRADEBOOK_BONUS_REASON = "weekly_bonus:gradebook"
 
+function isAutomaticWeeklyBonusReason(reason) {
+  const value = String(reason || "")
+  return value === WEEKLY_GRADEBOOK_BONUS_REASON || value.startsWith("Thuong tu so dau bai:")
+}
+
 function getWeeklyBonusConfig(cb) {
   db.all(
     `SELECT setting_key, setting_value FROM system_settings WHERE setting_key IN ('weekly_bonus_enabled', 'weekly_bonus_score_threshold', 'weekly_bonus_require_all_entries', 'weekly_bonus_points')`,
@@ -41,91 +46,127 @@ function getWeeklyBonusEligibility(weekId, className, cb) {
     db.get(
       `
         SELECT
-          COUNT(*) as session_count,
-          SUM(CASE WHEN b.min_score IS NOT NULL THEN 1 ELSE 0 END) as bonus_count,
-          SUM(CASE WHEN b.min_score >= ? THEN 1 ELSE 0 END) as ok_count,
-          MIN(COALESCE(b.min_score, -1)) as min_of_min
-        FROM duty_sessions s
-        LEFT JOIN daily_bonus b
-          ON b.week_id=s.week_id AND b.date=s.date AND b.class_name=s.duty_class
-        WHERE s.week_id=? AND s.duty_class=?
+          COUNT(*) AS day_count,
+          SUM(CASE WHEN min_score IS NOT NULL THEN 1 ELSE 0 END) AS scored_day_count,
+          SUM(CASE WHEN min_score >= ? THEN 1 ELSE 0 END) AS ok_count,
+          MIN(min_score) AS min_score
+        FROM daily_bonus
+        WHERE week_id=? AND class_name=?
       `,
       [config.threshold, weekId, className],
       (err, row) => {
         if (err) return cb(err)
-        const sessionCount = Number(row?.session_count || 0)
-        const bonusCount = Number(row?.bonus_count || 0)
+        const dayCount = Number(row?.day_count || 0)
+        const scoredDayCount = Number(row?.scored_day_count || 0)
         const okCount = Number(row?.ok_count || 0)
-        const complete = sessionCount > 0 && bonusCount === sessionCount
-        const scoreCondition = config.requireAllEntries ? okCount === sessionCount : okCount > 0
+        const complete = dayCount > 0 && scoredDayCount === dayCount
+        const scoreCondition = config.requireAllEntries ? okCount === dayCount : okCount > 0
         cb(null, {
           config,
-          sessionCount,
-          bonusCount,
+          dayCount,
+          scoredDayCount,
           okCount,
-          missingCount: Math.max(0, sessionCount - bonusCount),
-          minScore: sessionCount > 0 ? Number(row?.min_of_min ?? -1) : null,
+          minScore: row?.min_score == null ? null : Number(row.min_score),
           complete,
-          eligible: config.enabled && complete && scoreCondition,
+          eligible: config.enabled && dayCount > 0 && scoreCondition,
         })
       },
     )
   })
 }
 
-// Manual gradebook changes must not revoke an earned bonus while the remaining
-// recorded days still meet the configured score threshold.
-function preserveWeeklyBonusAfterDayDelete(weekId, className, cb) {
-  getWeeklyBonusConfig((configErr, config) => {
-    if (configErr) return cb(configErr)
-
-    db.get(
-      `
-        SELECT COUNT(*) AS bonus_count, MIN(min_score) AS min_score
-        FROM daily_bonus
-        WHERE week_id=? AND class_name=? AND min_score IS NOT NULL
-      `,
-      [weekId, className],
-      (scoreErr, scoreRow) => {
-        if (scoreErr) return cb(scoreErr)
-
-        db.get(
-          `SELECT reason FROM weekly_bonus WHERE week_id=? AND class_name=? LIMIT 1`,
-          [weekId, className],
-          (bonusErr, existingBonus) => {
-            if (bonusErr) return cb(bonusErr)
-
-            const reason = String(existingBonus?.reason || "")
-            const isAutomaticBonus =
-              reason === WEEKLY_GRADEBOOK_BONUS_REASON || reason.startsWith("Thuong tu so dau bai:")
-            const bonusCount = Number(scoreRow?.bonus_count || 0)
-            const minScore = Number(scoreRow?.min_score)
-            const keepBonus =
-              Boolean(existingBonus) &&
-              isAutomaticBonus &&
-              config.enabled &&
-              bonusCount > 0 &&
-              Number.isFinite(minScore) &&
-              minScore >= config.threshold
-
-            if (keepBonus || !isAutomaticBonus) {
-              return cb(null, { eligible: keepBonus })
-            }
-
-            db.run(
-              `
-                DELETE FROM weekly_bonus
-                WHERE week_id=? AND class_name=?
-                  AND (reason=? OR reason LIKE 'Thuong tu so dau bai:%')
-              `,
-              [weekId, className, WEEKLY_GRADEBOOK_BONUS_REASON],
-              (deleteErr) => (deleteErr ? cb(deleteErr) : cb(null, { eligible: false })),
-            )
-          },
-        )
-      },
+function getWeeklyBonusEligibilityAsync(weekId, className) {
+  return new Promise((resolve, reject) => {
+    getWeeklyBonusEligibility(weekId, className, (err, result) =>
+      err ? reject(err) : resolve(result),
     )
   })
+}
+
+async function reconcileWeeklyBonus(weekId, className) {
+  const normalizedClassName = String(className || "").trim().toUpperCase()
+  const eligibility = await getWeeklyBonusEligibilityAsync(weekId, normalizedClassName)
+  const existingBonus = await get(
+    `SELECT points, reason FROM weekly_bonus WHERE week_id=? AND class_name=? LIMIT 1`,
+    [weekId, normalizedClassName],
+  )
+  const existingIsAutomatic = isAutomaticWeeklyBonusReason(existingBonus?.reason)
+
+  if (eligibility.eligible) {
+    if (existingBonus && !existingIsAutomatic) {
+      return { class_name: normalizedClassName, status: "skipped_manual", ...eligibility }
+    }
+
+    const now = time.now()
+    await run(
+      `
+        INSERT INTO weekly_bonus (week_id,class_name,points,reason,created_at,updated_at)
+        VALUES(?,?,?,?,?,?)
+        ON CONFLICT(week_id,class_name)
+        DO UPDATE SET
+          points=excluded.points,
+          reason=excluded.reason,
+          updated_at=excluded.updated_at
+      `,
+      [
+        weekId,
+        normalizedClassName,
+        eligibility.config.points,
+        WEEKLY_GRADEBOOK_BONUS_REASON,
+        now,
+        now,
+      ],
+    )
+    return {
+      class_name: normalizedClassName,
+      status: existingBonus ? "already_applied" : "applied",
+      ...eligibility,
+    }
+  }
+
+  if (existingBonus && existingIsAutomatic) {
+    await run(`DELETE FROM weekly_bonus WHERE week_id=? AND class_name=?`, [
+      weekId,
+      normalizedClassName,
+    ])
+    return { class_name: normalizedClassName, status: "removed", ...eligibility }
+  }
+
+  return {
+    class_name: normalizedClassName,
+    status: existingBonus ? "skipped_manual" : "ineligible",
+    ...eligibility,
+  }
+}
+
+function summarizeWeeklyBonusReconciliation(results) {
+  const summary = {
+    checked: results.length,
+    eligible: 0,
+    applied: 0,
+    already_applied: 0,
+    removed: 0,
+    skipped_manual: 0,
+    ineligible: 0,
+  }
+  for (const result of results) {
+    if (result.eligible) summary.eligible += 1
+    if (Object.prototype.hasOwnProperty.call(summary, result.status)) {
+      summary[result.status] += 1
+    }
+  }
+  return { ...summary, classes: results }
+}
+
+async function reconcileWeeklyBonuses(weekId, classNames) {
+  const uniqueClassNames = Array.from(
+    new Set((classNames || []).map((name) => String(name || "").trim().toUpperCase()).filter(Boolean)),
+  ).sort()
+  const results = []
+  for (const className of uniqueClassNames) {
+    results.push(await reconcileWeeklyBonus(weekId, className))
+  }
+  return summarizeWeeklyBonusReconciliation(results)
 }
 
 async function clearGradebookData(weekId, grade = null) {
@@ -211,6 +252,14 @@ function isIgnoredSubject(text) {
     s === "sinh hoat" ||
     s.startsWith("sinh hoat ")
   )
+}
+
+function isPhysicalEducationSubject(text) {
+  const subject = String(text || "")
+    .normalize("NFC")
+    .replace(/\s+/gu, " ")
+    .trim()
+  return subject.startsWith("Giáo dục thể chất")
 }
 
 function gradeFromClassName(name) {
@@ -791,7 +840,8 @@ router.post(
     let skippedFiles = 0
     const appliedClasses = new Set()
     const errors = []
-        const missingLogs = []
+    const missingLogs = []
+    let weeklyBonusReconciliation = summarizeWeeklyBonusReconciliation([])
 
       await withTransaction(async () => {
         for (const f of xlsxFiles) {
@@ -850,63 +900,112 @@ router.post(
         }
 
         const usable = []
-        if (diaryScheduleBindingEnabled && classMap) {
-          const dayMap = classMap.get(dayNum)
-          if (dayMap) {
-            for (const [session, periodMap] of dayMap.entries()) {
-              for (const [periodNo, subjectTk] of periodMap.entries()) {
-                if (isAutoChaoCoByRule(className, dayNum, session, periodNo)) {
-                  continue
-                }
-                if (isIgnoredSubject(subjectTk)) continue
+        const countedPeriodKeys = new Set()
+        if (diaryScheduleBindingEnabled) {
+          if (classMap) {
+            const dayMap = classMap.get(dayNum)
+            if (dayMap) {
+              for (const [session, periodMap] of dayMap.entries()) {
+                for (const [periodNo, subjectTk] of periodMap.entries()) {
+                  if (isAutoChaoCoByRule(className, dayNum, session, periodNo)) {
+                    continue
+                  }
+                  if (isIgnoredSubject(subjectTk)) continue
 
-                const sdb = sdbMap.get(session)?.get(periodNo)
-                if (sdb && sdb.score != null) {
-                  let score = sdb.score
-                  if (score > 10) {
-                    const ddmmyy = formatDateVN(day.date)
-                    const dayName = dayNameFromNumber(dayNum)
+                  const periodKey = `${session}\u0000${periodNo}`
+                  const sdb = sdbMap.get(session)?.get(periodNo)
+                  if (sdb && sdb.score != null) {
+                    let score = sdb.score
+                    if (score > 10) {
+                      const ddmmyy = formatDateVN(day.date)
+                      const dayName = dayNameFromNumber(dayNum)
+                      const sessLabel = session.toLowerCase() === "sáng" ? "Sáng" : "Chiều"
+                      missingLogs.push({
+                        grade: gradeFromClassName(className),
+                        class_name: className,
+                        day_name: dayName,
+                        date: ddmmyy,
+                        period: periodNo,
+                        subject: subjectTk,
+                        session: sessLabel,
+                        status: `Nhập sổ đầu bài không hợp lệ (${score} điểm)`,
+                      })
+                      score = 10
+                    }
+                    usable.push({
+                      subject: sdb.subject || subjectTk,
+                      score,
+                    })
+                    countedPeriodKeys.add(periodKey)
+                    continue
+                  }
+
+                  const ddmmyy = formatDateVN(day.date)
+                  const dayName = dayNameFromNumber(dayNum)
                   const sessLabel = session.toLowerCase() === "sáng" ? "Sáng" : "Chiều"
                   missingLogs.push({
-                      grade: gradeFromClassName(className),
-                      class_name: className,
-                      day_name: dayName,
-                      date: ddmmyy,
-                      period: periodNo,
-                      subject: subjectTk,
-                      session: sessLabel,
-                      status: `Nhập sổ đầu bài không hợp lệ (${score} điểm)`,
-                    })
-                    score = 10
-                  }
-                  usable.push({
-                    subject: sdb.subject || subjectTk,
-                    score,
+                    grade: gradeFromClassName(className),
+                    class_name: className,
+                    day_name: dayName,
+                    date: ddmmyy,
+                    period: periodNo,
+                    subject: subjectTk,
+                    session: sessLabel,
+                    status: "Chưa nhập sổ đầu bài",
                   })
-                  continue
+                  usable.push({
+                    subject: subjectTk,
+                    score: 10,
+                  })
+                  countedPeriodKeys.add(periodKey)
                 }
+              }
+            }
+          }
 
-                const ddmmyy = formatDateVN(day.date)
-                const dayName = dayNameFromNumber(dayNum)
-                const sessLabel = session.toLowerCase() === "sáng" ? "Sáng" : "Chiều"
+          for (const [session, periodMap] of sdbMap.entries()) {
+            for (const [periodNo, sdb] of periodMap.entries()) {
+              const periodKey = `${session}\u0000${periodNo}`
+              if (countedPeriodKeys.has(periodKey) || !isPhysicalEducationSubject(sdb.subject)) {
+                continue
+              }
+
+              let score = sdb.score ?? 10
+              const ddmmyy = formatDateVN(day.date)
+              const dayName = dayNameFromNumber(dayNum)
+              const sessLabel = session.toLowerCase() === "sáng" ? "Sáng" : "Chiều"
+              if (sdb.score == null) {
                 missingLogs.push({
                   grade: gradeFromClassName(className),
                   class_name: className,
                   day_name: dayName,
                   date: ddmmyy,
                   period: periodNo,
-                  subject: subjectTk,
+                  subject: sdb.subject || "Tiết",
                   session: sessLabel,
                   status: "Chưa nhập sổ đầu bài",
                 })
-                usable.push({
-                  subject: subjectTk,
-                  score: 10,
+              } else if (score > 10) {
+                missingLogs.push({
+                  grade: gradeFromClassName(className),
+                  class_name: className,
+                  day_name: dayName,
+                  date: ddmmyy,
+                  period: periodNo,
+                  subject: sdb.subject || "Tiết",
+                  session: sessLabel,
+                  status: `Nhập sổ đầu bài không hợp lệ (${score} điểm)`,
                 })
+                score = 10
               }
+              usable.push({
+                subject: sdb.subject || "Tiết",
+                score,
+              })
+              countedPeriodKeys.add(periodKey)
             }
           }
-        } else if (!diaryScheduleBindingEnabled) {
+        } else {
           for (const [session, periodMap] of sdbMap.entries()) {
             for (const [periodNo, sdb] of periodMap.entries()) {
               let score = sdb.score ?? 10
@@ -998,31 +1097,10 @@ router.post(
         }
       }
 
-      for (const className of Array.from(appliedClasses)) {
-        const eligibility = await new Promise((resolve, reject) => {
-          getWeeklyBonusEligibility(weekId, className, (err, result) => err ? reject(err) : resolve(result))
-        })
-        const now = time.now()
-        if (eligibility.eligible) {
-          await run(
-            `
-              INSERT INTO weekly_bonus (week_id,class_name,points,reason,created_at,updated_at)
-              VALUES(?,?,?,?,?,?)
-              ON CONFLICT(week_id,class_name)
-              DO UPDATE SET
-                points=excluded.points,
-                reason=excluded.reason,
-                updated_at=excluded.updated_at
-            `,
-            [weekId, className, eligibility.config.points, WEEKLY_GRADEBOOK_BONUS_REASON, now, now],
-          )
-        } else {
-          await run(
-            `DELETE FROM weekly_bonus WHERE week_id=? AND class_name=? AND reason=?`,
-            [weekId, className, WEEKLY_GRADEBOOK_BONUS_REASON],
-          )
-        }
-      }
+      weeklyBonusReconciliation = await reconcileWeeklyBonuses(
+        weekId,
+        Array.from(appliedClasses),
+      )
 
       await run(
         `
@@ -1040,6 +1118,7 @@ router.post(
         skipped_files: skippedFiles,
         applied_days: appliedDays,
         classes: Array.from(appliedClasses),
+        weekly_bonus_reconciliation: weeklyBonusReconciliation,
         missing_logs: missingLogs,
         errors,
       })
@@ -1238,6 +1317,51 @@ router.get(
   },
 )
 
+router.post(
+  "/admin/week/:weekId/reconcile-weekly-bonuses",
+  requireLogin,
+  requireRole(["admin"]),
+  async (req, res) => {
+    const weekId = Number(req.params.weekId)
+    if (!weekId) return res.status(400).json({ error: "Invalid week" })
+
+    try {
+      const week = await get(`SELECT id FROM schedule_weeks WHERE id=? LIMIT 1`, [weekId])
+      if (!week) return res.status(404).json({ error: "Week not found" })
+
+      const closed = await new Promise((resolve, reject) => {
+        isWeekClosed(weekId, (err, value) => (err ? reject(err) : resolve(value)))
+      })
+      if (closed) return res.status(403).json({ error: "Week closed" })
+
+      const candidates = await all(
+        `
+          SELECT class_name
+          FROM daily_bonus
+          WHERE week_id=?
+          UNION
+          SELECT class_name
+          FROM weekly_bonus
+          WHERE week_id=?
+            AND (reason=? OR reason LIKE 'Thuong tu so dau bai:%')
+        `,
+        [weekId, weekId, WEEKLY_GRADEBOOK_BONUS_REASON],
+      )
+      const reconciliation = await withTransaction(() =>
+        reconcileWeeklyBonuses(
+          weekId,
+          (candidates || []).map((row) => row.class_name),
+        ),
+      )
+
+      res.json({ success: true, week_id: weekId, reconciliation })
+    } catch (err) {
+      console.error(err)
+      res.status(err?.status || 500).json({ error: err?.message || "Cannot reconcile weekly bonuses" })
+    }
+  },
+)
+
 /*
 ADMIN: clear all electronic gradebook data for a week
 Removes daily gradebook scores, weekly gradebook bonuses, and upload markers.
@@ -1356,31 +1480,16 @@ router.post(
 
         const now = time.now()
         const finalizeWeeklyBonus = () => {
-          getWeeklyBonusEligibility(weekId, className, (eligibilityErr, eligibility) => {
-            if (eligibilityErr) return res.status(500).json({ error: eligibilityErr.message })
-            db.get(`SELECT reason FROM weekly_bonus WHERE week_id=? AND class_name=? LIMIT 1`, [weekId, className], (err, existingBonus) => {
-              if (err) return res.status(500).json({ error: err.message })
-              const isAutomaticBonus = existingBonus?.reason === WEEKLY_GRADEBOOK_BONUS_REASON
-              if (eligibility.eligible && (!existingBonus || isAutomaticBonus)) {
-                return db.run(
-                  `INSERT INTO weekly_bonus (week_id,class_name,points,reason,created_at,updated_at) VALUES(?,?,?,?,?,?) ON CONFLICT(week_id,class_name) DO UPDATE SET points=excluded.points,reason=excluded.reason,updated_at=excluded.updated_at`,
-                  [weekId, className, eligibility.config.points, WEEKLY_GRADEBOOK_BONUS_REASON, now, now],
-                  (writeErr) => writeErr ? res.status(500).json({ error: writeErr.message }) : res.json({ success: true, eligible: true, complete: eligibility.complete }),
-                )
-              }
-              if (!eligibility.eligible) {
-                return preserveWeeklyBonusAfterDayDelete(weekId, className, (preserveErr, preserved) => {
-                  if (preserveErr) return res.status(500).json({ error: preserveErr.message })
-                  res.json({
-                    success: true,
-                    eligible: Boolean(preserved?.eligible),
-                    complete: eligibility.complete,
-                  })
-                })
-              }
-              res.json({ success: true, eligible: eligibility.eligible, complete: eligibility.complete })
-            })
-          })
+          reconcileWeeklyBonus(weekId, className)
+            .then((result) =>
+              res.json({
+                success: true,
+                eligible: result.eligible,
+                complete: result.complete,
+                weekly_bonus_status: result.status,
+              }),
+            )
+            .catch((err) => res.status(500).json({ error: err.message }))
         }
 
         if (!hasPeriods) {
@@ -1392,14 +1501,7 @@ router.post(
                 const out = mapDatabaseError(err, err.message)
                 return res.status(out.status).json({ error: out.error })
               }
-              preserveWeeklyBonusAfterDayDelete(weekId, className, (bonusErr, result) => {
-                if (bonusErr) return res.status(500).json({ error: bonusErr.message })
-                res.json({
-                  success: true,
-                  eligible: Boolean(result?.eligible),
-                  complete: Boolean(result?.eligible),
-                })
-              })
+              finalizeWeeklyBonus()
             },
           )
         }
@@ -1455,33 +1557,26 @@ router.get(
   "/eligibility",
   requireLogin,
   requireRole(["admin"]),
-  (req, res) => {
+  async (req, res) => {
     const weekId = Number(req.query.week_id)
     const className = String(req.query.class_name || "").trim()
     if (!weekId || !className) return res.status(400).json({ error: "Missing fields" })
 
-    db.get(
-      `
-        SELECT
-          COUNT(*) as day_count,
-          SUM(CASE WHEN all_above_9=1 THEN 1 ELSE 0 END) as ok_count
-        FROM daily_bonus
-        WHERE week_id=?
-          AND class_name=?
-      `,
-      [weekId, className],
-      (err, row) => {
-        if (err) return res.status(500).json({ error: err.message })
-        const dayCount = Number(row?.day_count || 0)
-        const okCount = Number(row?.ok_count || 0)
-        res.json({
-          week_id: weekId,
-          class_name: className,
-          day_count: dayCount,
-          eligible: dayCount > 0 && okCount === dayCount,
-        })
-      },
-    )
+    try {
+      const eligibility = await getWeeklyBonusEligibilityAsync(weekId, className)
+      res.json({
+        week_id: weekId,
+        class_name: className,
+        day_count: eligibility.dayCount,
+        scored_day_count: eligibility.scoredDayCount,
+        ok_count: eligibility.okCount,
+        min_score: eligibility.minScore,
+        threshold: eligibility.config.threshold,
+        eligible: eligibility.eligible,
+      })
+    } catch (err) {
+      res.status(500).json({ error: err.message })
+    }
   },
 )
 
@@ -1754,51 +1849,25 @@ router.post(
       })
       if (closed) return res.status(403).json({ error: "Week closed" })
 
-      const config = await new Promise((resolve, reject) => {
-        getWeeklyBonusConfig((err, value) => (err ? reject(err) : resolve(value)))
-      })
-      if (!config.enabled) return res.status(400).json({ error: "Weekly gradebook bonus is disabled" })
-
-      const score = await get(
-        `
-          SELECT COUNT(*) AS day_count, MIN(min_score) AS min_score
-          FROM daily_bonus
-          WHERE week_id=? AND class_name=? AND min_score IS NOT NULL
-        `,
-        [weekId, className],
-      )
-      const dayCount = Number(score?.day_count || 0)
-      const minScore = Number(score?.min_score)
-      if (!dayCount || !Number.isFinite(minScore) || minScore < config.threshold) {
+      const result = await reconcileWeeklyBonus(weekId, className)
+      if (!result.eligible) {
         return res.status(400).json({
-          error: `Min tiết hiện tại chưa đạt ${config.threshold} điểm`,
-          min_score: Number.isFinite(minScore) ? minScore : null,
-          threshold: config.threshold,
+          error: result.config.enabled
+            ? `Dữ liệu sổ đầu bài chưa đạt điều kiện thưởng tuần`
+            : "Weekly gradebook bonus is disabled",
+          min_score: result.minScore,
+          threshold: result.config.threshold,
         })
       }
-
-      const now = time.now()
-      await run(
-        `
-          INSERT INTO weekly_bonus
-          (week_id,class_name,points,reason,created_at,updated_at)
-          VALUES(?,?,?,?,?,?)
-          ON CONFLICT(week_id,class_name)
-          DO UPDATE SET
-            points=excluded.points,
-            reason=excluded.reason,
-            updated_at=excluded.updated_at
-        `,
-        [weekId, className, config.points, WEEKLY_GRADEBOOK_BONUS_REASON, now, now],
-      )
 
       res.json({
         success: true,
         week_id: weekId,
         class_name: className,
-        points: config.points,
-        min_score: minScore,
-        threshold: config.threshold,
+        points: result.config.points,
+        min_score: result.minScore,
+        threshold: result.config.threshold,
+        weekly_bonus_status: result.status,
       })
     } catch (err) {
       console.error(err)
@@ -1899,86 +1968,24 @@ router.post(
               (err) => {
                 if (err) return res.status(500).json({ error: err.message })
 
-                // Recheck only after every required duty session has gradebook data.
-                getWeeklyBonusConfig((configErr, config) => {
-                  if (configErr) return res.status(500).json({ error: configErr.message })
-                db.get(
-                  `
-                    SELECT
-                      COUNT(*) as session_count,
-                      SUM(CASE WHEN b.min_score IS NOT NULL THEN 1 ELSE 0 END) as bonus_count,
-                      SUM(CASE WHEN b.min_score >= ? THEN 1 ELSE 0 END) as ok_count
-                    FROM duty_sessions s
-                    LEFT JOIN daily_bonus b
-                      ON b.week_id = s.week_id
-                     AND b.date = s.date
-                     AND b.class_name = s.duty_class
-                  WHERE s.week_id=?
-                    AND s.duty_class=?
-                  `,
-                  [config.threshold, session.week_id, session.duty_class],
-                  (err, checkRow) => {
-                    if (err) return res.status(500).json({ error: err.message })
-
-                    const sessionCount = Number(checkRow?.session_count || 0)
-                    const bonusCount = Number(checkRow?.bonus_count || 0)
-                    const okCount = Number(checkRow?.ok_count || 0)
-                    const complete = sessionCount > 0 && bonusCount === sessionCount
-                    const scoreCondition = config.requireAllEntries
-                      ? okCount === sessionCount
-                      : okCount > 0
-                    const eligible = config.enabled && complete && scoreCondition
-
-                    // Check if weekly_bonus already exists
-                    db.get(
-                      `SELECT points, reason FROM weekly_bonus WHERE week_id=? AND class_name=?`,
-                      [session.week_id, session.duty_class],
-                      (err, existingBonus) => {
-                        if (err) return res.status(500).json({ error: err.message })
-
-                        const isAutomaticBonus = existingBonus && (
-                          existingBonus.reason === WEEKLY_GRADEBOOK_BONUS_REASON ||
-                          String(existingBonus.reason || "").startsWith("Thuong tu so dau bai:")
-                        )
-
-                        if (eligible && (!existingBonus || isAutomaticBonus)) {
-                          db.run(
-                            `INSERT INTO weekly_bonus (week_id,class_name,points,reason,created_at,updated_at) VALUES(?,?,?,?,?,?) ON CONFLICT(week_id,class_name) DO UPDATE SET points=excluded.points, reason=excluded.reason, updated_at=excluded.updated_at`,
-                            [session.week_id, session.duty_class, config.points, WEEKLY_GRADEBOOK_BONUS_REASON, now, now],
-                            (err) => {
-                              if (err) return res.status(500).json({ error: err.message })
-                              recordLog()
-                            }
-                          )
-                        } else if (!eligible && isAutomaticBonus) {
-                          db.run(
-                            `DELETE FROM weekly_bonus WHERE week_id=? AND class_name=? AND reason IN (?, ?)`,
-                            [session.week_id, session.duty_class, WEEKLY_GRADEBOOK_BONUS_REASON, existingBonus.reason],
-                            (err) => {
-                              if (err) return res.status(500).json({ error: err.message })
-                              recordLog()
-                            }
-                          )
-                        } else {
-                          // No change needed
-                          recordLog()
-                        }
-
-                        function recordLog() {
-                          db.run(
-                            `INSERT INTO duty_revision_logs (session_id,action,created_at) VALUES(?,?,?)`,
-                            [sessionId, "bonus:apply_daily_bonus", time.now()],
-                            (err) => {
-                              if (err) return res.status(500).json({ error: err.message })
-                              res.json({ success: true, eligible, complete, bonus_adjusted: eligible !== !existingBonus })
-                            }
-                          )
-                        }
-                      }
+                reconcileWeeklyBonus(session.week_id, session.duty_class)
+                  .then((result) => {
+                    db.run(
+                      `INSERT INTO duty_revision_logs (session_id,action,created_at) VALUES(?,?,?)`,
+                      [sessionId, "bonus:apply_daily_bonus", time.now()],
+                      (logErr) => {
+                        if (logErr) return res.status(500).json({ error: logErr.message })
+                        res.json({
+                          success: true,
+                          eligible: result.eligible,
+                          complete: result.complete,
+                          bonus_adjusted: result.status === "applied" || result.status === "removed",
+                          weekly_bonus_status: result.status,
+                        })
+                      },
                     )
-                  }
-                )
-                })
+                  })
+                  .catch((bonusErr) => res.status(500).json({ error: bonusErr.message }))
               },
             )
           },

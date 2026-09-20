@@ -53,6 +53,7 @@ export default function AdminDutyManage() {
   const [uploadGrade, setUploadGrade] = useState("10")
   const [uploadFiles, setUploadFiles] = useState<File[]>([])
   const [uploading, setUploading] = useState(false)
+  const [reconcilingWeeklyBonus, setReconcilingWeeklyBonus] = useState(false)
   const [deletingGradebook, setDeletingGradebook] = useState<string | null>(null)
   const [useElectronicGradebook, setUseElectronicGradebook] = useState(true)
   const [uploadStatus, setUploadStatus] = useState<Record<
@@ -394,7 +395,11 @@ export default function AdminDutyManage() {
         if (Array.isArray(res.data?.missing_logs)) {
           allMissing.push(...res.data.missing_logs)
         }
-        const msg = `Đã xử lý ${res.data.processed_files} file, áp dụng ${res.data.applied_days} ngày`
+        const reconciliation = res.data?.weekly_bonus_reconciliation
+        const bonusResult = reconciliation
+          ? `; thưởng tuần: cộng ${Number(reconciliation.applied || 0)}, đã có ${Number(reconciliation.already_applied || 0)}, thu hồi ${Number(reconciliation.removed || 0)}`
+          : ""
+        const msg = `Đã xử lý ${res.data.processed_files} file, áp dụng ${res.data.applied_days} ngày${bonusResult}`
         alert(msg)
       }
       setUploadFiles([])
@@ -405,6 +410,27 @@ export default function AdminDutyManage() {
       alert(msg)
     } finally {
       setUploading(false)
+    }
+  }
+
+  async function reconcileWeeklyBonuses() {
+    if (!weekId) return
+    if (!confirm("Kiểm tra và đồng bộ thưởng sổ đầu bài cho toàn bộ lớp trong tuần này?")) {
+      return
+    }
+
+    setReconcilingWeeklyBonus(true)
+    try {
+      const res = await api.post(`/bonus/admin/week/${weekId}/reconcile-weekly-bonuses`)
+      const result = res.data?.reconciliation || {}
+      alert(
+        `Đã kiểm tra ${Number(result.checked || 0)} lớp: đủ điều kiện ${Number(result.eligible || 0)}, cộng mới ${Number(result.applied || 0)}, đã có ${Number(result.already_applied || 0)}, thu hồi ${Number(result.removed || 0)}, giữ thưởng thủ công ${Number(result.skipped_manual || 0)}.`,
+      )
+      await Promise.all([load(weekId, date, grade), loadSummary(weekId)])
+    } catch (err: any) {
+      alert(err?.response?.data?.error || "Không thể kiểm tra thưởng tuần")
+    } finally {
+      setReconcilingWeeklyBonus(false)
     }
   }
 
@@ -771,8 +797,17 @@ export default function AdminDutyManage() {
           </div>
 
           <div className="mt-4 rounded-2xl bg-slate-50 p-4">
-            <div className="text-sm font-semibold text-gray-900">
-              Upload sổ đầu bài theo khối (file .zip)
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div className="text-sm font-semibold text-gray-900">
+                Upload sổ đầu bài theo khối (file .zip)
+              </div>
+              <button
+                onClick={() => void reconcileWeeklyBonuses()}
+                disabled={reconcilingWeeklyBonus || !weekId || !!closedAt}
+                className="rounded-xl bg-emerald-600 px-3 py-2 text-xs font-semibold text-white shadow-sm disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {reconcilingWeeklyBonus ? "Đang kiểm tra..." : "Kiểm tra thưởng tuần"}
+              </button>
             </div>
             <div className="mt-2 grid grid-cols-1 lg:grid-cols-[140px_1fr_160px_160px] gap-3">
               <select
