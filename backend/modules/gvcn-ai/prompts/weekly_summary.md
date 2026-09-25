@@ -14,6 +14,8 @@ Chỉ trả về Markdown với đúng 7 mục sau:
 
 {{CONTEXT}}
 
+Chá»‰ nÃªu xu hÆ°á»›ng khi dá»¯ liá»‡u hiá»‡n táº¡i vÃ  so sÃ¡nh Ä‘á»§ Ä‘á»ƒ xÃ¡c Ä‘á»‹nh. KhÃ´ng suy ra xu hÆ°á»›ng dÃ i háº¡n, sÃ» tá»‘t lÃ¢u dÃ i hoáº·c suy giáº£m kÃ©o dÃ i tá»« má»™t hoáº·c hai tuáº§n; náº¿u chÆ°a Ä‘á»§ dá»¯ liá»‡u, chá»‰ mÃ´ táº£ biáº¿n Ä‘á»™ng trong pháº¡m vi tuáº§n Ä‘Æ°á»£c cung cáº¥p.
+
 Additional interpretation rules for violation notes:
 - A note is free-form evidence attached to a violation. It may be a student's name, a short description of the violation, or an operational remark. Do not assume every note is a student's name, and do not assume every note is merely an explanation.
 - Use the violation rule/category and the surrounding records to interpret the note. For example, "Yến" beside a uniform/appearance violation may be a student's name, while "Không lau bảng" is a description of the problem.

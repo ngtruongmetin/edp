@@ -156,6 +156,7 @@ function buildViolationStatistics(violations) {
         effectiveQuantity: 0,
         scoreImpact: 0,
         dates: new Set(),
+        notes: new Set(),
       }
 
       student.violationOccurrences += 1
@@ -165,6 +166,7 @@ function buildViolationStatistics(violations) {
       studentViolation.effectiveQuantity += effectiveQuantity
       studentViolation.scoreImpact += scoreImpact
       studentViolation.dates.add(violation.date)
+      if (!isPlaceholderNote(note)) studentViolation.notes.add(note)
       student.violations.set(typeKey, studentViolation)
       byStudent.set(studentKey, student)
     }
@@ -189,7 +191,7 @@ function buildViolationStatistics(violations) {
       effectiveQuantity: student.effectiveQuantity,
       scoreImpact: student.scoreImpact,
       violations: [...student.violations.values()]
-        .map((violation) => ({ ...violation, dates: [...violation.dates].sort() }))
+        .map((violation) => ({ ...violation, dates: [...violation.dates].sort(), notes: [...violation.notes].sort() }))
         .sort((a, b) => a.scoreImpact - b.scoreImpact || b.effectiveQuantity - a.effectiveQuantity || a.name.localeCompare(b.name)),
     }))
     .sort((a, b) => b.violationOccurrences - a.violationOccurrences || a.scoreImpact - b.scoreImpact || a.studentName.localeCompare(b.studentName))
@@ -236,12 +238,16 @@ function buildDailySummary(sessionReports) {
     current.totalScoreImpact += session.violationScoreImpact + session.dailyBonusPoints
     session.violations.forEach((violation) => {
       if (violation.effectiveQuantity > 0) current.violationTypes.add(violation.ruleName)
+      if (violation.note) {
+        current.notes = current.notes || new Set()
+        current.notes.add(violation.note)
+      }
     })
     daily.set(session.date, current)
   }
 
   return [...daily.values()]
-    .map((item) => ({ ...item, violationTypes: [...item.violationTypes].sort() }))
+    .map((item) => ({ ...item, violationTypes: [...item.violationTypes].sort(), notes: [...(item.notes || [])].sort() }))
     .sort((a, b) => a.date.localeCompare(b.date))
 }
 
@@ -522,6 +528,23 @@ async function buildWeeklySummaryContext({ weekId, classId, className }) {
   const previousWeek = await buildPreviousWeekComparison(week, className)
   const signedSessions = sessionReports.filter((session) => session.status === "signed")
   const draftSessions = sessionReports.filter((session) => session.status !== "signed")
+  const usedRuleIds = new Set([
+    ...violationStatistics.violationsByType.map((item) => item.ruleId),
+    ...(previousWeek.violationsByType || []).map((item) => item.ruleId),
+  ])
+  const currentScore = ranking.current
+  const previousScore = previousWeek.score || null
+  const currentPenalty = violationStatistics.totals.scoreImpact
+  const previousPenalty = previousWeek.statistics?.scoreImpact ?? null
+  const comparison = previousWeek.available && previousScore
+    ? {
+        available: true,
+        scoreChange: currentScore.score - previousScore.score,
+        rankChange: previousScore.rank - currentScore.rank,
+        violationChange: violationStatistics.totals.effectiveQuantity - previousWeek.statistics.effectiveQuantity,
+        penaltyChange: currentPenalty - previousPenalty,
+      }
+    : { available: false, reason: previousWeek.reason || "Insufficient previous-week data." }
 
   return {
     task: WEEKLY_SUMMARY_TASK,
@@ -551,8 +574,7 @@ async function buildWeeklySummaryContext({ weekId, classId, className }) {
     scoring: {
       basePoints: asNumber(baseScoreResult.rows[0]?.setting_value || 100),
       currentWeekScore: ranking.current,
-      gradeRanking: ranking.gradeRanking,
-      dailyBonuses: weekData.dailyBonuses,
+      dailyBonuses: weekData.dailyBonuses.map(({ date, points, minimumScore, allAboveNine, source }) => ({ date, points, minimumScore, allAboveNine, source })),
       weeklyBonus: weekData.weeklyBonus,
     },
     sessionStatus: {
@@ -560,14 +582,20 @@ async function buildWeeklySummaryContext({ weekId, classId, className }) {
       signed: signedSessions.length,
       draft: draftSessions.length,
     },
+    comparison,
     statistics: violationStatistics.totals,
     violationsByType: violationStatistics.violationsByType,
     violationsByRecordedNote: violationStatistics.violationsByRecordedNote,
     studentsFromNotes: violationStatistics.studentsFromNotes,
     dailySummary: buildDailySummary(sessionReports),
-    sessions: sessionReports,
-    absenceEvidences: weekData.absenceEvidences,
-    rules: rulesResult.rows.map((rule) => ({
+    attendanceSummary: {
+      total: weekData.absenceEvidences.length,
+      pending: weekData.absenceEvidences.filter((item) => item.status === "pending").length,
+      approved: weekData.absenceEvidences.filter((item) => item.status === "approved").length,
+      rejected: weekData.absenceEvidences.filter((item) => item.status === "rejected").length,
+      students: weekData.absenceEvidences.map(({ studentName, startDate, endDate, note, status, reviewReason, approvedExemptionCount }) => ({ studentName, startDate, endDate, note, status, reviewReason, approvedExemptionCount })),
+    },
+    rulesUsed: rulesResult.rows.filter((rule) => usedRuleIds.has(asNumber(rule.id))).map((rule) => ({
       category: rule.category || "Chưa phân loại",
       name: rule.name,
       scoreDelta: asNumber(rule.score_delta),

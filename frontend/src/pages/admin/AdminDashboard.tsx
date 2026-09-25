@@ -92,7 +92,7 @@ export default function AdminDashboard() {
           </div>
         </section>
 
-        <section className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_320px]">
+        <section>
           <div className="edp-glass-panel rounded-[32px] p-5 sm:p-6">
             <div className="flex items-center justify-between gap-3">
               <div>
@@ -116,17 +116,6 @@ export default function AdminDashboard() {
             </div>
           </div>
 
-          <div className="space-y-6">
-            <section className="edp-glass-panel rounded-[32px] p-5 sm:p-6">
-              <div className="text-xs font-semibold uppercase tracking-[0.22em] text-[#2e77df]/70">
-                Gợi ý
-              </div>
-              <div className="mt-3 space-y-3 text-sm leading-6 text-slate-600">
-                <p>Quản lý luật để đồng bộ điểm trừ và danh mục vi phạm trong toàn hệ thống.</p>
-                <p>Cấu hình hệ thống là nơi kiểm tra API AI, chọn model và chỉnh các tham số gốc như điểm nền.</p>
-              </div>
-            </section>
-          </div>
         </section>
       </div>
 
