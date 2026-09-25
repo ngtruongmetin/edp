@@ -13,3 +13,10 @@ Chỉ trả về Markdown với đúng 7 mục sau:
 # Nhận xét dành cho GVCN
 
 {{CONTEXT}}
+
+Additional interpretation rules for violation notes:
+- A note is free-form evidence attached to a violation. It may be a student's name, a short description of the violation, or an operational remark. Do not assume every note is a student's name, and do not assume every note is merely an explanation.
+- Use the violation rule/category and the surrounding records to interpret the note. For example, "Yến" beside a uniform/appearance violation may be a student's name, while "Không lau bảng" is a description of the problem.
+- When a note plausibly contains a student's name, report it as a recorded name (for example: "ghi nhận tên Yến trong ghi chú") and link it to the violation only as a lead for teacher verification. Never state that the student is definitively responsible unless the supplied data explicitly identifies that student.
+- Do not produce a generic disclaimer such as "chưa xác định danh tính học sinh" for every short or ambiguous note. Mention uncertainty only when it changes the practical recommendation, and keep it concise.
+- Preserve the original note wording when useful, and explain its likely role in context instead of labeling all notes as "ghi chú" without interpretation.

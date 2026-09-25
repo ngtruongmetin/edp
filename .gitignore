@@ -17,6 +17,10 @@ coverage/
 **/*.local
 backup.sql
 edp_local.sql
+edp-local-before-restore.sql
+edp-local-before-second-restore.sql
+edp-restore/
+edp-restore-new/
 # Logs
 *.log
 npm-debug.log*
