@@ -94,7 +94,7 @@ export default function AdminAbsenceEvidences() {
         setWeeks(nextWeeks)
         setWeekId((current) => current && nextWeeks.some((week) => week.id === current) ? current : nextWeeks[0]?.id || null)
       } catch (error) {
-        if (active) toast.error(getApiErrorMessage(error, "KhÃ´ng thá»ƒ táº£i danh sÃ¡ch tuáº§n trá»±c."))
+        if (active) toast.error(getApiErrorMessage(error, "Không thể tải danh sách tuần trực."))
       } finally {
         if (active) setLoadingWeeks(false)
       }
@@ -209,9 +209,9 @@ export default function AdminAbsenceEvidences() {
               <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-600">Đối chiếu số vắng có phép và ghi nhận số lượng được miễn trừ, không thay đổi dữ liệu Phiếu trực.</p>
             </div>
             <label className="block text-sm font-semibold text-slate-700 sm:w-80">
-              Tuáº§n trá»±c
+              Tuần trực
               <select value={weekId ?? ""} onChange={(event) => setWeekId(Number(event.target.value) || null)} disabled={loadingWeeks || weeks.length === 0} className="mt-2 min-h-11 w-full rounded-2xl border border-blue-100 bg-white px-4 text-sm font-medium text-slate-800 outline-none focus:border-[#2e77df] disabled:cursor-not-allowed disabled:bg-slate-50">
-                {weeks.length === 0 ? <option value="">ChÆ°a cÃ³ tuáº§n trá»±c</option> : weeks.map((week) => <option key={week.id} value={week.id}>Tuáº§n {week.week_number} ({formatDate(week.start_date)} - {formatDate(week.end_date)})</option>)}
+                {weeks.length === 0 ? <option value="">Chưa có tuần trực</option> : weeks.map((week) => <option key={week.id} value={week.id}>Tuần {week.week_number} ({formatDate(week.start_date)} - {formatDate(week.end_date)})</option>)}
               </select>
             </label>
             <label className="block text-sm font-semibold text-slate-700 sm:w-52">
@@ -228,7 +228,7 @@ export default function AdminAbsenceEvidences() {
 
         <section className="edp-glass-panel overflow-hidden rounded-[32px]">
           {loadingWeeks ? (
-            <div className="p-6 text-sm text-slate-500">Äang táº£i danh sÃ¡ch tuáº§n trá»±c...</div>
+            <div className="p-6 text-sm text-slate-500">Đang tải danh sách tuần trực...</div>
           ) : loading ? (
             <div className="p-6 text-sm text-slate-500">Đang tải danh sách...</div>
           ) : evidences.length === 0 ? (
