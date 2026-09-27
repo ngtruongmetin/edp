@@ -42,6 +42,13 @@ type Evidence = {
   }>
 }
 
+type DutyWeek = {
+  id: number
+  week_number: number
+  start_date: string
+  end_date: string
+}
+
 function formatDate(value: string) {
   const [year, month, day] = value.split("-")
   return year && month && day ? `${day}/${month}/${year}` : value
@@ -62,6 +69,9 @@ function statusClass(status: Evidence["status"]) {
 export default function AdminAbsenceEvidences() {
   usePageTitle("EDP | Quản lý minh chứng nghỉ học")
   const [status, setStatus] = useState("")
+  const [weeks, setWeeks] = useState<DutyWeek[]>([])
+  const [weekId, setWeekId] = useState<number | null>(null)
+  const [loadingWeeks, setLoadingWeeks] = useState(true)
   const [evidences, setEvidences] = useState<Evidence[]>([])
   const [loading, setLoading] = useState(true)
   const [selected, setSelected] = useState<Evidence | null>(null)
@@ -74,11 +84,35 @@ export default function AdminAbsenceEvidences() {
   const [deleteTarget, setDeleteTarget] = useState<Evidence | null>(null)
   const [deleting, setDeleting] = useState(false)
 
+  useEffect(() => {
+    let active = true
+    async function loadWeeks() {
+      try {
+        const response = await api.get<DutyWeek[]>("/schedule/admin")
+        if (!active) return
+        const nextWeeks = response.data || []
+        setWeeks(nextWeeks)
+        setWeekId((current) => current && nextWeeks.some((week) => week.id === current) ? current : nextWeeks[0]?.id || null)
+      } catch (error) {
+        if (active) toast.error(getApiErrorMessage(error, "KhÃ´ng thá»ƒ táº£i danh sÃ¡ch tuáº§n trá»±c."))
+      } finally {
+        if (active) setLoadingWeeks(false)
+      }
+    }
+    void loadWeeks()
+    return () => { active = false }
+  }, [])
+
   const load = useCallback(async () => {
+    if (!weekId) {
+      setEvidences([])
+      setLoading(false)
+      return
+    }
     try {
       setLoading(true)
       const response = await api.get<{ evidences: Evidence[] }>("/absence-evidences/admin", {
-        params: status ? { status } : undefined,
+        params: { week_id: weekId, ...(status ? { status } : {}) },
       })
       setEvidences(response.data.evidences || [])
     } catch (error) {
@@ -86,7 +120,7 @@ export default function AdminAbsenceEvidences() {
     } finally {
       setLoading(false)
     }
-  }, [status])
+  }, [status, weekId])
 
   useEffect(() => {
     void load()
@@ -174,7 +208,13 @@ export default function AdminAbsenceEvidences() {
               <h1 className="mt-2 text-2xl font-semibold text-slate-900">Minh chứng nghỉ học</h1>
               <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-600">Đối chiếu số vắng có phép và ghi nhận số lượng được miễn trừ, không thay đổi dữ liệu Phiếu trực.</p>
             </div>
-            <label className="block text-sm font-semibold text-slate-700">
+            <label className="block text-sm font-semibold text-slate-700 sm:w-80">
+              Tuáº§n trá»±c
+              <select value={weekId ?? ""} onChange={(event) => setWeekId(Number(event.target.value) || null)} disabled={loadingWeeks || weeks.length === 0} className="mt-2 min-h-11 w-full rounded-2xl border border-blue-100 bg-white px-4 text-sm font-medium text-slate-800 outline-none focus:border-[#2e77df] disabled:cursor-not-allowed disabled:bg-slate-50">
+                {weeks.length === 0 ? <option value="">ChÆ°a cÃ³ tuáº§n trá»±c</option> : weeks.map((week) => <option key={week.id} value={week.id}>Tuáº§n {week.week_number} ({formatDate(week.start_date)} - {formatDate(week.end_date)})</option>)}
+              </select>
+            </label>
+            <label className="block text-sm font-semibold text-slate-700 sm:w-52">
               Trạng thái
               <select value={status} onChange={(event) => setStatus(event.target.value)} className="mt-2 min-h-11 w-full rounded-2xl border border-blue-100 bg-white px-4 text-sm font-medium text-slate-800 outline-none focus:border-[#2e77df] sm:w-52">
                 <option value="">Tất cả trạng thái</option>
@@ -187,7 +227,9 @@ export default function AdminAbsenceEvidences() {
         </section>
 
         <section className="edp-glass-panel overflow-hidden rounded-[32px]">
-          {loading ? (
+          {loadingWeeks ? (
+            <div className="p-6 text-sm text-slate-500">Äang táº£i danh sÃ¡ch tuáº§n trá»±c...</div>
+          ) : loading ? (
             <div className="p-6 text-sm text-slate-500">Đang tải danh sách...</div>
           ) : evidences.length === 0 ? (
             <div className="p-8 text-center text-sm text-slate-500">Chưa có minh chứng phù hợp.</div>
