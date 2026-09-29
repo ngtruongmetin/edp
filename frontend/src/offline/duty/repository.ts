@@ -463,6 +463,12 @@ export class OfflineDutyRepository {
     }
     await dutyStorage.putAttachment(attachment)
     await dutyStorage.putOperation(operation(this.ownerClass, session.clientId, "upload_evidence", {}, [attachmentId]))
+    await dutyStorage.putSession({
+      ...session,
+      status: "draft",
+      signedAt: null,
+      updatedAt: nowIso(),
+    })
     return attachment
   }
 
@@ -500,6 +506,7 @@ export class OfflineDutyRepository {
   async removeEvidence(session: OfflineDutySession, attachment: DutyOfflineAttachment) {
     if (!(await this.isOfflineEnabled())) {
       if (attachment.serverId) await api.delete(`/duty/evidence/${attachment.serverId}`)
+      await dutyStorage.putSession({ ...session, status: "draft", signedAt: null, updatedAt: nowIso() })
       return
     }
     const storedAttachment = await dutyStorage.getAttachment(attachment.id) || attachment
@@ -510,6 +517,7 @@ export class OfflineDutyRepository {
       await dutyStorage.putOperation(operation(this.ownerClass, session.clientId, "delete_evidence", { image_id: storedAttachment.serverId }))
     }
     await dutyStorage.deleteAttachment(attachment.id)
+    await dutyStorage.putSession({ ...session, status: "draft", signedAt: null, updatedAt: nowIso() })
   }
 
   async queueSignature(session: OfflineDutySession, signatureSvg: string) {

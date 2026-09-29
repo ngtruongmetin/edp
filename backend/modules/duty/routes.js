@@ -2654,8 +2654,31 @@ router.post(
         [sessionId, "edit:add_evidence", now, req.session.user?.class_id || null, req.session.user?.role || null, JSON.stringify({ actor_name: req.session.user?.username || req.session.user?.class_name || null, count: uploadedFiles.length })],
       )
       await client.query("COMMIT")
-      await syncSignedStatusAfterChangeAsync(sessionId, "edit:add_evidence")
-      res.status(201).json({ images })
+      const statusResult = await syncSignedStatusAfterChangeAsync(sessionId, "edit:add_evidence")
+      await pool.query(
+        `
+          UPDATE duty_revision_logs
+          SET metadata = COALESCE(metadata, '{}'::jsonb) || $1::jsonb
+          WHERE id = (
+            SELECT id FROM duty_revision_logs
+            WHERE session_id = $2 AND action = 'edit:add_evidence' AND metadata ->> 'count' = $3
+            ORDER BY id DESC LIMIT 1
+          )
+        `,
+        [JSON.stringify({ status_changed: Boolean(statusResult?.changed), previous_status: statusResult?.previousStatus || null, new_status: statusResult?.nextStatus || null }), sessionId, String(uploadedFiles.length)],
+      )
+      const currentSession = await pool.query(
+        `SELECT status, signed_at FROM duty_sessions WHERE id = $1 LIMIT 1`,
+        [sessionId],
+      )
+      res.status(201).json({
+        images,
+        status: currentSession.rows[0]?.status || null,
+        signed_at: currentSession.rows[0]?.signed_at || null,
+        status_changed: Boolean(statusResult?.changed),
+        previous_status: statusResult?.previousStatus || null,
+        next_status: statusResult?.nextStatus || currentSession.rows[0]?.status || null,
+      })
     } catch (error) {
       if (client) await client.query("ROLLBACK")
       if (uploadedFiles.length) removeDutyEvidenceFiles(uploadedFiles)
@@ -2705,9 +2728,22 @@ router.delete(
         [image.session_id, "edit:remove_evidence", time.now(), req.session.user?.class_id || null, req.session.user?.role || null, JSON.stringify({ actor_name: req.session.user?.username || req.session.user?.class_name || null, image_id: imageId })],
       )
       await client.query("COMMIT")
-      await syncSignedStatusAfterChangeAsync(image.session_id, "edit:remove_evidence")
+      const statusResult = await syncSignedStatusAfterChangeAsync(image.session_id, "edit:remove_evidence")
+      await pool.query(
+        `
+          UPDATE duty_revision_logs
+          SET metadata = COALESCE(metadata, '{}'::jsonb) || $1::jsonb
+          WHERE id = (
+            SELECT id FROM duty_revision_logs
+            WHERE session_id = $2 AND action = 'edit:remove_evidence' AND metadata ->> 'image_id' = $3
+            ORDER BY id DESC LIMIT 1
+          )
+        `,
+        [JSON.stringify({ status_changed: Boolean(statusResult?.changed), previous_status: statusResult?.previousStatus || null, new_status: statusResult?.nextStatus || null }), image.session_id, String(imageId)],
+      )
       removeDutyEvidenceFiles([{ filePath: image.file_path }])
-      res.json({ success: true })
+      const currentSession = await pool.query(`SELECT status, signed_at FROM duty_sessions WHERE id = $1 LIMIT 1`, [image.session_id])
+      res.json({ success: true, status: currentSession.rows[0]?.status || null, signed_at: currentSession.rows[0]?.signed_at || null, status_changed: Boolean(statusResult?.changed), previous_status: statusResult?.previousStatus || null, next_status: statusResult?.nextStatus || currentSession.rows[0]?.status || null })
     } catch (error) {
       if (client) await client.query("ROLLBACK")
       res.status(error.status || 500).json({ error: error.message || "Không thể xóa ảnh minh chứng." })

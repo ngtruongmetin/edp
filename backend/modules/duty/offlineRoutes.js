@@ -212,15 +212,21 @@ async function computeViolationHash(client, sessionId) {
 }
 
 async function markEdited(client, session, action, user, metadata = {}) {
+  let statusChanged = false
+  let previousStatus = null
+  let newStatus = null
   if (session.signed_snapshot_hash) {
     const currentHash = await computeViolationHash(client, session.id)
     if (currentHash !== session.signed_snapshot_hash) {
       await client.query(`UPDATE duty_sessions SET status = 'draft', signed_at = NULL WHERE id = $1`, [session.id])
+      statusChanged = session.status === "signed"
+      previousStatus = session.status
+      newStatus = "draft"
     }
   }
   await client.query(
     `INSERT INTO duty_revision_logs (session_id, action, created_at, actor_id, actor_role, metadata) VALUES ($1, $2, $3, $4, $5, $6::jsonb)`,
-    [session.id, action, time.now(), user?.class_id || null, user?.role || null, JSON.stringify({ actor_name: user?.username || user?.class_name || null, ...metadata })],
+    [session.id, action, time.now(), user?.class_id || null, user?.role || null, JSON.stringify({ actor_name: user?.username || user?.class_name || null, ...metadata, status_changed: statusChanged, previous_status: previousStatus, new_status: newStatus })],
   )
 }
 

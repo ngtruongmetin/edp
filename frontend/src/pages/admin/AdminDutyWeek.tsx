@@ -191,7 +191,7 @@ export default function AdminDutyWeek() {
                         {s.signature_svg ? (
                           <span className="text-[11px] text-gray-500">Đã ký tay</span>
                         ) : s.confirmation_method === "legacy_photo" ? (
-                          <span className="text-[11px] text-gray-500">Ảnh cũ</span>
+                          <span className="text-[11px] text-gray-500">Ảnh chụp khuôn mặt</span>
                         ) : s.confirmation_method === "admin_override" ? (
                           <span className="text-[11px] text-gray-500">Admin</span>
                         ) : null}
@@ -255,7 +255,7 @@ export default function AdminDutyWeek() {
                       <SignatureDisplay svg={detail.session.signature_svg} />
                     ) : (
                       <div className="h-40 flex items-center justify-center text-sm text-gray-500">
-                        {detail.session.confirmation_method === "legacy_photo" ? "Đã xác nhận bằng ảnh cũ" : detail.session.confirmation_method === "admin_override" ? "Admin override" : "Chưa có chữ ký"}
+                        {detail.session.confirmation_method === "legacy_photo" ? "Đã xác nhận bằng ảnh chụp khuôn mặt" : detail.session.confirmation_method === "admin_override" ? "Admin override" : "Chưa có chữ ký"}
                       </div>
                     )}
                   </div>
@@ -330,7 +330,7 @@ export default function AdminDutyWeek() {
                             <div className="mt-2 overflow-hidden rounded-2xl ring-1 ring-blue-100 bg-slate-50">
                               <SignatureDisplay svg={s.signature_svg} />
                             </div>
-                          ) : <div className="mt-2 text-xs text-gray-500">{s.confirmation_method === "legacy_photo" ? "Đã xác nhận bằng ảnh cũ" : s.confirmation_method === "admin_override" ? "Admin override" : "Không có chữ ký"}</div>}
+                          ) : <div className="mt-2 text-xs text-gray-500">{s.confirmation_method === "legacy_photo" ? "Đã xác nhận bằng ảnh chụp khuôn mặt" : s.confirmation_method === "admin_override" ? "Admin override" : "Không có chữ ký"}</div>}
                         </div>
                       ))
                     ) : (

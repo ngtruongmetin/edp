@@ -791,7 +791,7 @@ export default function GvcnDashboard() {
                     <SignatureDisplay svg={detail.session.signature_svg} />
                   ) : (
                     <div className="h-40 flex items-center justify-center text-sm text-gray-500">
-                      {detail.session.confirmation_method === "legacy_photo" ? "Đã xác nhận bằng ảnh cũ" : detail.session.confirmation_method === "admin_override" ? "Admin override" : "Chưa có chữ ký"}
+                      {detail.session.confirmation_method === "legacy_photo" ? "Đã xác nhận bằng ảnh chụp khuôn mặt" : detail.session.confirmation_method === "admin_override" ? "Admin override" : "Chưa có chữ ký"}
                     </div>
                   )}
                 </div>

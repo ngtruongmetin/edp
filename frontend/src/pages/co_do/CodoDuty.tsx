@@ -452,7 +452,13 @@ export default function CodoDuty() {
         )}
 
         {session && (
-          <DutyEvidencePanel session={session as OfflineDutySession} />
+          <DutyEvidencePanel
+            session={session as OfflineDutySession}
+            onSessionChanged={async () => {
+              if (routeSessionId) await loadSessionById(routeSessionId)
+              else await loadSession()
+            }}
+          />
         )}
 
         {session && (
@@ -688,7 +694,7 @@ export default function CodoDuty() {
                 ) : session?.confirmation_method === "admin_override" ? (
                   <div className="text-xs text-gray-500">Admin override</div>
                 ) : session?.confirmation_method === "legacy_photo" ? (
-                  <div className="text-xs text-gray-500">Đã xác nhận bằng ảnh cũ</div>
+                  <div className="text-xs text-gray-500">Đã xác nhận bằng ảnh chụp khuôn mặt</div>
                 ) : null}
               </div>
             )}

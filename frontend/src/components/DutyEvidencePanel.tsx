@@ -18,6 +18,7 @@ type Props = {
   session?: OfflineDutySession
   sessionId?: number
   readOnly?: boolean
+  onSessionChanged?: () => Promise<void> | void
 }
 
 const MAX_IMAGES = 10
@@ -31,7 +32,7 @@ function attachmentUiId(attachment: DutyOfflineAttachment) {
   return -Math.max(1, Math.abs(hash))
 }
 
-export default function DutyEvidencePanel({ session, sessionId, readOnly = false }: Props) {
+export default function DutyEvidencePanel({ session, sessionId, readOnly = false, onSessionChanged }: Props) {
   const dutyOffline = useOptionalDutyOffline()
   const fileInputRef = useRef<HTMLInputElement | null>(null)
   const [images, setImages] = useState<DutyEvidenceImage[]>([])
@@ -108,17 +109,19 @@ export default function DutyEvidencePanel({ session, sessionId, readOnly = false
 
     try {
       setUploading(true)
+      const activeServerId = session?.serverId || sessionId
       if (session && dutyOffline?.offlineEnabled) {
         for (const file of selectedFiles) {
           await dutyOffline.repository.addEvidence(session, file)
         }
-        void dutyOffline.syncNow()
+        await dutyOffline.syncNow()
       } else {
-        if (!sessionId) throw new Error("Thiếu Phiếu trực")
+        if (!activeServerId) throw new Error("Thiếu Phiếu trực")
         const formData = new FormData()
         selectedFiles.forEach((file) => formData.append("files", file))
-        await api.post(`/duty/session/${sessionId}/evidences`, formData)
+        await api.post(`/duty/session/${activeServerId}/evidences`, formData)
       }
+      await Promise.resolve(onSessionChanged?.())
       await loadImages()
       toast.success("Đã thêm ảnh minh chứng")
     } catch (error) {
@@ -137,10 +140,11 @@ export default function DutyEvidencePanel({ session, sessionId, readOnly = false
       if (session && dutyOffline?.offlineEnabled && image.attachment) {
         await dutyOffline.repository.removeEvidence(session, image.attachment)
         if (image.url.startsWith("blob:")) URL.revokeObjectURL(image.url)
-        void dutyOffline.syncNow()
+        await dutyOffline.syncNow()
       } else {
         await api.delete(`/duty/evidence/${image.id}`)
       }
+      await Promise.resolve(onSessionChanged?.())
       setImages((current) => current.filter((item) => item.id !== image.id))
       setPreviewIndex((current) => (current == null ? null : Math.min(current, Math.max(images.length - 2, 0))))
       toast.success("Đã xóa ảnh minh chứng")

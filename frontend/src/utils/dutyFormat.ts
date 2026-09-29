@@ -18,6 +18,8 @@ export function formatRevisionAction(action: string | null | undefined) {
     "bonus:apply_daily_bonus": "Áp dụng điểm sổ đầu bài",
     "edit:apply_daily_bonus": "Áp dụng điểm sổ đầu bài",
   }
+  if (a === "edit:add_evidence") return "Thêm ảnh minh chứng"
+  if (a === "edit:remove_evidence") return "Xóa ảnh minh chứng"
   if (map[a]) return map[a]
 
   if (a.startsWith("bonus:")) return "Điểm cộng: cập nhật"
@@ -45,6 +47,11 @@ export function formatRevisionDetails(revision: { action?: string; metadata?: Re
   if (metadata.old_quantity !== undefined && metadata.new_quantity !== undefined) parts.push(`Số lượng: ${metadata.old_quantity} -> ${metadata.new_quantity}`)
   if (metadata.old_note !== undefined || metadata.new_note !== undefined) parts.push(`Ghi chú: ${String(metadata.old_note || "Không có")} -> ${String(metadata.new_note || "Không có")}`)
   if (metadata.violation_score !== undefined || metadata.total_points !== undefined) parts.push(`Điểm phiếu: ${String(metadata.total_points ?? metadata.violation_score)}`)
+  if (metadata.count !== undefined) parts.push(`Số ảnh: ${String(metadata.count)}`)
+  if (metadata.image_id !== undefined) parts.push(`Ảnh: #${String(metadata.image_id)}`)
+  if (metadata.confirmation_method) parts.push(`Phương thức: ${String(metadata.confirmation_method)}`)
+  if (metadata.signature_format) parts.push(`Định dạng: ${String(metadata.signature_format)}`)
+  if (metadata.operation_id) parts.push(`Operation: ${String(metadata.operation_id)}`)
   if (metadata.status_changed && metadata.previous_status && metadata.new_status) {
     const statusLabel = (value: unknown) => String(value) === "signed" ? "Đã ký" : String(value) === "draft" ? "Nháp" : String(value)
     parts.push(`Trạng thái: ${statusLabel(metadata.previous_status)} -> ${statusLabel(metadata.new_status)}`)
