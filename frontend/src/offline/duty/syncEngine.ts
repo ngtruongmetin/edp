@@ -255,6 +255,11 @@ export class DutySyncEngine {
       if (!attachment) throw new Error("Ảnh chữ ký cục bộ không còn tồn tại.")
       form.append("photo", attachment.blob, attachment.fileName)
     }
+    if (typeof operation.payload.signature_svg === "string" && operation.payload.signature_svg) {
+      form.append("signature_svg", operation.payload.signature_svg)
+      form.append("signature_width", String(operation.payload.signature_width || 600))
+      form.append("signature_height", String(operation.payload.signature_height || 240))
+    }
     const response = await api.post(`/duty/offline/sessions/${session.clientId}/sign`, form)
     const current = await dutyStorage.getSession(session.clientId)
     if (!current) return
@@ -264,6 +269,8 @@ export class DutySyncEngine {
       signedAt: String(response.data.signed_at || current.signedAt || new Date().toISOString()),
       signatureSignedAt: String(response.data.signed_at || current.signatureSignedAt || new Date().toISOString()),
       signaturePhotoPath: String(response.data.photo_path || current.signaturePhotoPath || "") || null,
+      signatureSvg: String(response.data.signature_svg || current.signatureSvg || "") || null,
+      confirmationMethod: response.data.confirmation_method || current.confirmationMethod || null,
       updatedAt: new Date().toISOString(),
     })
   }

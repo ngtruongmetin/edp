@@ -98,6 +98,8 @@ export interface OfflineDutySession {
   signedAt?: string | null
   signatureSignedAt?: string | null
   signaturePhotoPath?: string | null
+  signatureSvg?: string | null
+  confirmationMethod?: "hand_signature" | "legacy_photo" | "admin_override" | "legacy_unknown" | null
   bonusPoints: number
   violations: OfflineDutyViolation[]
 }

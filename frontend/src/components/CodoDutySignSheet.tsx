@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react"
 
 import toast from "react-hot-toast"
 
-import CameraCapture from "./CameraCapture"
+import SignaturePadField from "./SignaturePadField"
 import { useDutyOffline } from "../offline/duty/DutyOfflineContext"
 import { offlinePinVerifier } from "../offline/duty/offlinePinVerifier"
 import { api } from "../api/api"
@@ -31,14 +31,14 @@ export default function CodoDutySignSheet({
 }: Props) {
   const { repository, syncNow } = useDutyOffline()
   const [pin, setPin] = useState("")
-  const [photoFile, setPhotoFile] = useState<File | null>(null)
+  const [signatureSvg, setSignatureSvg] = useState("")
   const [signing, setSigning] = useState(false)
   const pinInputRef = useRef<HTMLInputElement | null>(null)
 
   useEffect(() => {
     if (!open) {
       setPin("")
-      setPhotoFile(null)
+      setSignatureSvg("")
       setSigning(false)
       return
     }
@@ -65,6 +65,11 @@ export default function CodoDutySignSheet({
       return
     }
 
+    if (!signatureSvg.trim()) {
+      toast.error("Vui lòng ký xác nhận")
+      return
+    }
+
     setSigning(true)
 
     try {
@@ -78,7 +83,9 @@ export default function CodoDutySignSheet({
         const form = new FormData()
         form.append("session_id", String(signableSession.serverId || signableSession.localId))
         form.append("pin", pin.trim())
-        if (photoFile) form.append("photo", photoFile, photoFile.name)
+        form.append("signature_svg", signatureSvg)
+        form.append("signature_width", "600")
+        form.append("signature_height", "240")
         await api.post("/duty/sign", form)
         toast.success("Đã ký xác nhận")
         await Promise.resolve(onSigned?.())
@@ -97,7 +104,7 @@ export default function CodoDutySignSheet({
         }
       }
       await offlinePinVerifier.authorize(signableSession, pin)
-      await repository.queueSignature(signableSession, photoFile)
+      await repository.queueSignature(signableSession, signatureSvg)
       void syncNow()
 
       toast.success("Đã ký xác nhận")
@@ -110,7 +117,7 @@ export default function CodoDutySignSheet({
 
       onClose()
       setPin("")
-      setPhotoFile(null)
+      setSignatureSvg("")
     } catch (err: any) {
       console.error(err)
       const code = err instanceof Error ? err.message : ""
@@ -156,7 +163,7 @@ export default function CodoDutySignSheet({
         </div>
 
         <div className="mt-2 text-sm leading-6 text-gray-600">
-          Nhập PIN Ban cán sự của lớp và chụp ảnh rõ mặt để xác nhận.
+          Ký trực tiếp trên vùng bên dưới, sau đó nhập PIN để xác nhận.
         </div>
 
         <div className="mt-4 max-h-[calc(92dvh-9rem)] space-y-3 overflow-y-auto pr-1">
@@ -187,9 +194,9 @@ export default function CodoDutySignSheet({
           </div>
 
           <div className="rounded-2xl border border-blue-100 bg-white px-4 py-3 shadow-sm">
-            <div className="text-[11px] text-gray-500">Ảnh xác nhận</div>
+            <div className="text-[11px] text-gray-500">Chữ ký xác nhận</div>
             <div className="mt-3">
-              <CameraCapture value={photoFile} onChange={setPhotoFile} />
+              <SignaturePadField value={signatureSvg} onChange={setSignatureSvg} />
             </div>
           </div>
 

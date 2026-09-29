@@ -5,6 +5,7 @@ import { api } from "../../api/api"
 import Navbar from "../../components/Navbar"
 import Footer from "../../components/Footer"
 import DutyEvidencePanel from "../../components/DutyEvidencePanel"
+import SignatureDisplay from "../../components/SignatureDisplay"
 import { formatDutyStatus, formatRevisionAction, formatRevisionDetails } from "../../utils/dutyFormat"
 import { violationQuantityLabel } from "../../utils/dutyViolations"
 import { usePageTitle } from "../../utils/usePageTitle"
@@ -24,6 +25,8 @@ type SessionRow = {
   duty_class: string
   status: string
   signature_photo_path: string | null
+  signature_svg?: string | null
+  confirmation_method?: string | null
   total_score: number
 }
 
@@ -185,8 +188,12 @@ export default function AdminDutyWeek() {
                             Nháp
                           </span>
                         )}
-                        {s.signature_photo_path ? (
-                          <span className="text-[11px] text-gray-500">Có ảnh</span>
+                        {s.signature_svg ? (
+                          <span className="text-[11px] text-gray-500">Đã ký tay</span>
+                        ) : s.confirmation_method === "legacy_photo" ? (
+                          <span className="text-[11px] text-gray-500">Ảnh cũ</span>
+                        ) : s.confirmation_method === "admin_override" ? (
+                          <span className="text-[11px] text-gray-500">Admin</span>
                         ) : null}
                       </div>
                     </div>
@@ -244,15 +251,11 @@ export default function AdminDutyWeek() {
                   </div>
 
                   <div className="overflow-hidden rounded-2xl ring-1 ring-blue-100 bg-slate-50">
-                    {detail.session.signature_photo_path ? (
-                      <img
-                        src={detail.session.signature_photo_path}
-                        alt="signature"
-                        className="w-full"
-                      />
+                    {detail.session.signature_svg ? (
+                      <SignatureDisplay svg={detail.session.signature_svg} />
                     ) : (
                       <div className="h-40 flex items-center justify-center text-sm text-gray-500">
-                        Chưa có ảnh ký
+                        {detail.session.confirmation_method === "legacy_photo" ? "Đã xác nhận bằng ảnh cũ" : detail.session.confirmation_method === "admin_override" ? "Admin override" : "Chưa có chữ ký"}
                       </div>
                     )}
                   </div>
@@ -323,11 +326,11 @@ export default function AdminDutyWeek() {
                           className="rounded-2xl border border-blue-100 bg-white px-4 py-3"
                         >
                           <div className="text-xs text-gray-500">{s.signed_at}</div>
-                          {s.photo_path ? (
+                          {s.signature_svg ? (
                             <div className="mt-2 overflow-hidden rounded-2xl ring-1 ring-blue-100 bg-slate-50">
-                              <img src={s.photo_path} className="w-full" />
+                              <SignatureDisplay svg={s.signature_svg} />
                             </div>
-                          ) : null}
+                          ) : <div className="mt-2 text-xs text-gray-500">{s.confirmation_method === "legacy_photo" ? "Đã xác nhận bằng ảnh cũ" : s.confirmation_method === "admin_override" ? "Admin override" : "Không có chữ ký"}</div>}
                         </div>
                       ))
                     ) : (

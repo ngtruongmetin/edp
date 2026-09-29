@@ -5,6 +5,7 @@ import toast from "react-hot-toast"
 import { api } from "../../api/api"
 import { useAuth } from "../../auth/AuthContext"
 import Navbar from "../../components/Navbar"
+import SignatureDisplay from "../../components/SignatureDisplay"
 import Footer from "../../components/Footer"
 import AbsenceEvidencePanel from "../../components/AbsenceEvidencePanel"
 import DutyPeriodSelector, { type DutyPeriodTree } from "../../components/DutyPeriodSelector"
@@ -41,6 +42,8 @@ type Session = {
   violation_score: number
   bonus_points: number
   signature_photo_path?: string | null
+  signature_svg?: string | null
+  confirmation_method?: string | null
 }
 
 type DashboardSnapshot = {
@@ -784,11 +787,11 @@ export default function GvcnDashboard() {
                 </div>
 
                 <div className="overflow-hidden rounded-2xl ring-1 ring-blue-100 bg-slate-50">
-                  {detail.session.signature_photo_path ? (
-                    <img src={detail.session.signature_photo_path} className="w-full" />
+                  {detail.session.signature_svg ? (
+                    <SignatureDisplay svg={detail.session.signature_svg} />
                   ) : (
                     <div className="h-40 flex items-center justify-center text-sm text-gray-500">
-                      Chưa có ảnh ký
+                      {detail.session.confirmation_method === "legacy_photo" ? "Đã xác nhận bằng ảnh cũ" : detail.session.confirmation_method === "admin_override" ? "Admin override" : "Chưa có chữ ký"}
                     </div>
                   )}
                 </div>

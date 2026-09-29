@@ -143,6 +143,32 @@ function uploadDutySignaturePhoto(req, res, next) {
   })
 }
 
+const SIGNATURE_MAX_LENGTH = 120000
+
+function parseSignatureInput(req) {
+  const raw = String(req.body?.signature_svg || "").trim()
+  if (!raw) return null
+  if (raw.length > SIGNATURE_MAX_LENGTH || /<\s*(script|foreignObject|iframe|object|image)\b/i.test(raw) || /\bon[a-z]+\s*=|javascript\s*:/i.test(raw)) {
+    throw dutyEvidenceError(400, "Chữ ký không hợp lệ.")
+  }
+  if (!/<svg\b/i.test(raw) || !/<path\b/i.test(raw) || !/\bd\s*=\s*[\"'][^\"']+/i.test(raw)) {
+    throw dutyEvidenceError(400, "Chữ ký không hợp lệ.")
+  }
+  const width = Number(req.body?.signature_width || 600)
+  const height = Number(req.body?.signature_height || 240)
+  if (!Number.isInteger(width) || !Number.isInteger(height) || width < 1 || height < 1 || width > 2000 || height > 1200) {
+    throw dutyEvidenceError(400, "Kích thước chữ ký không hợp lệ.")
+  }
+  return { svg: raw, width, height }
+}
+
+function signatureMethod({ signature, photo, admin = false }) {
+  if (admin) return "admin_override"
+  if (signature) return "hand_signature"
+  if (photo) return "legacy_photo"
+  return "legacy_unknown"
+}
+
 /*
 PUBLIC: landing stats (no auth)
 */
@@ -2077,6 +2103,10 @@ function aggregateSessions(whereSql, params, cb) {
         s.created_at,
         s.signed_at,
         ds.photo_path as signature_photo_path,
+        ds.signature_svg,
+        ds.signature_width,
+        ds.signature_height,
+        COALESCE(ds.confirmation_method, CASE WHEN ds.photo_path IS NOT NULL THEN 'legacy_photo' WHEN EXISTS (SELECT 1 FROM duty_revision_logs log WHERE log.session_id = s.id AND log.action = 'sign:admin') THEN 'admin_override' ELSE 'legacy_unknown' END) as confirmation_method,
         ${effectiveViolationScoreSql("v", "r")} as violation_score,
         COALESCE(MAX(b.points), 0) as bonus_points,
         ${effectiveViolationScoreSql("v", "r")} + COALESCE(MAX(b.points), 0) as total_score
@@ -2100,7 +2130,11 @@ function aggregateSessions(whereSql, params, cb) {
         s.status,
         s.created_at,
         s.signed_at,
-        ds.photo_path
+        ds.photo_path,
+        ds.signature_svg,
+        ds.signature_width,
+        ds.signature_height,
+        ds.confirmation_method
       ORDER BY s.date DESC, s.id DESC
     `,
     params,
@@ -2142,6 +2176,10 @@ router.get(
         b.min_score as bonus_min_score,
         b.source as bonus_source,
         ds.photo_path as signature_photo_path,
+        ds.signature_svg,
+        ds.signature_width,
+        ds.signature_height,
+        COALESCE(ds.confirmation_method, CASE WHEN ds.photo_path IS NOT NULL THEN 'legacy_photo' WHEN EXISTS (SELECT 1 FROM duty_revision_logs log WHERE log.session_id = s.id AND log.action = 'sign:admin') THEN 'admin_override' ELSE 'legacy_unknown' END) as confirmation_method,
         ds.signed_at as signature_signed_at
       FROM duty_sessions s
       LEFT JOIN daily_bonus b
@@ -2447,6 +2485,10 @@ router.get(
           b.source as bonus_source,
           b.periods_json as bonus_periods_json,
           ds.photo_path as signature_photo_path,
+          ds.signature_svg,
+          ds.signature_width,
+          ds.signature_height,
+          COALESCE(ds.confirmation_method, CASE WHEN ds.photo_path IS NOT NULL THEN 'legacy_photo' WHEN EXISTS (SELECT 1 FROM duty_revision_logs log WHERE log.session_id = s.id AND log.action = 'sign:admin') THEN 'admin_override' ELSE 'legacy_unknown' END) as confirmation_method,
           ds.signed_at as signature_signed_at
         FROM duty_sessions s
         JOIN schedule_assignments a
@@ -3137,20 +3179,29 @@ router.post(
           if (closedErr) return res.status(500).json({ error: closedErr.message })
           if (closed) return res.status(403).json({ error: "Week closed" })
 
+          let signature
+          try {
+            signature = parseSignatureInput(req)
+          } catch (error) {
+            return res.status(error.status || 400).json({ error: error.message })
+          }
+
           const proceedWithSignature = () => {
                 const photoPath = req.file ? `/assets/duty-signatures/${req.file.filename}` : null
+                const method = signatureMethod({ signature, photo: req.file })
 
                 db.run(
                   `
                     INSERT INTO duty_signatures
-                    (session_id,photo_path,signed_at)
-                    VALUES(?,?,?)
+                    (session_id,photo_path,signature_svg,signature_width,signature_height,confirmation_method,signed_at)
+                    VALUES(?,?,?,?,?,?,?)
                   `,
-                  [session_id, photoPath, time.now()],
-                  (signatureErr) => {
+                  [session_id, photoPath, signature?.svg || null, signature?.width || null, signature?.height || null, method, time.now()],
+                  function onSignatureInserted(signatureErr) {
                     if (signatureErr) {
                       return res.status(500).json({ error: signatureErr.message })
                     }
+                    const signatureId = this.lastID || null
 
                     computeViolationHash(session_id, (hashErr, hash) => {
                       if (hashErr) return res.status(500).json({ error: hashErr.message })
@@ -3175,9 +3226,9 @@ router.post(
                               (session_id,action,created_at,actor_id,actor_role,metadata)
                               VALUES(?,?,?,?,?,?::jsonb)
                             `,
-                            [session_id, "sign", time.now(), req.session.user?.class_id || null, req.session.user?.role || null, JSON.stringify({ actor_name: req.session.user?.class_name || null, violation_score: Number(session.violation_score || 0), bonus_points: Number(session.bonus_points || 0), total_points: Number(session.violation_score || 0) + Number(session.bonus_points || 0) })],
+                            [session_id, "sign", time.now(), req.session.user?.class_id || null, req.session.user?.role || null, JSON.stringify({ actor_name: req.session.user?.class_name || null, confirmation_method: method, signature_format: signature ? "svg" : (req.file ? "legacy_photo" : null), signature_id: signatureId, violation_score: Number(session.violation_score || 0), bonus_points: Number(session.bonus_points || 0), total_points: Number(session.violation_score || 0) + Number(session.bonus_points || 0) })],
                             () => {
-                              res.json({ success: true, photo_path: photoPath })
+                              res.json({ success: true, signature_id: signatureId, photo_path: photoPath, signature_svg: signature?.svg || null, signature_width: signature?.width || null, signature_height: signature?.height || null, confirmation_method: method, signed_at: time.now() })
                             },
                           )
                         },
@@ -3241,6 +3292,10 @@ router.get(
           b.source as bonus_source,
           b.periods_json as bonus_periods_json,
           ds.photo_path as signature_photo_path,
+          ds.signature_svg,
+          ds.signature_width,
+          ds.signature_height,
+          COALESCE(ds.confirmation_method, CASE WHEN ds.photo_path IS NOT NULL THEN 'legacy_photo' WHEN EXISTS (SELECT 1 FROM duty_revision_logs log WHERE log.session_id = s.id AND log.action = 'sign:admin') THEN 'admin_override' ELSE 'legacy_unknown' END) as confirmation_method,
           ds.signed_at as signature_signed_at
         FROM duty_sessions s
         JOIN schedule_weeks w
@@ -3287,7 +3342,9 @@ router.get(
 
                 db.all(
                   `
-                    SELECT id, photo_path, signed_at
+                    SELECT id, photo_path, signature_svg, signature_width, signature_height,
+                           COALESCE(confirmation_method, CASE WHEN photo_path IS NOT NULL THEN 'legacy_photo' WHEN EXISTS (SELECT 1 FROM duty_revision_logs log WHERE log.session_id = duty_signatures.session_id AND log.action = 'sign:admin') THEN 'admin_override' ELSE 'legacy_unknown' END) as confirmation_method,
+                           signed_at
                     FROM duty_signatures
                     WHERE session_id=?
                     ORDER BY id DESC
@@ -3622,10 +3679,10 @@ router.post(
                   db.run(
                     `
                       INSERT INTO duty_signatures
-                      (session_id,photo_path,signed_at)
-                      VALUES(?,?,?)
+                      (session_id,photo_path,confirmation_method,signed_at)
+                      VALUES(?,?,?,?)
                     `,
-                    [sessionId, null, now],
+                    [sessionId, null, "admin_override", now],
                     (err5) => {
                       if (err5) return res.status(500).json({ error: err5.message })
 
@@ -3650,7 +3707,7 @@ router.post(
                                 (session_id,action,created_at,actor_id,actor_role,metadata)
                                 VALUES(?,?,?,?,?,?::jsonb)
                               `,
-                              [sessionId, "sign:admin", now, req.session.user?.class_id || null, req.session.user?.role || null, JSON.stringify({ actor_name: req.session.user?.username || null, violation_score: Number(session.violation_score || 0), bonus_points: Number(session.bonus_points || 0), total_points: Number(session.violation_score || 0) + Number(session.bonus_points || 0) })],
+                              [sessionId, "sign:admin", now, req.session.user?.class_id || null, req.session.user?.role || null, JSON.stringify({ actor_name: req.session.user?.username || null, confirmation_method: "admin_override", signature_format: null, violation_score: Number(session.violation_score || 0), bonus_points: Number(session.bonus_points || 0), total_points: Number(session.violation_score || 0) + Number(session.bonus_points || 0) })],
                               (revisionErr) => {
                                 if (revisionErr) return res.status(500).json({ error: revisionErr.message })
                                 res.json({ success: true })
@@ -5273,6 +5330,10 @@ router.get(
           b.min_score as bonus_min_score,
           b.source as bonus_source,
           ds.photo_path as signature_photo_path,
+          ds.signature_svg,
+          ds.signature_width,
+          ds.signature_height,
+          COALESCE(ds.confirmation_method, CASE WHEN ds.photo_path IS NOT NULL THEN 'legacy_photo' WHEN EXISTS (SELECT 1 FROM duty_revision_logs log WHERE log.session_id = s.id AND log.action = 'sign:admin') THEN 'admin_override' ELSE 'legacy_unknown' END) as confirmation_method,
           ds.signed_at as signature_signed_at
         FROM duty_sessions s
         LEFT JOIN daily_bonus b
@@ -5443,6 +5504,10 @@ router.get(
           b.min_score as bonus_min_score,
           b.source as bonus_source,
           ds.photo_path as signature_photo_path,
+          ds.signature_svg,
+          ds.signature_width,
+          ds.signature_height,
+          COALESCE(ds.confirmation_method, CASE WHEN ds.photo_path IS NOT NULL THEN 'legacy_photo' WHEN EXISTS (SELECT 1 FROM duty_revision_logs log WHERE log.session_id = s.id AND log.action = 'sign:admin') THEN 'admin_override' ELSE 'legacy_unknown' END) as confirmation_method,
           ds.signed_at as signature_signed_at
         FROM duty_sessions s
         JOIN schedule_weeks w

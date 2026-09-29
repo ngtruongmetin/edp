@@ -32,6 +32,10 @@ type ServerSession = {
   signed_at?: string | null
   signature_signed_at?: string | null
   signature_photo_path?: string | null
+  signature_svg?: string | null
+  signature_width?: number | null
+  signature_height?: number | null
+  confirmation_method?: string | null
   bonus_points?: number
 }
 
@@ -293,7 +297,7 @@ export class OfflineDutyRepository {
       item.clientId === local.clientId && item.kind === "sign",
     ))
     const offlineEnabled = await this.isOfflineEnabled()
-    let clientId = local?.clientId || String(raw.client_id || "") || crypto.randomUUID()
+    const clientId = local?.clientId || String(raw.client_id || "") || crypto.randomUUID()
     if (offlineEnabled && !raw.client_id) {
       await api.post("/duty/offline/sessions/claim", { session_id: raw.id, client_id: clientId })
     }
@@ -330,6 +334,8 @@ export class OfflineDutyRepository {
       signedAt: hasPendingSignature ? local?.signedAt || null : raw.signed_at || null,
       signatureSignedAt: hasPendingSignature ? local?.signatureSignedAt || null : raw.signature_signed_at || null,
       signaturePhotoPath: raw.signature_photo_path || local?.signaturePhotoPath || null,
+      signatureSvg: raw.signature_svg || local?.signatureSvg || null,
+      confirmationMethod: (raw.confirmation_method as OfflineDutySession["confirmationMethod"]) || local?.confirmationMethod || null,
       bonusPoints: Number(raw.bonus_points || 0),
       violations,
     }
@@ -506,32 +512,19 @@ export class OfflineDutyRepository {
     await dutyStorage.deleteAttachment(attachment.id)
   }
 
-  async queueSignature(session: OfflineDutySession, photo: File | null) {
+  async queueSignature(session: OfflineDutySession, signatureSvg: string) {
     if (!(await this.isOfflineEnabled())) {
       const form = new FormData()
       form.append("session_id", String(session.serverId || session.localId))
       form.append("pin", "")
-      if (photo) form.append("photo", photo, photo.name)
       throw new Error("ONLINE_SIGNATURE_REQUIRES_PIN")
     }
-    const attachmentIds: string[] = []
-    if (photo) {
-      const attachment: DutyOfflineAttachment = {
-        id: crypto.randomUUID(),
-        clientId: session.clientId,
-        ownerClass: this.ownerClass,
-        kind: "signature",
-        blob: photo,
-        fileName: photo.name || `chu-ky-${Date.now()}.jpg`,
-        mimeType: photo.type,
-        byteSize: photo.size,
-        createdAt: nowIso(),
-      }
-      await dutyStorage.putAttachment(attachment)
-      attachmentIds.push(attachment.id)
-    }
-    await dutyStorage.putOperation(operation(this.ownerClass, session.clientId, "sign", {}, attachmentIds))
-    const next = { ...session, status: "signed" as const, signedAt: nowIso(), signatureSignedAt: nowIso(), signaturePhotoPath: null, updatedAt: nowIso() }
+    await dutyStorage.putOperation(operation(this.ownerClass, session.clientId, "sign", {
+      signature_svg: signatureSvg,
+      signature_width: 600,
+      signature_height: 240,
+    }))
+    const next = { ...session, status: "signed" as const, signedAt: nowIso(), signatureSignedAt: nowIso(), signaturePhotoPath: null, signatureSvg, confirmationMethod: "hand_signature" as const, updatedAt: nowIso() }
     await dutyStorage.putSession(next)
     return next
   }

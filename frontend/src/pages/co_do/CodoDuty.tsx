@@ -6,6 +6,7 @@ import Navbar from "../../components/Navbar"
 import Footer from "../../components/Footer"
 import RuleSelector, { type RuleType } from "../../components/RuleSelector"
 import CodoDutySignSheet from "../../components/CodoDutySignSheet"
+import SignatureDisplay from "../../components/SignatureDisplay"
 import DutyEvidencePanel from "../../components/DutyEvidencePanel"
 
 import toast from "react-hot-toast"
@@ -198,6 +199,8 @@ export default function CodoDuty() {
       signed_at: value.signedAt,
       signature_signed_at: value.signatureSignedAt,
       signature_photo_path: value.signaturePhotoPath,
+      signature_svg: value.signatureSvg,
+      confirmation_method: value.confirmationMethod,
     }
   }
 
@@ -678,14 +681,14 @@ export default function CodoDuty() {
                 <div className="text-xs text-gray-500">
                   Đã ký xác nhận lúc {session?.signed_at || "--"}
                 </div>
-                {session?.signature_photo_path ? (
+                {session?.signature_svg ? (
                   <div className="overflow-hidden rounded-2xl ring-1 ring-blue-100">
-                    <img
-                      src={session.signature_photo_path}
-                      alt="signature"
-                      className="w-full"
-                    />
+                    <SignatureDisplay svg={session.signature_svg} />
                   </div>
+                ) : session?.confirmation_method === "admin_override" ? (
+                  <div className="text-xs text-gray-500">Admin override</div>
+                ) : session?.confirmation_method === "legacy_photo" ? (
+                  <div className="text-xs text-gray-500">Đã xác nhận bằng ảnh cũ</div>
                 ) : null}
               </div>
             )}

@@ -36,6 +36,25 @@ const imageUpload = multer({
   },
 })
 
+const SIGNATURE_MAX_LENGTH = 120000
+
+function parseSignatureInput(req) {
+  const raw = String(req.body?.signature_svg || "").trim()
+  if (!raw) return null
+  if (raw.length > SIGNATURE_MAX_LENGTH || /<\s*(script|foreignObject|iframe|object|image)\b/i.test(raw) || /\bon[a-z]+\s*=|javascript\s*:/i.test(raw)) {
+    throw httpError(400, "Chữ ký không hợp lệ.")
+  }
+  if (!/<svg\b/i.test(raw) || !/<path\b/i.test(raw) || !/\bd\s*=\s*[\"'][^\"']+/i.test(raw)) {
+    throw httpError(400, "Chữ ký không hợp lệ.")
+  }
+  const width = Number(req.body?.signature_width || 600)
+  const height = Number(req.body?.signature_height || 240)
+  if (!Number.isInteger(width) || !Number.isInteger(height) || width < 1 || height < 1 || width > 2000 || height > 1200) {
+    throw httpError(400, "Kích thước chữ ký không hợp lệ.")
+  }
+  return { svg: raw, width, height }
+}
+
 router.use(requireLogin, requireRole(["co_do"]))
 router.use(async (req, res, next) => {
   try {
@@ -670,6 +689,7 @@ router.post(
 
     let written = null
     try {
+      const signature = parseSignatureInput(req)
       if (req.file) written = await writeDutyImage(DUTY_SIGNATURE_DIRECTORY, "duty", req.file)
       const response = await transaction(async (client) => {
         const completed = await findCompletedOperation(client, operationId, clientId, "sign")
@@ -688,17 +708,18 @@ router.post(
         const bonusPoints = Number(scoreResult.rows[0]?.bonus_points || 0)
         const signedAt = time.now()
         const photoPath = written ? `/assets/duty-signatures/${written.fileName}` : null
+        const confirmationMethod = signature ? "hand_signature" : written ? "legacy_photo" : "legacy_unknown"
         const signatureResult = await client.query(
-          `INSERT INTO duty_signatures (session_id, photo_path, signed_at) VALUES ($1, $2, $3) RETURNING id`,
-          [session.id, photoPath, signedAt],
+          `INSERT INTO duty_signatures (session_id, photo_path, signature_svg, signature_width, signature_height, confirmation_method, signed_at) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id`,
+          [session.id, photoPath, signature?.svg || null, signature?.width || null, signature?.height || null, confirmationMethod, signedAt],
         )
         const hash = await computeViolationHash(client, session.id)
         await client.query(
           `UPDATE duty_sessions SET status = 'signed', signed_at = $1, signed_snapshot_hash = $2 WHERE id = $3`,
           [signedAt, hash, session.id],
         )
-        await markEdited(client, session, "offline:sign", req.session.user, { violation_score: violationScore, bonus_points: bonusPoints, total_points: violationScore + bonusPoints, operation_id: operationId })
-        const result = { success: true, signature_id: signatureResult.rows[0].id, photo_path: photoPath, signed_at: signedAt }
+        await markEdited(client, session, "offline:sign", req.session.user, { violation_score: violationScore, bonus_points: bonusPoints, total_points: violationScore + bonusPoints, operation_id: operationId, confirmation_method: confirmationMethod, signature_format: signature ? "svg" : (written ? "legacy_photo" : null), signature_id: signatureResult.rows[0].id })
+        const result = { success: true, signature_id: signatureResult.rows[0].id, photo_path: photoPath, signature_svg: signature?.svg || null, signature_width: signature?.width || null, signature_height: signature?.height || null, confirmation_method: confirmationMethod, signed_at: signedAt }
         await completeOperation(client, operationId, clientId, "sign", result)
         return result
       })
