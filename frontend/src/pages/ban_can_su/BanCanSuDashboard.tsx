@@ -182,17 +182,17 @@ export default function BanCanSuDashboard() {
       setPeriodTree(tree)
       setWeeks(list)
 
-      const now = new Date()
-      const current = list.find((w) => {
-        const start = new Date((w.start_datetime || `${w.start_date}T00:00:00`).replace(" ", "T"))
-        const end = new Date((w.end_datetime || `${w.end_date}T23:59:59`).replace(" ", "T"))
-        return start <= now && now <= end
-      })
-      const defaultWeekId = current?.id ?? list[0]?.id ?? null
+      const latest = [...list].sort((a, b) => {
+        const dateDiff = new Date(b.start_date).getTime() - new Date(a.start_date).getTime()
+        return dateDiff || Number(b.week_number) - Number(a.week_number) || Number(b.id) - Number(a.id)
+      })[0]
+      const defaultWeekId = latest?.id ?? null
       const defaultWeek = list.find((item) => item.id === defaultWeekId) || null
-      const firstSemester = tree.semesters?.[0] || null
-      setSemesterKey(defaultWeek?.semester_key || firstSemester?.semester_key || "")
-      setMonthKey(defaultWeek?.month_key || "")
+      const latestSemester = [...(tree.semesters || [])].sort((a, b) => b.semester_number - a.semester_number || b.id - a.id)[0]
+      setSemesterKey(defaultWeek?.semester_key || latestSemester?.semester_key || "")
+      const selectedSemester = tree.semesters?.find((item) => item.semester_key === (defaultWeek?.semester_key || latestSemester?.semester_key))
+      const latestMonth = [...(selectedSemester?.months || [])].sort((a, b) => b.month_number - a.month_number || b.id - a.id)[0]
+      setMonthKey(defaultWeek?.month_key || latestMonth?.month_key || "")
       setWeekId(defaultWeekId)
     } catch (err: any) {
       console.error(err)
