@@ -37,6 +37,7 @@ import GvcnDashboard from "./pages/gvcn/GvcnDashboard"
 import { useAuth } from "./auth/AuthContext"
 import { Toaster } from "react-hot-toast"
 import PasskeyEnrollmentBanner from "./components/PasskeyEnrollmentBanner"
+import InstallPrompt from "./components/InstallPrompt"
 
 export default function App(){
   const { user, loading } = useAuth()
@@ -118,6 +119,7 @@ export default function App(){
       </Routes>
 
       {user && <PasskeyEnrollmentBanner />}
+      <InstallPrompt />
 
     </BrowserRouter>
 
