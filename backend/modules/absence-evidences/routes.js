@@ -125,7 +125,13 @@ async function getEvidence(id) {
         classes.name AS class_name,
         weeks.week_number,
         weeks.start_date AS week_start_date,
-        weeks.end_date AS week_end_date
+        weeks.end_date AS week_end_date,
+        (
+          SELECT ticket.id
+          FROM support_tickets ticket
+          WHERE ticket.linked_absence_evidence_id = evidence.id
+          LIMIT 1
+        ) AS support_ticket_id
       FROM absence_evidences evidence
       JOIN classes ON classes.id = evidence.class_id
       JOIN schedule_weeks weeks ON weeks.id = evidence.week_id
@@ -446,6 +452,7 @@ router.delete(
 
     try {
       const client = await pool.connect()
+      let committed = false
       try {
         await client.query("BEGIN")
         const evidenceResult = await client.query(
@@ -589,6 +596,100 @@ router.get(
 )
 
 router.post(
+  "/admin/:id/support-message",
+  requireLogin,
+  requireRole(["admin"]),
+  async (req, res) => {
+    const id = Number(req.params.id)
+    const body = String(req.body?.body || "").trim()
+    if (!Number.isInteger(id) || id < 1) return res.status(400).json({ error: "Mã minh chứng không hợp lệ." })
+    if (!body || body.length > 5000) {
+      return res.status(400).json({ error: "Nội dung phản hồi phải có từ 1 đến 5000 ký tự." })
+    }
+
+    try {
+      const client = await pool.connect()
+      let ticketId
+      try {
+        await client.query("BEGIN")
+        const evidenceResult = await client.query(
+          `
+            SELECT evidence.*, classes.name AS class_name
+            FROM absence_evidences evidence
+            JOIN classes ON classes.id = evidence.class_id
+            WHERE evidence.id = $1
+            FOR UPDATE
+          `,
+          [id],
+        )
+        const evidence = evidenceResult.rows[0]
+        if (!evidence) {
+          const error = new Error("Không tìm thấy minh chứng.")
+          error.status = 404
+          throw error
+        }
+        if (evidence.status !== "pending") {
+          const error = new Error("Chỉ có thể phản hồi minh chứng đang chờ duyệt.")
+          error.status = 409
+          throw error
+        }
+
+        const existingTicket = await client.query(
+          `SELECT id FROM support_tickets WHERE linked_absence_evidence_id = $1 FOR UPDATE`,
+          [id],
+        )
+        if (existingTicket.rows[0]) {
+          ticketId = existingTicket.rows[0].id
+        } else {
+          const now = new Date().toISOString()
+          const createdTicket = await client.query(
+            `
+              INSERT INTO support_tickets
+              (creator_role, creator_class_id, title, request_type, status, linked_absence_evidence_id, created_at, updated_at)
+              VALUES ('gvcn', $1, $2, 'absence_evidence', 'in_progress', $3, $4, $4)
+              RETURNING id
+            `,
+            [evidence.class_id, `Minh chứng nghỉ học: ${evidence.student_name}`, id, now],
+          )
+          ticketId = createdTicket.rows[0].id
+        }
+
+        const now = new Date().toISOString()
+        const messageResult = await client.query(
+          `
+            INSERT INTO support_messages (ticket_id, sender_role, sender_class_id, body, created_at)
+            VALUES ($1, 'admin', NULL, $2, $3)
+            RETURNING id
+          `,
+          [ticketId, body, now],
+        )
+        await client.query(`UPDATE support_tickets SET updated_at = $1 WHERE id = $2`, [now, ticketId])
+        await client.query(
+          `
+            INSERT INTO support_notifications
+            (ticket_id, message_id, recipient_role, recipient_class_id, is_read, created_at)
+            VALUES ($1, $2, 'gvcn', $3, 0, $4)
+          `,
+          [ticketId, messageResult.rows[0].id, evidence.class_id, now],
+        )
+        await client.query("COMMIT")
+      } catch (error) {
+        await client.query("ROLLBACK")
+        throw error
+      } finally {
+        client.release()
+      }
+
+      const updatedEvidence = await getEvidence(id)
+      res.status(201).json({ evidence: await presentEvidence(updatedEvidence, true), ticket_id: ticketId })
+    } catch (error) {
+      console.error("[absence-evidences/admin/support-message]", error)
+      res.status(error.status || 500).json({ error: error.message || "Không thể gửi phản hồi cho GVCN." })
+    }
+  },
+)
+
+router.post(
   "/admin/:id/review",
   requireLogin,
   requireRole(["admin"]),
@@ -599,7 +700,7 @@ router.post(
     const requestedApprovalDates = Array.isArray(req.body?.approved_dates)
       ? [...new Set(req.body.approved_dates.map((date) => String(date || "")))]
       : null
-    if (!Number.isInteger(id) || id < 1 || !["approved", "rejected"].includes(action)) {
+    if (!Number.isInteger(id) || id < 1 || !["pending", "approved", "rejected"].includes(action)) {
       return res.status(400).json({ error: "Yêu cầu duyệt minh chứng không hợp lệ." })
     }
     if (action === "rejected" && !reviewReason) {
@@ -634,6 +735,31 @@ router.post(
           error.status = 404
           throw error
         }
+        if (action === "pending") {
+          if (evidence.status !== "rejected") {
+            const error = new Error("Chỉ có thể duyệt lại minh chứng đã bị từ chối.")
+            error.status = 409
+            throw error
+          }
+
+          await client.query(
+            `
+              UPDATE absence_evidences
+              SET status = 'pending',
+                  reviewed_by = NULL,
+                  reviewed_at = NULL,
+                  review_reason = NULL,
+                  approved_exemption_count = 0
+              WHERE id = $1
+            `,
+            [id],
+          )
+          await client.query("COMMIT")
+          committed = true
+          const updatedEvidence = await getEvidence(id)
+          return res.json({ evidence: await presentEvidence(updatedEvidence, true) })
+        }
+
         if (evidence.status !== "pending") {
           const error = new Error("Minh chứng này đã được xử lý.")
           error.status = 409
@@ -738,8 +864,9 @@ router.post(
           )
         }
         await client.query("COMMIT")
+        committed = true
       } catch (error) {
-        await client.query("ROLLBACK")
+        if (!committed) await client.query("ROLLBACK")
         throw error
       } finally {
         client.release()

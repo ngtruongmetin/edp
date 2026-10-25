@@ -9,7 +9,8 @@ const requireRole = require("../../middleware/requireRole")
 
 const router = express.Router()
 const USER_ROLES = ["gvcn", "ban_can_su", "co_do"]
-const REQUEST_TYPES = ["duty_complaint", "system_bug", "suggestion", "usage_support", "other"]
+const REQUEST_TYPES = ["duty_complaint", "system_bug", "suggestion", "usage_support", "other", "absence_evidence"]
+const USER_REQUEST_TYPES = ["duty_complaint", "system_bug", "suggestion", "usage_support", "other"]
 const TICKET_STATUSES = ["in_progress", "resolved"]
 const MAX_FILES = 5
 const MAX_FILE_BYTES = 8 * 1024 * 1024
@@ -358,7 +359,7 @@ router.post("/", requireLogin, requireRole(USER_ROLES), async (req, res) => {
     const requestType = String(req.body?.request_type || "").trim()
     const body = String(req.body?.body || "").trim()
     if (!title || title.length > 200) throw httpError(400, "Tiêu đề phải có từ 1 đến 200 ký tự.")
-    if (!REQUEST_TYPES.includes(requestType)) throw httpError(400, "Loại yêu cầu không hợp lệ.")
+    if (!USER_REQUEST_TYPES.includes(requestType)) throw httpError(400, "Loại yêu cầu không hợp lệ.")
     if (!body || body.length > 5000) throw httpError(400, "Nội dung phải có từ 1 đến 5000 ký tự.")
 
     const weekId = req.body?.linked_week_id ? parseId(req.body.linked_week_id, "Tuần") : null

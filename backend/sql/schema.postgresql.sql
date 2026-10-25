@@ -554,6 +554,21 @@ UPDATE support_tickets
 SET status = CASE WHEN status IN ('new', 'in_progress') THEN 'in_progress' ELSE 'resolved' END;
 ALTER TABLE support_tickets ALTER COLUMN status SET DEFAULT 'in_progress';
 ALTER TABLE support_tickets ADD CONSTRAINT chk_support_ticket_status CHECK (status IN ('in_progress', 'resolved'));
+ALTER TABLE support_tickets ADD COLUMN IF NOT EXISTS linked_absence_evidence_id INTEGER;
+ALTER TABLE support_tickets DROP CONSTRAINT IF EXISTS support_tickets_request_type_check;
+ALTER TABLE support_tickets ADD CONSTRAINT support_tickets_request_type_check
+  CHECK (request_type IN ('duty_complaint', 'system_bug', 'suggestion', 'usage_support', 'other', 'absence_evidence'));
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint WHERE conname = 'fk_support_tickets_absence_evidence'
+  ) THEN
+    ALTER TABLE support_tickets
+    ADD CONSTRAINT fk_support_tickets_absence_evidence
+    FOREIGN KEY (linked_absence_evidence_id) REFERENCES absence_evidences(id) ON DELETE SET NULL;
+  END IF;
+END $$;
 
 DO $$
 BEGIN
@@ -610,6 +625,9 @@ CREATE INDEX IF NOT EXISTS idx_absence_exemption_logs_evidence ON absence_exempt
 CREATE INDEX IF NOT EXISTS idx_timetable_entries ON timetable_entries(timetable_id, class_name, day_of_week, session, period);
 CREATE INDEX IF NOT EXISTS idx_support_tickets_creator ON support_tickets(creator_role, creator_class_id, updated_at DESC);
 CREATE INDEX IF NOT EXISTS idx_support_tickets_admin_list ON support_tickets(status, updated_at DESC);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_support_tickets_absence_evidence
+  ON support_tickets(linked_absence_evidence_id)
+  WHERE linked_absence_evidence_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_support_messages_ticket ON support_messages(ticket_id, created_at, id);
 CREATE INDEX IF NOT EXISTS idx_support_attachments_message ON support_attachments(message_id, sort_order);
 CREATE INDEX IF NOT EXISTS idx_support_notifications_recipient ON support_notifications(recipient_role, recipient_class_id, is_read, created_at DESC);

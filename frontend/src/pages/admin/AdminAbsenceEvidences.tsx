@@ -32,6 +32,7 @@ type Evidence = {
   note?: string | null
   status: "pending" | "approved" | "rejected"
   approved_exemption_count: number
+  support_ticket_id?: number | null
   files?: EvidenceFile[]
   comparison?: Array<{
     date: string
@@ -83,6 +84,9 @@ export default function AdminAbsenceEvidences() {
   const [previewIndex, setPreviewIndex] = useState<number | null>(null)
   const [deleteTarget, setDeleteTarget] = useState<Evidence | null>(null)
   const [deleting, setDeleting] = useState(false)
+  const [showSupportMessageModal, setShowSupportMessageModal] = useState(false)
+  const [supportMessage, setSupportMessage] = useState("")
+  const [sendingSupportMessage, setSendingSupportMessage] = useState(false)
 
   useEffect(() => {
     let active = true
@@ -142,7 +146,7 @@ export default function AdminAbsenceEvidences() {
     }
   }
 
-  async function review(action: "approved" | "rejected", reason = "") {
+  async function review(action: "pending" | "approved" | "rejected", reason = "") {
     if (!selected) return
     if (action === "approved" && approvedDates.length === 0) {
       toast.error("Chọn ít nhất một ngày có lỗi để miễn trừ.")
@@ -156,13 +160,13 @@ export default function AdminAbsenceEvidences() {
       setReviewing(true)
       const response = await api.post<{ evidence: Evidence }>(`/absence-evidences/admin/${selected.id}/review`, action === "approved"
         ? { action, approved_dates: approvedDates }
-        : { action, review_reason: reason.trim() })
+        : action === "rejected" ? { action, review_reason: reason.trim() } : { action })
       setSelected(response.data.evidence)
       setEvidences((current) => current.map((item) => item.id === selected.id ? response.data.evidence : item))
       setApprovedDates([])
       setShowRejectModal(false)
       setRejectionReason("")
-      toast.success(action === "approved" ? "Đã chấp nhận minh chứng." : "Đã từ chối minh chứng.")
+      toast.success(action === "approved" ? "Đã chấp nhận minh chứng." : action === "rejected" ? "Đã từ chối minh chứng." : "Đã chuyển minh chứng về trạng thái chờ duyệt.")
     } catch (error) {
       toast.error(getApiErrorMessage(error, "Không thể xử lý minh chứng."))
     } finally {
@@ -188,6 +192,25 @@ export default function AdminAbsenceEvidences() {
       toast.error(getApiErrorMessage(error, "Không thể xóa minh chứng."))
     } finally {
       setDeleting(false)
+    }
+  }
+
+  async function sendSupportMessage() {
+    if (!selected || !supportMessage.trim()) return
+    try {
+      setSendingSupportMessage(true)
+      const response = await api.post<{ evidence: Evidence }>(`/absence-evidences/admin/${selected.id}/support-message`, {
+        body: supportMessage.trim(),
+      })
+      setSelected(response.data.evidence)
+      setEvidences((current) => current.map((item) => item.id === selected.id ? { ...item, ...response.data.evidence } : item))
+      setSupportMessage("")
+      setShowSupportMessageModal(false)
+      toast.success("Đã gửi phản hồi cho GVCN qua Trung tâm hỗ trợ.")
+    } catch (error) {
+      toast.error(getApiErrorMessage(error, "Không thể gửi phản hồi cho GVCN."))
+    } finally {
+      setSendingSupportMessage(false)
     }
   }
 
@@ -293,6 +316,33 @@ export default function AdminAbsenceEvidences() {
                 </section>
               )}
 
+              {selected.status === "rejected" && (
+                <div className="mt-5 flex justify-end">
+                  <button
+                    type="button"
+                    disabled={reviewing || deleting}
+                    onClick={() => void review("pending")}
+                    className="min-h-11 rounded-2xl bg-[#2e77df] px-4 text-sm font-semibold text-white shadow-[0_12px_24px_rgba(46,119,223,0.22)] disabled:opacity-60"
+                  >
+                    {reviewing ? "Đang xử lý..." : "Duyệt lại"}
+                  </button>
+                </div>
+              )}
+
+              {selected.status === "pending" && (
+                <div className="mt-5 flex flex-wrap items-center justify-end gap-3">
+                  {selected.support_ticket_id && <span className="text-xs font-medium text-slate-500">Đã có luồng trao đổi hỗ trợ.</span>}
+                  <button
+                    type="button"
+                    disabled={reviewing || deleting}
+                    onClick={() => { setSupportMessage(""); setShowSupportMessageModal(true) }}
+                    className="min-h-11 rounded-2xl border border-[#2e77df]/30 bg-blue-50 px-4 text-sm font-semibold text-[#2e77df] disabled:opacity-60"
+                  >
+                    Phản hồi GVCN
+                  </button>
+                </div>
+              )}
+
               {selected.note && <section className="mt-5"><h3 className="text-sm font-semibold text-slate-900">Ghi chú</h3><p className="mt-2 rounded-2xl bg-slate-50 p-4 text-sm leading-6 text-slate-600">{selected.note}</p></section>}
               <section className="mt-5"><h3 className="text-sm font-semibold text-slate-900">Tệp minh chứng</h3><div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-3">{selected.files?.map((file, index) => file.mime_type.startsWith("image/") ? <button key={file.id} type="button" onClick={() => setPreviewIndex(index)} className="overflow-hidden rounded-2xl border border-slate-200 text-left transition hover:border-blue-200 active:scale-[0.98]"><img src={file.url} alt={file.file_name} className="h-28 w-full object-cover" /><span className="block truncate px-2 py-2 text-xs font-medium text-slate-600">{file.file_name}</span></button> : <button key={file.id} type="button" onClick={() => setPreviewIndex(index)} className="flex min-h-28 items-center justify-center rounded-2xl border border-rose-100 bg-rose-50 px-3 text-center text-xs font-semibold text-rose-700 transition active:scale-[0.98]">Xem tệp PDF</button>)}</div></section>
               <section className="mt-6">
@@ -383,6 +433,29 @@ export default function AdminAbsenceEvidences() {
           <div className="mt-6 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
             <button type="button" disabled={reviewing} onClick={() => setShowRejectModal(false)} className="min-h-11 rounded-2xl border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-700 disabled:opacity-60">Hủy</button>
             <button type="button" disabled={reviewing || !rejectionReason.trim()} onClick={() => void review("rejected", rejectionReason)} className="min-h-11 rounded-2xl bg-rose-600 px-4 text-sm font-semibold text-white disabled:opacity-60">{reviewing ? "Đang lưu..." : "Từ chối"}</button>
+          </div>
+        </ModalShell>
+      )}
+
+      {showSupportMessageModal && selected && (
+        <ModalShell className="max-w-lg p-5 sm:p-6" onClose={sendingSupportMessage ? undefined : () => setShowSupportMessageModal(false)}>
+          <h2 className="pr-10 text-lg font-semibold text-slate-900">Phản hồi cho GVCN</h2>
+          <p className="mt-2 text-sm leading-6 text-slate-600">Tin nhắn sẽ được gửi đến Trung tâm hỗ trợ của GVCN lớp {selected.class_name}.</p>
+          <label className="mt-5 block text-sm font-semibold text-slate-800">
+            Nội dung phản hồi
+            <textarea
+              value={supportMessage}
+              onChange={(event) => setSupportMessage(event.target.value)}
+              rows={5}
+              maxLength={5000}
+              autoFocus
+              placeholder="Nhập nội dung phản hồi"
+              className="mt-2 w-full resize-y rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-[#2e77df] focus:ring-2 focus:ring-blue-100"
+            />
+          </label>
+          <div className="mt-6 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
+            <button type="button" disabled={sendingSupportMessage} onClick={() => setShowSupportMessageModal(false)} className="min-h-11 rounded-2xl border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-700 disabled:opacity-60">Hủy</button>
+            <button type="button" disabled={sendingSupportMessage || !supportMessage.trim()} onClick={() => void sendSupportMessage()} className="min-h-11 rounded-2xl bg-[#2e77df] px-4 text-sm font-semibold text-white disabled:opacity-60">{sendingSupportMessage ? "Đang gửi..." : "Gửi phản hồi"}</button>
           </div>
         </ModalShell>
       )}

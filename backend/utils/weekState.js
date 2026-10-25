@@ -36,7 +36,6 @@ function datePart(dateTime, fallback = null) {
 
 function statusForWeek(week, now = time.now()) {
   if (week?.status === WEEK_STATUSES.SUMMARIZED || week?.closed_at) return WEEK_STATUSES.SUMMARIZED
-  if (week?.status === WEEK_STATUSES.LIMITED_EDIT) return WEEK_STATUSES.LIMITED_EDIT
   const end = normalizeDateTime(week?.end_datetime, week?.end_date, "23:59:59")
   return end && String(now) >= end ? WEEK_STATUSES.LIMITED_EDIT : WEEK_STATUSES.NOT_SUMMARIZED
 }

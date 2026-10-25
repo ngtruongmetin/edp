@@ -4,6 +4,7 @@ import toast from "react-hot-toast"
 
 import { api } from "../api/api"
 import { useAuth } from "../auth/AuthContext"
+import AdminDutySessionModal from "../components/AdminDutySessionModal"
 import EvidenceFilePreviewModal, { type EvidencePreviewFile } from "../components/EvidenceFilePreviewModal"
 import Footer from "../components/Footer"
 import ModalShell from "../components/ModalShell"
@@ -13,7 +14,7 @@ import { getDashboardPath } from "../utils/authRoutes"
 import { usePageTitle } from "../utils/usePageTitle"
 
 type SupportRole = "admin" | "gvcn" | "ban_can_su" | "co_do"
-type RequestType = "duty_complaint" | "system_bug" | "suggestion" | "usage_support" | "other"
+type RequestType = "duty_complaint" | "system_bug" | "suggestion" | "usage_support" | "other" | "absence_evidence"
 type TicketStatus = "in_progress" | "resolved"
 
 type Attachment = EvidencePreviewFile & { id: number; sort_order: number }
@@ -59,6 +60,7 @@ const requestTypeLabels: Record<RequestType, string> = {
   suggestion: "Góp ý",
   usage_support: "Hỗ trợ sử dụng",
   other: "Khác",
+  absence_evidence: "Trao đổi minh chứng nghỉ học",
 }
 
 const statusLabels: Record<TicketStatus, string> = {
@@ -172,6 +174,7 @@ export default function SupportCenter() {
   const [loading, setLoading] = useState(true)
   const [createOpen, setCreateOpen] = useState(false)
   const [selected, setSelected] = useState<Ticket | null>(null)
+  const [dutySessionId, setDutySessionId] = useState<number | null>(null)
   const [loadingDetail, setLoadingDetail] = useState(false)
   const [previewFiles, setPreviewFiles] = useState<Attachment[] | null>(null)
   const [previewIndex, setPreviewIndex] = useState(0)
@@ -346,7 +349,12 @@ export default function SupportCenter() {
         setSelected(null)
         setLoadingDetail(false)
         window.dispatchEvent(new Event("support-notifications-read"))
-      }} onPreview={(files, index) => { setPreviewFiles(files); setPreviewIndex(index) }} />}
+      }} onPreview={(files, index) => { setPreviewFiles(files); setPreviewIndex(index) }} onViewDutySession={(id) => setDutySessionId(id)} />}
+
+      {dutySessionId !== null && <AdminDutySessionModal sessionId={dutySessionId} onClose={() => setDutySessionId(null)} onSessionChanged={async () => {
+        if (selected) await openTicket(selected.id)
+        await loadTickets()
+      }} />}
 
       {previewFiles && <EvidenceFilePreviewModal files={previewFiles} initialIndex={previewIndex} onClose={() => setPreviewFiles(null)} />}
     </div>
@@ -409,7 +417,7 @@ function CreateTicketModal({ weeks, isOffline, onClose, onCreated }: {
         <div className="pr-10"><h2 className="text-xl font-semibold text-slate-900">Tạo yêu cầu hỗ trợ</h2><p className="mt-1 text-sm text-slate-500">Thông tin sẽ được lưu thành một cuộc hội thoại với Quản trị viên.</p></div>
         <div className="mt-6 grid gap-4">
           <label className="text-sm font-semibold text-slate-700">Tiêu đề<input required maxLength={200} value={title} onChange={(event) => setTitle(event.target.value)} className="mt-2 min-h-11 w-full rounded-xl border border-slate-200 px-3 text-sm font-normal outline-none focus:border-[#2e77df] focus:ring-4 focus:ring-blue-100" /></label>
-          <label className="text-sm font-semibold text-slate-700">Loại yêu cầu<select value={requestType} onChange={(event) => setRequestType(event.target.value as RequestType)} className="mt-2 min-h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm font-normal outline-none focus:border-[#2e77df]">{Object.entries(requestTypeLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
+          <label className="text-sm font-semibold text-slate-700">Loại yêu cầu<select value={requestType} onChange={(event) => setRequestType(event.target.value as RequestType)} className="mt-2 min-h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm font-normal outline-none focus:border-[#2e77df]">{Object.entries(requestTypeLabels).filter(([value]) => value !== "absence_evidence").map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
           {requestType === "duty_complaint" && <div className="grid gap-4 sm:grid-cols-2">
             <label className="text-sm font-semibold text-slate-700">Tuần<select required value={weekId} onChange={(event) => setWeekId(event.target.value)} className="mt-2 min-h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm font-normal outline-none focus:border-[#2e77df]"><option value="">Chọn tuần</option>{weeks.map((week) => <option key={week.id} value={week.id}>Tuần {week.week_number} ({formatDate(week.start_date)} - {formatDate(week.end_date)})</option>)}</select></label>
             <label className="text-sm font-semibold text-slate-700">Phiếu trực<select required value={sessionId} onChange={(event) => setSessionId(event.target.value)} disabled={!weekId} className="mt-2 min-h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm font-normal outline-none focus:border-[#2e77df] disabled:bg-slate-50"><option value="">Chọn phiếu trực</option>{sessions.map((session) => <option key={session.id} value={session.id}>{formatDate(session.date)} - Cờ đỏ {session.red_class}, trực {session.duty_class}</option>)}</select></label>
@@ -425,7 +433,7 @@ function CreateTicketModal({ weeks, isOffline, onClose, onCreated }: {
   )
 }
 
-function TicketModal({ ticket, loading, currentRole, currentClassId, isOffline, onClose, onTicketUpdated, onDeleted, onPreview }: {
+function TicketModal({ ticket, loading, currentRole, currentClassId, isOffline, onClose, onTicketUpdated, onDeleted, onPreview, onViewDutySession }: {
   ticket: Ticket | null
   loading: boolean
   currentRole: SupportRole
@@ -435,6 +443,7 @@ function TicketModal({ ticket, loading, currentRole, currentClassId, isOffline, 
   onTicketUpdated: (ticket: Ticket) => void
   onDeleted: (ticketId: number) => void
   onPreview: (files: Attachment[], index: number) => void
+  onViewDutySession: (sessionId: number) => void
 }) {
   const [reply, setReply] = useState("")
   const [files, setFiles] = useState<PendingFile[]>([])
@@ -491,7 +500,7 @@ function TicketModal({ ticket, loading, currentRole, currentClassId, isOffline, 
         <header className="border-b border-slate-100 px-5 py-5 pr-16 sm:pl-7 sm:pr-20">
           <div className="min-w-0"><h2 className="text-xl font-semibold text-slate-900">{ticket.title}</h2><p className="mt-1 text-sm text-slate-500">{requestTypeLabels[ticket.request_type]} - tạo {formatDateTime(ticket.created_at)}</p></div>
           <div className="mt-3"><span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${statusClass(ticket.status)}`}>{statusLabels[ticket.status]}</span></div>
-          <div className="mt-4 flex flex-wrap gap-x-5 gap-y-2 text-sm text-slate-600"><span>Người gửi: {roleLabel(ticket.creator_role)} - lớp {ticket.creator_class_name}</span>{ticket.linked_duty_session_id && <span>Phiếu trực: Tuần {ticket.linked_week_number}, {ticket.linked_duty_date ? formatDate(ticket.linked_duty_date) : ""} - Cờ đỏ {ticket.linked_red_class}, trực {ticket.linked_duty_class}</span>}</div>
+          <div className="mt-4 flex flex-wrap items-center gap-x-5 gap-y-2 text-sm text-slate-600"><span>Người gửi: {roleLabel(ticket.creator_role)} - lớp {ticket.creator_class_name}</span>{ticket.linked_duty_session_id && <span>Phiếu trực: Tuần {ticket.linked_week_number}, {ticket.linked_duty_date ? formatDate(ticket.linked_duty_date) : ""} - Cờ đỏ {ticket.linked_red_class}, trực {ticket.linked_duty_class}</span>}{currentRole === "admin" && ticket.request_type === "duty_complaint" && ticket.linked_duty_session_id && <button type="button" onClick={() => onViewDutySession(Number(ticket.linked_duty_session_id))} className="min-h-9 rounded-xl border border-[#2e77df]/30 bg-blue-50 px-3 text-xs font-semibold text-[#2e77df] transition hover:bg-blue-100">Xem phiếu trực</button>}</div>
           <div className="mt-4">
             {confirmDelete ? (
               <div className="flex flex-col gap-3 rounded-xl border border-rose-200 bg-rose-50 p-3 sm:flex-row sm:items-center sm:justify-between">

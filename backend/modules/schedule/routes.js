@@ -11,6 +11,7 @@ const {
   WEEK_STATUSES,
   normalizeDateTime,
   datePart,
+  syncWeekStatus,
   syncAllWeekStatuses,
 } = require("../../utils/weekState")
 
@@ -576,7 +577,15 @@ router.post(
             [weekNumber, start, end, times.startDateTime, times.endDateTime, week_id],
           )
         }
-        res.json({ success: true })
+
+        const syncedWeek = await new Promise((resolve, reject) => {
+          syncWeekStatus(week_id, (syncError, week) => {
+            if (syncError) return reject(syncError)
+            resolve(week)
+          })
+        })
+
+        res.json({ success: true, status: syncedWeek?.status || WEEK_STATUSES.NOT_SUMMARIZED })
       } catch (err) {
         const out = mapDatabaseError(err, err.message)
         res.status(out.status).json({ error: out.error })
