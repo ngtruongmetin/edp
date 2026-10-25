@@ -3,6 +3,7 @@ import { Link } from "react-router-dom"
 import toast from "react-hot-toast"
 
 import { api } from "../../api/api"
+import AdminDutySessionModal from "../../components/AdminDutySessionModal"
 import EvidenceFilePreviewModal, { type EvidencePreviewFile } from "../../components/EvidenceFilePreviewModal"
 import Footer from "../../components/Footer"
 import ModalShell from "../../components/ModalShell"
@@ -24,6 +25,7 @@ type Evidence = {
   week_number?: number
   start_date: string
   end_date: string
+  absence_dates?: string[]
   submitted_by: string
   submitted_at: string
   reviewed_by?: string | null
@@ -36,7 +38,8 @@ type Evidence = {
   files?: EvidenceFile[]
   comparison?: Array<{
     date: string
-    absence_type: string
+    duty_session_id: number | null
+    absence_type: string | null
     absence_count: number
     absence_exempted: number
     effective_absence: number
@@ -87,6 +90,7 @@ export default function AdminAbsenceEvidences() {
   const [showSupportMessageModal, setShowSupportMessageModal] = useState(false)
   const [supportMessage, setSupportMessage] = useState("")
   const [sendingSupportMessage, setSendingSupportMessage] = useState(false)
+  const [dutySessionId, setDutySessionId] = useState<number | null>(null)
 
   useEffect(() => {
     let active = true
@@ -307,7 +311,7 @@ export default function AdminAbsenceEvidences() {
                 <div><p className="text-xs font-semibold uppercase tracking-[0.18em] text-[#2e77df]/70">Lớp {selected.class_name}</p><h2 className="mt-2 text-xl font-semibold text-slate-900">{selected.student_name}</h2></div>
                 <span className={`ml-auto rounded-full px-2.5 py-1 text-[11px] font-semibold ${statusClass(selected.status)}`}>{statusLabel(selected.status)}</span>
               </div>
-              <dl className="mt-6 grid gap-4 rounded-2xl bg-slate-50 p-4 text-sm sm:grid-cols-2"><div><dt className="text-slate-500">Khoảng nghỉ</dt><dd className="mt-1 font-semibold text-slate-800">{formatDate(selected.start_date)} - {formatDate(selected.end_date)}</dd></div><div><dt className="text-slate-500">Người gửi</dt><dd className="mt-1 font-semibold text-slate-800">{selected.submitted_by}</dd></div><div><dt className="text-slate-500">Ngày gửi</dt><dd className="mt-1 font-semibold text-slate-800">{new Date(selected.submitted_at).toLocaleString("vi-VN")}</dd></div><div><dt className="text-slate-500">Đã miễn trừ</dt><dd className="mt-1 font-semibold text-emerald-700">{selected.approved_exemption_count || 0}</dd></div></dl>
+              <dl className="mt-6 grid gap-4 rounded-2xl bg-slate-50 p-4 text-sm sm:grid-cols-2"><div><dt className="text-slate-500">Ngày nghỉ</dt><dd className="mt-1 font-semibold text-slate-800">{(selected.absence_dates?.length ? selected.absence_dates : [selected.start_date, selected.end_date]).map(formatDate).join(", ")}</dd></div><div><dt className="text-slate-500">Người gửi</dt><dd className="mt-1 font-semibold text-slate-800">{selected.submitted_by}</dd></div><div><dt className="text-slate-500">Ngày gửi</dt><dd className="mt-1 font-semibold text-slate-800">{new Date(selected.submitted_at).toLocaleString("vi-VN")}</dd></div><div><dt className="text-slate-500">Đã miễn trừ</dt><dd className="mt-1 font-semibold text-emerald-700">{selected.approved_exemption_count || 0}</dd></div></dl>
 
               {selected.status === "rejected" && selected.review_reason && (
                 <section className="mt-5">
@@ -345,6 +349,16 @@ export default function AdminAbsenceEvidences() {
 
               {selected.note && <section className="mt-5"><h3 className="text-sm font-semibold text-slate-900">Ghi chú</h3><p className="mt-2 rounded-2xl bg-slate-50 p-4 text-sm leading-6 text-slate-600">{selected.note}</p></section>}
               <section className="mt-5"><h3 className="text-sm font-semibold text-slate-900">Tệp minh chứng</h3><div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-3">{selected.files?.map((file, index) => file.mime_type.startsWith("image/") ? <button key={file.id} type="button" onClick={() => setPreviewIndex(index)} className="overflow-hidden rounded-2xl border border-slate-200 text-left transition hover:border-blue-200 active:scale-[0.98]"><img src={file.url} alt={file.file_name} className="h-28 w-full object-cover" /><span className="block truncate px-2 py-2 text-xs font-medium text-slate-600">{file.file_name}</span></button> : <button key={file.id} type="button" onClick={() => setPreviewIndex(index)} className="flex min-h-28 items-center justify-center rounded-2xl border border-rose-100 bg-rose-50 px-3 text-center text-xs font-semibold text-rose-700 transition active:scale-[0.98]">Xem tệp PDF</button>)}</div></section>
+              <section className="mt-6">
+                <h3 className="text-sm font-semibold text-slate-900">Phiếu trực các ngày nghỉ</h3>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {(selected.comparison || []).map((item) => item.duty_session_id ? (
+                    <button key={item.date} type="button" onClick={() => setDutySessionId(item.duty_session_id)} className="min-h-10 rounded-xl border border-[#2e77df]/30 bg-blue-50 px-3 text-sm font-semibold text-[#2e77df] transition hover:bg-blue-100">{formatDate(item.date)}</button>
+                  ) : (
+                    <span key={item.date} className="inline-flex min-h-10 items-center rounded-xl border border-slate-200 bg-slate-50 px-3 text-sm text-slate-500">{formatDate(item.date)}: Chưa có phiếu</span>
+                  ))}
+                </div>
+              </section>
               <section className="mt-6">
                 <h3 className="text-sm font-semibold text-slate-900">Đối chiếu Phiếu trực</h3>
                 {selected.status === "pending" ? (
@@ -480,6 +494,8 @@ export default function AdminAbsenceEvidences() {
       {selected?.files && previewIndex !== null && selected.files[previewIndex] && (
         <EvidenceFilePreviewModal files={selected.files as EvidencePreviewFile[]} initialIndex={previewIndex} onClose={() => setPreviewIndex(null)} />
       )}
+
+      {dutySessionId !== null && <AdminDutySessionModal sessionId={dutySessionId} onClose={() => setDutySessionId(null)} onSessionChanged={() => { void openDetail(selected?.id || 0) }} />}
     </div>
   )
 }

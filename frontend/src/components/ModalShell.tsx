@@ -8,7 +8,12 @@ type Props = {
 
 export default function ModalShell({ children, className = "", onClose }: Props) {
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/35 px-4 backdrop-blur-[8px]">
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/35 px-4 backdrop-blur-[8px]"
+      onPointerDown={(event) => {
+        if (onClose && event.target === event.currentTarget) onClose()
+      }}
+    >
       <div
         className={`relative w-full rounded-[30px] border border-slate-100 bg-white shadow-[0_30px_90px_rgba(15,23,42,0.22),0_8px_24px_rgba(15,23,42,0.08)] ${className}`}
       >

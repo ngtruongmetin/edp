@@ -323,6 +323,7 @@ CREATE TABLE IF NOT EXISTS absence_evidences (
   week_id INTEGER NOT NULL,
   start_date TEXT NOT NULL,
   end_date TEXT NOT NULL,
+  absence_dates JSONB NOT NULL DEFAULT '[]'::jsonb,
   note TEXT,
   status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'approved', 'rejected')),
   submitted_by TEXT NOT NULL,
@@ -558,6 +559,13 @@ ALTER TABLE support_tickets ADD COLUMN IF NOT EXISTS linked_absence_evidence_id 
 ALTER TABLE support_tickets DROP CONSTRAINT IF EXISTS support_tickets_request_type_check;
 ALTER TABLE support_tickets ADD CONSTRAINT support_tickets_request_type_check
   CHECK (request_type IN ('duty_complaint', 'system_bug', 'suggestion', 'usage_support', 'other', 'absence_evidence'));
+ALTER TABLE absence_evidences ADD COLUMN IF NOT EXISTS absence_dates JSONB NOT NULL DEFAULT '[]'::jsonb;
+UPDATE absence_evidences
+SET absence_dates = (
+  SELECT jsonb_agg(to_char(day::date, 'YYYY-MM-DD') ORDER BY day)
+  FROM generate_series(start_date::date, end_date::date, INTERVAL '1 day') AS day
+)
+WHERE jsonb_array_length(absence_dates) = 0;
 
 DO $$
 BEGIN

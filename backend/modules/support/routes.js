@@ -93,6 +93,21 @@ function userCanCreate(user) {
   return USER_ROLES.includes(String(user?.role || ""))
 }
 
+function dutyLinkColumnForRole(role) {
+  return role === "co_do" ? "red_class" : "duty_class"
+}
+
+function dutyLinkValiditySql(ticketAlias = "ticket", sessionAlias = "sessions", classAlias = "classes") {
+  return `
+    CASE
+      WHEN ${ticketAlias}.request_type <> 'duty_complaint' OR ${ticketAlias}.linked_duty_session_id IS NULL THEN NULL
+      WHEN ${sessionAlias}.id IS NULL THEN false
+      WHEN ${ticketAlias}.creator_role = 'co_do' THEN ${sessionAlias}.red_class = ${classAlias}.name
+      ELSE ${sessionAlias}.duty_class = ${classAlias}.name
+    END
+  `
+}
+
 function isOwner(ticket, user) {
   return ticket.creator_role === user.role && Number(ticket.creator_class_id) === Number(user.class_id)
 }
@@ -128,7 +143,8 @@ async function getTicket(ticketId) {
         weeks.week_number AS linked_week_number,
         sessions.date AS linked_duty_date,
         sessions.red_class AS linked_red_class,
-        sessions.duty_class AS linked_duty_class
+        sessions.duty_class AS linked_duty_class,
+        ${dutyLinkValiditySql() } AS linked_duty_session_valid
       FROM support_tickets ticket
       JOIN classes ON classes.id = ticket.creator_class_id
       LEFT JOIN schedule_weeks weeks ON weeks.id = ticket.linked_week_id
@@ -189,10 +205,10 @@ async function validateDutyLink({ user, weekId, sessionId }) {
       FROM duty_sessions sessions
       WHERE sessions.id = $1
         AND sessions.week_id = $2
-        AND (sessions.red_class = $3 OR sessions.duty_class = $3)
+        AND sessions.${dutyLinkColumnForRole(user.role)} = $3
       LIMIT 1
     `,
-    [sessionId, weekId, user.class_name],
+      [sessionId, weekId, user.class_name],
   )
   if (!result.rows[0]) {
     throw httpError(400, "Phiếu trực được chọn không thuộc tuần hoặc lớp hiện tại.")
@@ -263,7 +279,7 @@ router.get("/duty-sessions", requireLogin, requireRole(USER_ROLES), async (req, 
       `
         SELECT id, week_id, date, red_class, duty_class, status
         FROM duty_sessions
-        WHERE week_id = $1 AND (red_class = $2 OR duty_class = $2)
+        WHERE week_id = $1 AND ${dutyLinkColumnForRole(req.session.user.role)} = $2
         ORDER BY date DESC, id DESC
       `,
       [weekId, req.session.user.class_name],
@@ -300,6 +316,7 @@ router.get("/admin", requireLogin, requireRole(["admin"]), async (req, res) => {
     const result = await pool.query(
       `
         SELECT ticket.*, classes.name AS creator_class_name,
+          ${dutyLinkValiditySql()} AS linked_duty_session_valid,
           EXISTS (
             SELECT 1 FROM support_notifications notification
             WHERE notification.ticket_id = ticket.id
@@ -308,6 +325,7 @@ router.get("/admin", requireLogin, requireRole(["admin"]), async (req, res) => {
           ) AS has_new_response
         FROM support_tickets ticket
         JOIN classes ON classes.id = ticket.creator_class_id
+        LEFT JOIN duty_sessions sessions ON sessions.id = ticket.linked_duty_session_id
         ${where}
         ORDER BY
           CASE ticket.status WHEN 'in_progress' THEN 0 ELSE 1 END,
@@ -328,6 +346,7 @@ router.get("/my", requireLogin, requireRole(USER_ROLES), async (req, res) => {
     const result = await pool.query(
       `
         SELECT ticket.*, classes.name AS creator_class_name,
+          ${dutyLinkValiditySql()} AS linked_duty_session_valid,
           EXISTS (
             SELECT 1 FROM support_notifications notification
             WHERE notification.ticket_id = ticket.id
@@ -337,6 +356,7 @@ router.get("/my", requireLogin, requireRole(USER_ROLES), async (req, res) => {
           ) AS has_new_response
         FROM support_tickets ticket
         JOIN classes ON classes.id = ticket.creator_class_id
+        LEFT JOIN duty_sessions sessions ON sessions.id = ticket.linked_duty_session_id
         WHERE ticket.creator_role = $1 AND ticket.creator_class_id = $2
         ORDER BY ticket.updated_at DESC, ticket.id DESC
       `,

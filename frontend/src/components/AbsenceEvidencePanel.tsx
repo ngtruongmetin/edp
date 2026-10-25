@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useState } from "react"
-import * as Slider from "@radix-ui/react-slider"
 import toast from "react-hot-toast"
 
 import { api } from "../api/api"
@@ -12,6 +11,7 @@ type Week = {
   week_number: number
   start_date: string
   end_date: string
+  absence_dates?: string[]
 }
 
 type EvidenceFile = {
@@ -28,6 +28,7 @@ type Evidence = {
   student_name: string
   start_date: string
   end_date: string
+  absence_dates?: string[]
   submitted_at: string
   status: "pending" | "approved" | "rejected"
   approved_exemption_count: number
@@ -45,6 +46,10 @@ const allowedTypes = new Set(["image/jpeg", "image/png", "application/pdf"])
 function formatDate(date: string) {
   const [year, month, day] = date.split("-")
   return year && month && day ? `${day}/${month}/${year}` : date
+}
+
+function weekdayLabel(date: string) {
+  return new Date(`${date}T00:00:00`).toLocaleDateString("vi-VN", { weekday: "short" })
 }
 
 function datesInWeek(startDate: string, endDate: string) {
@@ -85,8 +90,7 @@ async function readFile(file: File): Promise<EvidenceFile> {
 export default function AbsenceEvidencePanel({ week, disabled = false }: Props) {
   const [open, setOpen] = useState(false)
   const [studentName, setStudentName] = useState("")
-  const [startIndex, setStartIndex] = useState(0)
-  const [endIndex, setEndIndex] = useState(0)
+  const [selectedDates, setSelectedDates] = useState<string[]>([])
   const [note, setNote] = useState("")
   const [files, setFiles] = useState<EvidenceFile[]>([])
   const [evidences, setEvidences] = useState<Evidence[]>([])
@@ -102,8 +106,7 @@ export default function AbsenceEvidencePanel({ week, disabled = false }: Props) 
     [week],
   )
   useEffect(() => {
-    setStartIndex(0)
-    setEndIndex(Math.max(0, dates.length - 1))
+    setSelectedDates([])
     setStudentName("")
     setNote("")
     setFiles([])
@@ -170,6 +173,10 @@ export default function AbsenceEvidencePanel({ week, disabled = false }: Props) 
       toast.error("Vui lòng nhập tên học sinh.")
       return
     }
+    if (!selectedDates.length) {
+      toast.error("Vui lòng chọn ít nhất một ngày nghỉ.")
+      return
+    }
     if (!files.length) {
       toast.error("Vui lòng tải ít nhất một tệp minh chứng.")
       return
@@ -180,15 +187,13 @@ export default function AbsenceEvidencePanel({ week, disabled = false }: Props) 
       const response = await api.post<{ evidence: Evidence }>("/absence-evidences", {
         week_id: week.id,
         student_name: studentName.trim(),
-        start_date: dates[startIndex],
-        end_date: dates[endIndex],
+        absence_dates: selectedDates,
         note,
         files: files.map((file) => ({ name: file.file_name, type: file.type, data: file.data })),
       })
       setEvidences((current) => [response.data.evidence, ...current])
       setStudentName("")
-      setStartIndex(0)
-      setEndIndex(Math.max(0, dates.length - 1))
+      setSelectedDates([])
       setNote("")
       setFiles([])
       toast.success("Đã gửi minh chứng thành công.")
@@ -250,45 +255,26 @@ export default function AbsenceEvidencePanel({ week, disabled = false }: Props) 
             </label>
 
             <section>
-              <div className="text-sm font-semibold text-slate-800">Khoảng nghỉ</div>
-              <div className="mt-1 text-lg font-semibold text-[#1d4ed8]">{formatDate(dates[startIndex])} → {formatDate(dates[endIndex])}</div>
-              <div className="mt-4 grid grid-cols-7 gap-1 text-center">
-                {dates.map((date, index) => {
-                  const active = index >= startIndex && index <= endIndex
+              <div className="flex items-center gap-3">
+                <div className="text-sm font-semibold text-slate-800">Ngày nghỉ</div>
+                <div className="ml-auto text-xs text-slate-500">Đã chọn {selectedDates.length} ngày</div>
+              </div>
+              <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                {dates.map((date) => {
+                  const checked = selectedDates.includes(date)
                   return (
-                    <div key={date} className={`rounded-xl px-1 py-2 text-xs font-semibold ${active ? "bg-[#eff6ff] text-[#2e77df]" : "bg-slate-50 text-slate-500"}`}>
-                      {date.slice(8, 10)}
-                    </div>
+                    <label key={date} className={`flex min-h-12 cursor-pointer items-center gap-3 rounded-2xl border px-4 py-3 text-sm transition ${checked ? "border-[#2e77df] bg-blue-50 text-[#1d4ed8]" : "border-slate-200 bg-white text-slate-700"}`}>
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        onChange={() => setSelectedDates((current) => checked ? current.filter((item) => item !== date) : [...current, date].sort())}
+                        className="h-5 w-5 rounded border-slate-300 text-[#2e77df] focus:ring-[#2e77df]"
+                      />
+                      <span className="font-semibold">{weekdayLabel(date)}</span>
+                      <span className="ml-auto">{formatDate(date)}</span>
+                    </label>
                   )
                 })}
-              </div>
-              <div className="mt-4 rounded-2xl border border-blue-100 bg-blue-50/50 p-4">
-                <Slider.Root
-                  min={0}
-                  max={Math.max(0, dates.length - 1)}
-                  step={1}
-                  minStepsBetweenThumbs={0}
-                  preserveThumbOrder
-                  value={[startIndex, endIndex]}
-                  onValueChange={([nextStart, nextEnd]) => {
-                    setStartIndex(nextStart)
-                    setEndIndex(nextEnd)
-                  }}
-                  className="relative flex h-12 w-full touch-none select-none items-center"
-                  aria-label="Khoảng nghỉ"
-                >
-                  <Slider.Track className="relative h-2 w-full grow overflow-hidden rounded-full bg-blue-100">
-                    <Slider.Range className="absolute h-full rounded-full bg-[#2e77df]" />
-                  </Slider.Track>
-                  <Slider.Thumb
-                    className="block h-5 w-5 rounded-full border-4 border-white bg-[#2e77df] shadow-[0_4px_12px_rgba(46,119,223,0.36)] outline-none transition focus-visible:ring-4 focus-visible:ring-blue-200"
-                    aria-label="Ngày bắt đầu khoảng nghỉ"
-                  />
-                  <Slider.Thumb
-                    className="block h-5 w-5 rounded-full border-4 border-white bg-[#2e77df] shadow-[0_4px_12px_rgba(46,119,223,0.36)] outline-none transition focus-visible:ring-4 focus-visible:ring-blue-200"
-                    aria-label="Ngày kết thúc khoảng nghỉ"
-                  />
-                </Slider.Root>
               </div>
             </section>
 
@@ -372,7 +358,7 @@ export default function AbsenceEvidencePanel({ week, disabled = false }: Props) 
                     <div className="flex items-start gap-3">
                       <div className="min-w-0 flex-1">
                         <div className="text-sm font-semibold text-slate-900">{evidence.student_name}</div>
-                        <div className="mt-1 text-xs text-slate-500">{formatDate(evidence.start_date)} - {formatDate(evidence.end_date)} · Gửi {new Date(evidence.submitted_at).toLocaleString("vi-VN")}</div>
+                        <div className="mt-1 text-xs text-slate-500">{(evidence.absence_dates?.length ? evidence.absence_dates : [evidence.start_date, evidence.end_date]).map(formatDate).join(", ")} · Gửi {new Date(evidence.submitted_at).toLocaleString("vi-VN")}</div>
                       </div>
                       <span className={`shrink-0 rounded-full px-2.5 py-1 text-[11px] font-semibold ${statusClass(evidence.status)}`}>{statusLabel(evidence.status)}</span>
                     </div>

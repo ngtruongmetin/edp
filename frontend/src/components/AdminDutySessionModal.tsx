@@ -127,9 +127,16 @@ export default function AdminDutySessionModal({ sessionId, onClose, onSessionCha
   const violationScore = violations.reduce((total: number, violation: any) => total + effectiveViolationScore(violation), 0)
   const bonus = Number(detail?.session?.bonus_points || 0)
 
-  return <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 px-4">
+  const canClose = !signing && !saving
+
+  return <div
+    className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 px-4"
+    onPointerDown={(event) => {
+      if (canClose && event.target === event.currentTarget) onClose()
+    }}
+  >
     <div className="max-h-[calc(100dvh-2rem)] w-full max-w-xl overflow-hidden rounded-3xl bg-white p-5 shadow-2xl">
-      <div className="flex items-center gap-2"><h2 className="text-base font-semibold text-gray-900">Chi tiết phiếu trực</h2><button type="button" className="ml-auto rounded-full bg-gray-100 px-3 py-1 text-xs font-semibold text-gray-700" onClick={onClose}>Đóng</button></div>
+      <div className="flex items-center gap-2"><h2 className="text-base font-semibold text-gray-900">Chi tiết phiếu trực</h2><button type="button" disabled={!canClose} className="ml-auto rounded-full bg-gray-100 px-3 py-1 text-xs font-semibold text-gray-700 disabled:opacity-50" onClick={onClose}>Đóng</button></div>
       {!detail ? <div className="mt-4 text-sm text-gray-600">Đang tải...</div> : <div className="mt-4 max-h-[70vh] space-y-4 overflow-y-auto pb-2">
         <section className="rounded-2xl bg-slate-50 p-4"><div className="text-sm font-semibold text-gray-900">{detail.session.red_class} trực {detail.session.duty_class}</div><div className="mt-1 flex items-center gap-2 text-xs text-gray-600">Ngày: {detail.session.date} | Trạng thái: {formatDutyStatus(detail.session.status)}<button type="button" className="ml-auto rounded-full bg-red-50 px-3 py-1 font-semibold text-red-700" onClick={() => void removeSession()}>Xóa phiếu</button></div>{detail.session.status !== "signed" && <div className="mt-3 rounded-2xl bg-white p-3 ring-1 ring-blue-100"><div className="text-xs font-semibold text-gray-700">Ký phụ (Quản trị)</div><div className="mt-2 flex gap-2"><input type="password" value={password} onChange={(event) => setPassword(event.target.value)} placeholder="Mật khẩu quản trị" className="min-w-0 flex-1 rounded-xl border border-blue-100 px-3 py-2 text-sm"/><button type="button" disabled={signing} onClick={() => void sign()} className="rounded-xl bg-emerald-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50">{signing ? "Đang ký..." : "Ký"}</button></div></div>}</section>
         <section className="grid grid-cols-2 gap-3 rounded-2xl bg-white p-4 ring-1 ring-blue-50"><div><div className="text-xs text-gray-500">Tổng điểm</div><div className={`mt-1 text-2xl font-semibold ${violationScore + bonus >= 0 ? "text-emerald-700" : "text-red-600"}`}>{violationScore + bonus}</div></div><div><div className="text-xs text-gray-500">Cộng sổ đầu bài</div><div className="mt-1 text-2xl font-semibold text-[#2e77df]">+{bonus}</div></div></section>

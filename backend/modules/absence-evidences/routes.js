@@ -40,6 +40,27 @@ function isIsoDate(value) {
   return /^\d{4}-\d{2}-\d{2}$/.test(String(value || ""))
 }
 
+function datesBetween(startDate, endDate) {
+  const dates = []
+  const current = new Date(`${startDate}T00:00:00`)
+  const end = new Date(`${endDate}T00:00:00`)
+  while (current <= end) {
+    dates.push(current.toISOString().slice(0, 10))
+    current.setDate(current.getDate() + 1)
+  }
+  return dates
+}
+
+function getAbsenceDates(evidence) {
+  const raw = Array.isArray(evidence?.absence_dates)
+    ? evidence.absence_dates
+    : typeof evidence?.absence_dates === "string"
+      ? JSON.parse(evidence.absence_dates || "[]")
+      : []
+  const dates = [...new Set(raw.map((date) => String(date || "")).filter(isIsoDate))].sort()
+  return dates.length ? dates : datesBetween(evidence.start_date, evidence.end_date)
+}
+
 function getSubmittedBy(user, className) {
   const roleLabel = user.role === "gvcn" ? "GVCN" : "Ban cán sự"
   return `${roleLabel} lớp ${className}`
@@ -160,6 +181,8 @@ async function getEvidenceFiles(evidenceId) {
 }
 
 async function getDutyComparison(evidence) {
+  const absenceDates = getAbsenceDates(evidence)
+  if (!absenceDates.length) return []
   const result = await pool.query(
     `
       SELECT
@@ -171,35 +194,46 @@ async function getDutyComparison(evidence) {
         COALESCE(violations.quantity, 0) AS absence_count,
         COALESCE(SUM(logs.approved_quantity), 0) AS absence_exempted
       FROM duty_sessions sessions
-      JOIN duty_violations violations ON violations.session_id = sessions.id
-      JOIN rules ON rules.id = violations.rule_id
+      LEFT JOIN duty_violations violations ON violations.session_id = sessions.id
+      LEFT JOIN rules ON rules.id = violations.rule_id
       LEFT JOIN absence_exemption_logs logs ON logs.duty_violation_id = violations.id
       WHERE sessions.week_id = $1
         AND sessions.duty_class = $2
-        AND sessions.date BETWEEN $3 AND $4
+        AND sessions.date = ANY($3::text[])
       GROUP BY sessions.id, sessions.date, rules.name, rules.rule_code, violations.id, violations.quantity
       ORDER BY sessions.date ASC, violations.id ASC
     `,
-    [evidence.week_id, evidence.class_name, evidence.start_date, evidence.end_date],
+    [evidence.week_id, evidence.class_name, absenceDates],
   )
 
-  const days = new Map()
+  const days = new Map(absenceDates.map((date) => [date, {
+    date,
+    duty_session_id: null,
+    absence_type: null,
+    absence_count: 0,
+    absence_exempted: 0,
+  }]))
   for (const row of result.rows) {
-    if (!isPermittedAbsenceRule(row.rule_code)) continue
-
     const date = String(row.date)
     const current = days.get(date) || {
       date,
-      absence_type: row.absence_type,
+      duty_session_id: null,
+      absence_type: null,
       absence_count: 0,
       absence_exempted: 0,
     }
+    current.duty_session_id = Number(row.duty_session_id)
+    if (!isPermittedAbsenceRule(row.rule_code)) {
+      days.set(date, current)
+      continue
+    }
+    current.absence_type = current.absence_type || row.absence_type
     current.absence_count += Number(row.absence_count || 0)
     current.absence_exempted += Number(row.absence_exempted || 0)
     days.set(date, current)
   }
 
-  return [...days.values()].map((day) => ({
+  return absenceDates.map((date) => days.get(date)).map((day) => ({
     ...day,
     effective_absence: Math.max(0, day.absence_count - day.absence_exempted),
   }))
@@ -303,16 +337,16 @@ router.post(
   async (req, res) => {
     const weekId = Number(req.body?.week_id)
     const studentName = String(req.body?.student_name || "").trim()
-    const startDate = String(req.body?.start_date || "")
-    const endDate = String(req.body?.end_date || "")
+    const legacyStartDate = String(req.body?.start_date || "")
+    const legacyEndDate = String(req.body?.end_date || "")
+    const requestedDates = Array.isArray(req.body?.absence_dates)
+      ? [...new Set(req.body.absence_dates.map((date) => String(date || "")))].sort()
+      : null
     const note = String(req.body?.note || "").trim().slice(0, 2000)
     const files = Array.isArray(req.body?.files) ? req.body.files : []
 
     if (!Number.isInteger(weekId) || weekId < 1 || !studentName || studentName.length > 160) {
       return res.status(400).json({ error: "Thông tin học sinh hoặc tuần chưa hợp lệ." })
-    }
-    if (!isIsoDate(startDate) || !isIsoDate(endDate) || startDate > endDate) {
-      return res.status(400).json({ error: "Khoảng thời gian nghỉ chưa hợp lệ." })
     }
     if (!files.length) return res.status(400).json({ error: "Vui lòng tải ít nhất một tệp minh chứng." })
     if (files.length > MAX_FILES) return res.status(400).json({ error: "Bạn chỉ được tải tối đa 5 tệp." })
@@ -326,9 +360,18 @@ router.post(
         [weekId],
       )
       const week = weekResult.rows[0]
-      if (!week || startDate < week.start_date || endDate > week.end_date) {
-        return res.status(400).json({ error: "Khoảng nghỉ phải nằm trong tuần đã chọn." })
+      if (!week) return res.status(400).json({ error: "Tuần được chọn không tồn tại." })
+
+      const absenceDates = requestedDates === null
+        ? isIsoDate(legacyStartDate) && isIsoDate(legacyEndDate) && legacyStartDate <= legacyEndDate
+          ? datesBetween(legacyStartDate, legacyEndDate)
+          : []
+        : requestedDates
+      if (!absenceDates.length || absenceDates.some((date) => !isIsoDate(date) || date < week.start_date || date > week.end_date)) {
+        return res.status(400).json({ error: "Vui lòng chọn ít nhất một ngày nghỉ trong tuần." })
       }
+      const startDate = absenceDates[0]
+      const endDate = absenceDates[absenceDates.length - 1]
 
       savedFiles = saveFiles(files)
       const now = new Date().toISOString()
@@ -339,11 +382,11 @@ router.post(
         const insertEvidence = await client.query(
           `
             INSERT INTO absence_evidences
-            (class_id, student_name, week_id, start_date, end_date, note, status, submitted_by, submitted_at)
-            VALUES ($1, $2, $3, $4, $5, $6, 'pending', $7, $8)
+            (class_id, student_name, week_id, start_date, end_date, absence_dates, note, status, submitted_by, submitted_at)
+            VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7, 'pending', $8, $9)
             RETURNING id
           `,
-          [currentClass.id, studentName, weekId, startDate, endDate, note, getSubmittedBy(req.session.user, currentClass.name), now],
+          [currentClass.id, studentName, weekId, startDate, endDate, JSON.stringify(absenceDates), note, getSubmittedBy(req.session.user, currentClass.name), now],
         )
         evidenceId = insertEvidence.rows[0].id
         for (const file of savedFiles) {
@@ -768,6 +811,7 @@ router.post(
 
         let approvedCount = 0
         if (action === "approved") {
+          const absenceDates = getAbsenceDates(evidence)
           const candidates = await client.query(
             `
               SELECT
@@ -785,11 +829,11 @@ router.post(
               LEFT JOIN absence_exemption_logs logs ON logs.duty_violation_id = violations.id
               WHERE sessions.week_id = $1
                 AND sessions.duty_class = $2
-                AND sessions.date BETWEEN $3 AND $4
+                AND sessions.date = ANY($3::text[])
               GROUP BY sessions.id, sessions.date, violations.id, violations.quantity, rules.name, rules.rule_code, rules.score_delta
               ORDER BY sessions.date ASC, violations.id ASC
             `,
-            [evidence.week_id, evidence.class_name, evidence.start_date, evidence.end_date],
+            [evidence.week_id, evidence.class_name, absenceDates],
           )
 
           const perDate = new Map()

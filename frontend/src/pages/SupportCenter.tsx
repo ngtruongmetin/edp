@@ -43,6 +43,7 @@ type Ticket = {
   linked_duty_date?: string | null
   linked_red_class?: string | null
   linked_duty_class?: string | null
+  linked_duty_session_valid?: boolean | null
   created_at: string
   updated_at: string
   has_new_response?: boolean
@@ -316,6 +317,7 @@ export default function SupportCenter() {
                       <div className="flex flex-wrap items-center gap-2">
                         <span className="text-base font-semibold text-slate-900">{ticket.title}</span>
                         {ticket.has_new_response && <span className="rounded-full bg-[#2e77df] px-2 py-0.5 text-[11px] font-semibold text-white">Phản hồi mới</span>}
+                        {ticket.request_type === "duty_complaint" && ticket.linked_duty_session_valid === false && <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-semibold text-amber-800">Liên kết phiếu không hợp lệ</span>}
                       </div>
                       <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-xs text-slate-500">
                         <span>{requestTypeLabels[ticket.request_type]}</span>
@@ -501,6 +503,7 @@ function TicketModal({ ticket, loading, currentRole, currentClassId, isOffline, 
           <div className="min-w-0"><h2 className="text-xl font-semibold text-slate-900">{ticket.title}</h2><p className="mt-1 text-sm text-slate-500">{requestTypeLabels[ticket.request_type]} - tạo {formatDateTime(ticket.created_at)}</p></div>
           <div className="mt-3"><span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${statusClass(ticket.status)}`}>{statusLabels[ticket.status]}</span></div>
           <div className="mt-4 flex flex-wrap items-center gap-x-5 gap-y-2 text-sm text-slate-600"><span>Người gửi: {roleLabel(ticket.creator_role)} - lớp {ticket.creator_class_name}</span>{ticket.linked_duty_session_id && <span>Phiếu trực: Tuần {ticket.linked_week_number}, {ticket.linked_duty_date ? formatDate(ticket.linked_duty_date) : ""} - Cờ đỏ {ticket.linked_red_class}, trực {ticket.linked_duty_class}</span>}{currentRole === "admin" && ticket.request_type === "duty_complaint" && ticket.linked_duty_session_id && <button type="button" onClick={() => onViewDutySession(Number(ticket.linked_duty_session_id))} className="min-h-9 rounded-xl border border-[#2e77df]/30 bg-blue-50 px-3 text-xs font-semibold text-[#2e77df] transition hover:bg-blue-100">Xem phiếu trực</button>}</div>
+          {ticket.request_type === "duty_complaint" && ticket.linked_duty_session_valid === false && <p className="mt-3 rounded-xl bg-amber-50 px-3 py-2 text-sm text-amber-800">Ticket cũ này đang liên kết với phiếu trực không thuộc đúng vai trò của lớp gửi.</p>}
           <div className="mt-4">
             {confirmDelete ? (
               <div className="flex flex-col gap-3 rounded-xl border border-rose-200 bg-rose-50 p-3 sm:flex-row sm:items-center sm:justify-between">
