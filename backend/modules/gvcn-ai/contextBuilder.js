@@ -323,7 +323,7 @@ async function getWeekData(weekId, className) {
           v.rule_id,
           r.category,
           r.name AS rule_name,
-          r.score_delta,
+          COALESCE(v.score_delta_snapshot, r.score_delta) AS score_delta,
           COALESCE(v.quantity, 0) AS quantity,
           v.note,
           COALESCE((

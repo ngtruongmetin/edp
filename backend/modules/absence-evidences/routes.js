@@ -517,7 +517,7 @@ router.delete(
 
         const exemptionResult = await client.query(
           `
-            SELECT COALESCE(SUM(-rules.score_delta * logs.approved_quantity), 0) AS score_adjustment
+            SELECT COALESCE(SUM(-COALESCE(violations.score_delta_snapshot, rules.score_delta) * logs.approved_quantity), 0) AS score_adjustment
             FROM absence_exemption_logs logs
             JOIN duty_violations violations ON violations.id = logs.duty_violation_id
             JOIN rules ON rules.id = violations.rule_id
@@ -821,7 +821,7 @@ router.post(
                 violations.quantity,
                 rules.name AS absence_type,
                 rules.rule_code,
-                rules.score_delta,
+                COALESCE(violations.score_delta_snapshot, rules.score_delta) AS score_delta,
                 COALESCE(SUM(logs.approved_quantity), 0) AS already_exempted
               FROM duty_sessions sessions
               JOIN duty_violations violations ON violations.session_id = sessions.id
@@ -830,7 +830,7 @@ router.post(
               WHERE sessions.week_id = $1
                 AND sessions.duty_class = $2
                 AND sessions.date = ANY($3::text[])
-              GROUP BY sessions.id, sessions.date, violations.id, violations.quantity, rules.name, rules.rule_code, rules.score_delta
+              GROUP BY sessions.id, sessions.date, violations.id, violations.quantity, rules.name, rules.rule_code, violations.score_delta_snapshot, rules.score_delta
               ORDER BY sessions.date ASC, violations.id ASC
             `,
             [evidence.week_id, evidence.class_name, absenceDates],

@@ -22,7 +22,7 @@ function effectiveViolationQuantitySql(violationAlias = "v") {
 function effectiveViolationScoreSql(violationAlias = "v", ruleAlias = "r") {
   return `
     COALESCE(SUM(
-      ${ruleAlias}.score_delta * ${effectiveViolationQuantitySql(violationAlias)}
+      COALESCE(${violationAlias}.score_delta_snapshot, ${ruleAlias}.score_delta, 0) * ${effectiveViolationQuantitySql(violationAlias)}
     ), 0)
   `
 }

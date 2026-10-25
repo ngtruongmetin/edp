@@ -10,7 +10,8 @@ CREATE TABLE IF NOT EXISTS rules (
   rule_code TEXT UNIQUE,
   category TEXT,
   name TEXT,
-  score_delta INTEGER
+  score_delta INTEGER,
+  is_active INTEGER NOT NULL DEFAULT 1 CHECK (is_active IN (0, 1))
 );
 
 
@@ -147,6 +148,7 @@ CREATE TABLE IF NOT EXISTS duty_violations (
   client_id UUID UNIQUE,
   session_id INTEGER NOT NULL,
   rule_id INTEGER NOT NULL,
+  score_delta_snapshot INTEGER,
   quantity INTEGER,
   note TEXT,
   CONSTRAINT fk_duty_violations_session_id FOREIGN KEY (session_id) REFERENCES duty_sessions(id) ON DELETE CASCADE,
@@ -560,6 +562,13 @@ ALTER TABLE support_tickets DROP CONSTRAINT IF EXISTS support_tickets_request_ty
 ALTER TABLE support_tickets ADD CONSTRAINT support_tickets_request_type_check
   CHECK (request_type IN ('duty_complaint', 'system_bug', 'suggestion', 'usage_support', 'other', 'absence_evidence'));
 ALTER TABLE absence_evidences ADD COLUMN IF NOT EXISTS absence_dates JSONB NOT NULL DEFAULT '[]'::jsonb;
+ALTER TABLE rules ADD COLUMN IF NOT EXISTS is_active INTEGER NOT NULL DEFAULT 1;
+ALTER TABLE duty_violations ADD COLUMN IF NOT EXISTS score_delta_snapshot INTEGER;
+UPDATE duty_violations violation
+SET score_delta_snapshot = rules.score_delta
+FROM rules
+WHERE rules.id = violation.rule_id
+  AND violation.score_delta_snapshot IS NULL;
 UPDATE absence_evidences
 SET absence_dates = (
   SELECT jsonb_agg(to_char(day::date, 'YYYY-MM-DD') ORDER BY day)

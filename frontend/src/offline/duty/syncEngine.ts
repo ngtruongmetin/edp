@@ -154,7 +154,7 @@ export class DutySyncEngine {
         await this.addViolation(session, operation)
         return
       case "update_violation":
-        await api.post(`/duty/offline/sessions/${session.clientId}/violations/update`, { operation_id: operation.id, ...operation.payload })
+        await this.updateViolation(session, operation)
         return
       case "delete_violation":
         await api.post(`/duty/offline/sessions/${session.clientId}/violations/delete`, { operation_id: operation.id, ...operation.payload })
@@ -228,7 +228,21 @@ export class DutySyncEngine {
     if (!current) return
     await dutyStorage.putSession({
       ...current,
-      violations: current.violations.map((item) => item.clientId === violationClientId ? { ...item, id: Number(response.data.id), serverId: Number(response.data.id) } : item),
+      violations: current.violations.map((item) => item.clientId === violationClientId ? { ...item, id: Number(response.data.id), serverId: Number(response.data.id), score_delta: Number(response.data.score_delta ?? item.score_delta) } : item),
+      updatedAt: new Date().toISOString(),
+    })
+  }
+
+  private async updateViolation(session: OfflineDutySession, operation: DutyOfflineOperation) {
+    const response = await api.post(`/duty/offline/sessions/${session.clientId}/violations/update`, { operation_id: operation.id, ...operation.payload })
+    const violationClientId = String(operation.payload.violation_client_id || "")
+    const current = await dutyStorage.getSession(session.clientId)
+    if (!current || !violationClientId) return
+    await dutyStorage.putSession({
+      ...current,
+      violations: current.violations.map((item) => item.clientId === violationClientId
+        ? { ...item, score_delta: Number(response.data.score_delta ?? item.score_delta) }
+        : item),
       updatedAt: new Date().toISOString(),
     })
   }

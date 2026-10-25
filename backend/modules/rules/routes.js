@@ -168,8 +168,9 @@ router.get(
   (req, res) => {
     db.all(
       `
-        SELECT id, rule_code, category, name, score_delta
+        SELECT id, rule_code, category, name, score_delta, is_active
         FROM rules
+        WHERE is_active = 1
         ORDER BY category, id
       `,
       [],
@@ -189,10 +190,12 @@ router.get(
   requireLogin,
   requireRole(["admin"]),
   (req, res) => {
+    const includeArchived = String(req.query.include_archived || "") === "1"
     db.all(
       `
-        SELECT id, rule_code, category, name, score_delta
+        SELECT id, rule_code, category, name, score_delta, is_active
         FROM rules
+        ${includeArchived ? "" : "WHERE is_active = 1"}
         ORDER BY category, id
       `,
       [],
@@ -250,6 +253,7 @@ router.get(
         `
           SELECT rule_code, category, name, score_delta
           FROM rules
+          WHERE is_active = 1
           ORDER BY category, id
         `,
       )
@@ -315,7 +319,7 @@ router.post(
             await db.run(
               `
                 UPDATE rules
-                SET category=?, name=?, score_delta=?, rule_code=COALESCE(?, rule_code)
+                SET category=?, name=?, score_delta=?, rule_code=COALESCE(?, rule_code), is_active=1
                 WHERE id=?
               `,
               [row.category, row.name, row.score_delta, row.rule_code, existing.id],
@@ -415,25 +419,37 @@ router.delete(
   "/:id",
   requireLogin,
   requireRole(["admin"]),
-  (req, res) => {
-    db.run(
-      "DELETE FROM rules WHERE id=?",
-      [req.params.id],
-      function onDelete(err) {
-        if (err) {
-          if (isForeignKeyError(err)) {
-            return res.status(409).json({
-              error: "Không thể xóa lỗi vi phạm vì đã được dùng trong phiếu trực (cần xóa hoặc sửa phiếu trước)",
-            })
-          }
+  async (req, res) => {
+    try {
+      const ruleId = Number(req.params.id)
+      const references = await db.get(`SELECT COUNT(*)::int AS count FROM duty_violations WHERE rule_id=?`, [ruleId])
+      if (Number(references?.count || 0) > 0) {
+        await db.run(`UPDATE rules SET is_active=0 WHERE id=?`, [ruleId])
+        return res.json({ success: true, archived: true })
+      }
 
-          const out = mapDatabaseError(err, err.message)
-          return res.status(out.status).json({ error: out.error })
-        }
+      await db.run("DELETE FROM rules WHERE id=?", [ruleId])
+      res.json({ success: true, archived: false })
+    } catch (err) {
+      const out = mapDatabaseError(err, err.message)
+      res.status(out.status).json({ error: out.error })
+    }
+  },
+)
 
-        res.json({ success: true })
-      },
-    )
+router.patch(
+  "/:id/status",
+  requireLogin,
+  requireRole(["admin"]),
+  async (req, res) => {
+    try {
+      const isActive = req.body?.is_active ? 1 : 0
+      await db.run(`UPDATE rules SET is_active=? WHERE id=?`, [isActive, req.params.id])
+      res.json({ success: true, is_active: isActive })
+    } catch (err) {
+      const out = mapDatabaseError(err, err.message)
+      res.status(out.status).json({ error: out.error })
+    }
   },
 )
 

@@ -272,7 +272,7 @@ async function buildOfflineSnapshot(ownerClass) {
         ORDER BY c.grade ASC, c.name ASC
       `,
     ),
-    pool.query(`SELECT id, category, name, score_delta FROM rules ORDER BY category ASC, id ASC`),
+    pool.query(`SELECT id, category, name, score_delta FROM rules WHERE is_active = 1 ORDER BY category ASC, id ASC`),
   ])
 
   const rawWeek = weekResult.rows[0] || null
@@ -506,18 +506,18 @@ router.post("/sessions/:clientId/violations", handleRoute(async (req, res) => {
     const session = await getOwnedSession(client, clientId, req.session.user.class_name)
     await ensureWeekOpen(client, session.week_id)
     await ensureAttendanceCategory(client, session.week_id, ruleId)
-    const ruleResult = await client.query(`SELECT id, name FROM rules WHERE id = $1 LIMIT 1`, [ruleId])
+    const ruleResult = await client.query(`SELECT id, name, score_delta FROM rules WHERE id = $1 AND is_active = 1 LIMIT 1`, [ruleId])
     if (!ruleResult.rows[0]) throw httpError(400, "Lỗi vi phạm không còn tồn tại.")
     const violationResult = await client.query(
       `
-        INSERT INTO duty_violations (client_id, session_id, rule_id, quantity, note)
-        VALUES ($1, $2, $3, $4, $5)
+        INSERT INTO duty_violations (client_id, session_id, rule_id, score_delta_snapshot, quantity, note)
+        VALUES ($1, $2, $3, $4, $5, $6)
         ON CONFLICT (client_id) DO UPDATE SET client_id = EXCLUDED.client_id
         RETURNING id
       `,
-      [violationClientId, session.id, ruleId, quantity, note],
+      [violationClientId, session.id, ruleId, ruleResult.rows[0].score_delta, quantity, note],
     )
-    const result = { success: true, id: violationResult.rows[0].id, violation_client_id: violationClientId }
+    const result = { success: true, id: violationResult.rows[0].id, violation_client_id: violationClientId, score_delta: Number(ruleResult.rows[0].score_delta) }
     await markEdited(client, session, "offline:add_violation", req.session.user, { rule_id: ruleId, rule_name: ruleResult.rows[0].name, quantity, note, operation_id: operationId })
     await completeOperation(client, operationId, clientId, "add_violation", result)
     return result
@@ -588,20 +588,20 @@ router.post("/sessions/:clientId/violations/update", handleRoute(async (req, res
     )
     const previous = previousResult.rows[0]
     await ensureAttendanceCategory(client, session.week_id, ruleId, previous?.rule_id)
-    const ruleResult = await client.query(`SELECT id, name FROM rules WHERE id = $1 LIMIT 1`, [ruleId])
+    const ruleResult = await client.query(`SELECT id, name, score_delta FROM rules WHERE id = $1 AND is_active = 1 LIMIT 1`, [ruleId])
     if (!ruleResult.rows[0]) throw httpError(400, "Lỗi vi phạm không còn tồn tại.")
     const updated = await client.query(
       `
         UPDATE duty_violations
-        SET rule_id = $1, quantity = $2, note = $3
-        WHERE session_id = $4
-          AND (($5::integer > 0 AND id = $5) OR ($6::uuid IS NOT NULL AND client_id = $6))
+        SET rule_id = $1, score_delta_snapshot = $2, quantity = $3, note = $4
+        WHERE session_id = $5
+          AND (($6::integer > 0 AND id = $6) OR ($7::uuid IS NOT NULL AND client_id = $7))
         RETURNING id
       `,
-      [ruleId, quantity, note, session.id, violationId, violationClientId],
+      [ruleId, ruleResult.rows[0].score_delta, quantity, note, session.id, violationId, violationClientId],
     )
     if (!updated.rows[0]) throw httpError(404, "Không tìm thấy vi phạm cần sửa.")
-    const result = { success: true, id: Number(updated.rows[0].id) }
+    const result = { success: true, id: Number(updated.rows[0].id), score_delta: Number(ruleResult.rows[0].score_delta) }
     await markEdited(client, session, "offline:update_violation", req.session.user, { violation_id: Number(updated.rows[0].id), old_rule_id: previous?.rule_id, old_rule_name: previous?.rule_name, rule_id: ruleId, rule_name: ruleResult.rows[0].name, old_quantity: previous?.quantity, new_quantity: quantity, old_note: previous?.note, new_note: note, operation_id: operationId })
     await completeOperation(client, operationId, clientId, "update_violation", result)
     return result

@@ -1976,7 +1976,7 @@ async function loadCurrentPeriodTree() {
 function computeViolationHash(sessionId, cb) {
   db.all(
     `
-      SELECT rule_id, quantity, note
+      SELECT rule_id, score_delta_snapshot, quantity, note
       FROM duty_violations
       WHERE session_id=?
       ORDER BY rule_id ASC, note ASC, id ASC
@@ -1986,6 +1986,7 @@ function computeViolationHash(sessionId, cb) {
       if (err) return cb(err)
       const normalized = rows.map((r) => ({
         rule_id: Number(r.rule_id),
+        score_delta_snapshot: Number(r.score_delta_snapshot || 0),
         quantity: Number(r.quantity || 0),
         note: String(r.note || ""),
       }))
@@ -2206,7 +2207,7 @@ router.get(
         SELECT v.id,v.rule_id,v.quantity,v.note,
                ${exemptedViolationQuantitySql("v")} AS exempted_quantity,
                ${effectiveViolationQuantitySql("v")} AS effective_quantity,
-               r.name,r.score_delta
+               r.name,COALESCE(v.score_delta_snapshot, r.score_delta) AS score_delta
         FROM duty_violations v
         LEFT JOIN rules r
         ON r.id=v.rule_id
@@ -2520,7 +2521,7 @@ router.get(
                 SELECT v.id,v.rule_id,v.quantity,v.note,
                        ${exemptedViolationQuantitySql("v")} AS exempted_quantity,
                        ${effectiveViolationQuantitySql("v")} AS effective_quantity,
-                       r.category,r.name,r.score_delta
+                       r.category,r.name,COALESCE(v.score_delta_snapshot, r.score_delta) AS score_delta
                 FROM duty_violations v
                 LEFT JOIN rules r
                   ON r.id=v.rule_id
@@ -2830,13 +2831,14 @@ router.post(
             // Smart merge: same rule_id + same note => increase quantity instead of new row.
             db.get(
               `
-              SELECT v.id, v.quantity, r.name AS rule_name
+              SELECT v.id, v.quantity, r.name AS rule_name, r.score_delta
               FROM rules r
               LEFT JOIN duty_violations v
                 ON v.rule_id = r.id
                AND v.session_id = ?
                AND v.note = ?
-              WHERE r.id = ?
+               AND COALESCE(v.score_delta_snapshot, r.score_delta) = r.score_delta
+              WHERE r.id = ? AND r.is_active = 1
               ORDER BY v.id DESC
               LIMIT 1
             `,
@@ -2870,10 +2872,10 @@ router.post(
                 db.run(
                   `
                   INSERT INTO duty_violations
-                  (session_id,rule_id,quantity,note)
-                  VALUES(?,?,?,?)
+                  (session_id,rule_id,score_delta_snapshot,quantity,note)
+                  VALUES(?,?,?,?,?)
                 `,
-                  [session_id, rule_id, q, n],
+                  [session_id, rule_id, existing.score_delta, q, n],
                   function (err) {
                     if (err) return res.status(500).json({ error: err.message })
                     finalize({ success: true, merged: false, id: this.lastID })
@@ -2978,12 +2980,15 @@ router.post(
           db.run(
             `
             INSERT INTO duty_violations
-            (session_id, rule_id, quantity, note)
-            VALUES(?,?,?,?)
+            (session_id, rule_id, score_delta_snapshot, quantity, note)
+            SELECT ?, id, score_delta, ?, ?
+            FROM rules
+            WHERE id=? AND is_active=1
           `,
-            [session_id, rule_id, q, n],
+            [session_id, q, n, rule_id],
             function (err) {
               if (err) return res.status(500).json({ error: err.message })
+              if (!this.changes) return res.status(400).json({ error: "Lỗi vi phạm không còn được sử dụng." })
               const violationId = this.lastID
               db.get(`SELECT name FROM rules WHERE id=? LIMIT 1`, [rule_id], (ruleErr, rule) => {
                 if (ruleErr) return res.status(500).json({ error: ruleErr.message })
@@ -3022,14 +3027,15 @@ router.put(
     }
     const redClass = req.session.user?.class_name
     db.get(
-      `SELECT v.id, v.session_id, v.rule_id AS old_rule_id, old_rule.name AS old_rule_name, v.quantity AS old_quantity, v.note AS old_note, new_rule.name AS new_rule_name, s.week_id FROM duty_violations v JOIN duty_sessions s ON s.id=v.session_id LEFT JOIN rules old_rule ON old_rule.id=v.rule_id LEFT JOIN rules new_rule ON new_rule.id=? WHERE v.id=? AND s.red_class=? LIMIT 1`,
+      `SELECT v.id, v.session_id, v.rule_id AS old_rule_id, old_rule.name AS old_rule_name, v.quantity AS old_quantity, v.note AS old_note, new_rule.name AS new_rule_name, new_rule.score_delta AS new_rule_score_delta, new_rule.is_active AS new_rule_active, s.week_id FROM duty_violations v JOIN duty_sessions s ON s.id=v.session_id LEFT JOIN rules old_rule ON old_rule.id=v.rule_id LEFT JOIN rules new_rule ON new_rule.id=? WHERE v.id=? AND s.red_class=? LIMIT 1`,
       [ruleId, id, redClass],
       (err, row) => {
         if (err) return res.status(500).json({ error: err.message })
         if (!row) return res.status(404).json({ error: "Violation not found" })
+        if (!row.new_rule_name || !row.new_rule_active) return res.status(400).json({ error: "Lỗi vi phạm không còn được sử dụng." })
         ensureCoDoViolationPermission(row.week_id, ruleId, row.old_rule_id, (permissionErr) => {
           if (permissionErr) return res.status(permissionErr.status || 500).json({ error: permissionErr.message })
-          db.run(`UPDATE duty_violations SET rule_id=?, quantity=?, note=? WHERE id=?`, [ruleId, quantity, note, id], (updateErr) => {
+          db.run(`UPDATE duty_violations SET rule_id=?, score_delta_snapshot=?, quantity=?, note=? WHERE id=?`, [ruleId, row.new_rule_score_delta, quantity, note, id], (updateErr) => {
             if (updateErr) return res.status(500).json({ error: updateErr.message })
             syncSignedStatusAfterChange(row.session_id, "edit:update_violation", (statusErr, statusResult) => {
               if (statusErr) return res.status(500).json({ error: statusErr.message })
@@ -3060,7 +3066,7 @@ router.put(
 
     db.get(
       `
-        SELECT v.id, v.session_id, v.rule_id AS old_rule_id, old_rule.name AS old_rule_name, v.quantity AS old_quantity, v.note AS old_note, new_rule.name AS new_rule_name, s.week_id
+        SELECT v.id, v.session_id, v.rule_id AS old_rule_id, old_rule.name AS old_rule_name, v.quantity AS old_quantity, v.note AS old_note, new_rule.name AS new_rule_name, new_rule.score_delta AS new_rule_score_delta, new_rule.is_active AS new_rule_active, s.week_id
         FROM duty_violations v
         JOIN duty_sessions s
           ON s.id = v.session_id
@@ -3073,6 +3079,7 @@ router.put(
       (err, row) => {
         if (err) return res.status(500).json({ error: err.message })
         if (!row) return res.status(404).json({ error: "Violation not found" })
+        if (!row.new_rule_name || !row.new_rule_active) return res.status(400).json({ error: "Lỗi vi phạm không còn được sử dụng." })
 
         ensureWeekUnlocked(row.week_id, (lockErr) => {
           if (lockErr) return res.status(lockErr.status || 500).json({ error: lockErr.message })
@@ -3081,10 +3088,10 @@ router.put(
           db.run(
             `
             UPDATE duty_violations
-            SET rule_id=?, quantity=?, note=?
+            SET rule_id=?, score_delta_snapshot=?, quantity=?, note=?
             WHERE id=?
           `,
-            [rule_id, q, n, id],
+            [rule_id, row.new_rule_score_delta, q, n, id],
             (err) => {
               if (err) return res.status(500).json({ error: err.message })
               syncSignedStatusAfterChange(row.session_id, "edit:update_violation", (statusErr, statusResult) => {
@@ -3354,7 +3361,7 @@ router.get(
             SELECT v.id, v.rule_id, v.quantity, v.note,
                    ${exemptedViolationQuantitySql("v")} AS exempted_quantity,
                    ${effectiveViolationQuantitySql("v")} AS effective_quantity,
-                   r.category, r.name, r.score_delta
+                   r.category, r.name, COALESCE(v.score_delta_snapshot, r.score_delta) AS score_delta
             FROM duty_violations v
             LEFT JOIN rules r
               ON r.id = v.rule_id
@@ -3609,7 +3616,7 @@ router.get(
                   SELECT v.session_id, v.id, v.rule_id, v.quantity, v.note,
                          ${exemptedViolationQuantitySql("v")} AS exempted_quantity,
                          ${effectiveViolationQuantitySql("v")} AS effective_quantity,
-                         r.category, r.name, r.score_delta
+                         r.category, r.name, COALESCE(v.score_delta_snapshot, r.score_delta) AS score_delta
                   FROM duty_violations v
                   LEFT JOIN rules r
                     ON r.id = v.rule_id
@@ -5397,7 +5404,7 @@ router.get(
                 SELECT v.id,v.rule_id,v.quantity,v.note,
                        ${exemptedViolationQuantitySql("v")} AS exempted_quantity,
                        ${effectiveViolationQuantitySql("v")} AS effective_quantity,
-                       r.category,r.name,r.score_delta
+                       r.category,r.name,COALESCE(v.score_delta_snapshot, r.score_delta) AS score_delta
                 FROM duty_violations v
                 LEFT JOIN rules r
                   ON r.id=v.rule_id
@@ -5567,7 +5574,7 @@ router.get(
             SELECT v.id,v.rule_id,v.quantity,v.note,
                    ${exemptedViolationQuantitySql("v")} AS exempted_quantity,
                    ${effectiveViolationQuantitySql("v")} AS effective_quantity,
-                   r.category,r.name,r.score_delta
+                   r.category,r.name,COALESCE(v.score_delta_snapshot, r.score_delta) AS score_delta
             FROM duty_violations v
             LEFT JOIN rules r
               ON r.id=v.rule_id

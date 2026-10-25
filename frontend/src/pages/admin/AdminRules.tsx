@@ -15,6 +15,7 @@ type Rule = {
   category: string
   name: string
   score_delta: number
+  is_active: number
 }
 
 type RuleFormState = {
@@ -79,7 +80,7 @@ export default function AdminRules() {
   async function loadRules() {
     try {
       setLoading(true)
-      const res = await api.get<Rule[]>("/rules/admin")
+      const res = await api.get<Rule[]>("/rules/admin", { params: { include_archived: 1 } })
       setRules(res.data || [])
     } catch (err: any) {
       console.error(err)
@@ -164,12 +165,22 @@ export default function AdminRules() {
     if (!shouldDelete) return
 
     try {
-      await api.delete(`/rules/${rule.id}`)
-      toast.success("Đã xóa luật")
+      const response = await api.delete<{ archived?: boolean }>(`/rules/${rule.id}`)
+      toast.success(response.data.archived ? "Đã lưu trữ luật đã dùng" : "Đã xóa luật")
       await loadRules()
     } catch (err: any) {
       console.error(err)
       toast.error(err?.response?.data?.error || "Không xóa được luật")
+    }
+  }
+
+  async function restoreRule(rule: Rule) {
+    try {
+      await api.patch(`/rules/${rule.id}/status`, { is_active: true })
+      toast.success("Đã khôi phục luật")
+      await loadRules()
+    } catch (err: any) {
+      toast.error(err?.response?.data?.error || "Không khôi phục được luật")
     }
   }
 
@@ -354,7 +365,7 @@ export default function AdminRules() {
                   </tr>
                 ) : (
                   filteredRules.map((rule, index) => (
-                    <tr key={rule.id} className="border-t border-slate-100/80 transition hover:bg-slate-50/70">
+                    <tr key={rule.id} className={`border-t border-slate-100/80 transition hover:bg-slate-50/70 ${rule.is_active ? "" : "bg-slate-50/60 opacity-70"}`}>
                       <td className="px-4 py-4 text-slate-500">{index + 1}</td>
                       <td className="px-4 py-4 font-mono text-xs text-slate-600">{rule.rule_code || "--"}</td>
                       <td className="px-4 py-4">
@@ -362,24 +373,14 @@ export default function AdminRules() {
                           {rule.category}
                         </span>
                       </td>
-                      <td className="px-4 py-4 font-medium text-slate-900">{rule.name}</td>
+                      <td className="px-4 py-4 font-medium text-slate-900"><span>{rule.name}</span>{!rule.is_active && <span className="ml-2 rounded-full bg-slate-200 px-2 py-0.5 text-[11px] font-semibold text-slate-600">Đã lưu trữ</span>}</td>
                       <td className="px-4 py-4 font-semibold text-rose-600">{rule.score_delta}</td>
                       <td className="px-4 py-4">
                         <div className="flex justify-end gap-2">
-                          <button
-                            type="button"
-                            onClick={() => openEditModal(rule)}
-                            className="min-h-10 rounded-[16px] border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700 transition duration-200 active:scale-[0.98]"
-                          >
-                            Sửa
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => void deleteRule(rule)}
-                            className="min-h-10 rounded-[16px] border border-rose-100 bg-white px-3 text-xs font-semibold text-rose-600 transition duration-200 active:scale-[0.98]"
-                          >
-                            Xóa
-                          </button>
+                          {rule.is_active ? <>
+                            <button type="button" onClick={() => openEditModal(rule)} className="min-h-10 rounded-[16px] border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700 transition duration-200 active:scale-[0.98]">Sửa</button>
+                            <button type="button" onClick={() => void deleteRule(rule)} className="min-h-10 rounded-[16px] border border-rose-100 bg-white px-3 text-xs font-semibold text-rose-600 transition duration-200 active:scale-[0.98]">Xóa</button>
+                          </> : <button type="button" onClick={() => void restoreRule(rule)} className="min-h-10 rounded-[16px] border border-emerald-100 bg-white px-3 text-xs font-semibold text-emerald-700 transition duration-200 active:scale-[0.98]">Khôi phục</button>}
                         </div>
                       </td>
                     </tr>
