@@ -322,6 +322,8 @@ async function testDutyAndSummaries(ctx) {
   await expect("GET", `/api/duty/admin/week/${ctx.weekId}`, undefined, 200, "Duty Admin Week: list sessions")
   await expect("GET", `/api/duty/admin/week/${ctx.weekId}/stats`, undefined, 200, "Duty Admin Week: stats")
   await expect("GET", `/api/duty/admin/week/${ctx.weekId}/summary`, undefined, 200, "Weekly Scores: summary preview")
+  await expect("GET", `/api/duty/admin/week/${ctx.weekId}/violation-statistics`, undefined, 200, "Violation statistics: summary")
+  await expectBlob("GET", `/api/duty/admin/week/${ctx.weekId}/violation-statistics/export`, undefined, 200, "Violation statistics: export")
   await expect("GET", `/api/duty/admin/week/${ctx.weekId}/class/${encodeURIComponent(ctx.dutyClass)}/breakdown`, undefined, 200, "Weekly Scores: class breakdown")
   await expectBlob("GET", `/api/duty/admin/week/${ctx.weekId}/export`, undefined, 200, "Weekly Scores: export")
   const currentSettings = await request("GET", "/api/system-settings")

@@ -1286,6 +1286,384 @@ function parseClassNatural(name) {
   return { g, num, name: n }
 }
 
+function formatVietnameseDate(date) {
+  const [year, month, day] = String(date || "").split("-")
+  return year && month && day ? `${day}/${month}/${year}` : String(date || "")
+}
+
+function shortDaySheetName(date) {
+  const day = new Date(`${date}T00:00:00`)
+  const labels = ["CN", "T2", "T3", "T4", "T5", "T6", "T7"]
+  const label = Number.isNaN(day.getTime()) ? "Ngày" : labels[day.getDay()]
+  return `${label} ${formatVietnameseDate(date).replace(/\//g, "-")}`.slice(0, 31)
+}
+
+function excelColumnName(columnNumber) {
+  let value = Number(columnNumber || 0)
+  let result = ""
+  while (value > 0) {
+    const remainder = (value - 1) % 26
+    result = String.fromCharCode(65 + remainder) + result
+    value = Math.floor((value - 1) / 26)
+  }
+  return result || "A"
+}
+
+function makeViolationMatrix(rows, classes) {
+  const classNames = classes.map((item) => item.class_name)
+  const byRule = new Map()
+
+  for (const item of rows) {
+    const key = Number(item.rule_id)
+    if (!byRule.has(key)) {
+      byRule.set(key, {
+        rule_id: key,
+        category: String(item.category || "Khác"),
+        rule_name: String(item.rule_name || "Lỗi không xác định"),
+        values: Object.fromEntries(classNames.map((name) => [name, 0])),
+        total_quantity: 0,
+      })
+    }
+    const matrixRow = byRule.get(key)
+    const quantity = Number(item.quantity || 0)
+    matrixRow.values[item.class_name] = Number(matrixRow.values[item.class_name] || 0) + quantity
+    matrixRow.total_quantity += quantity
+  }
+
+  const matrixRows = Array.from(byRule.values()).sort((a, b) =>
+    b.total_quantity - a.total_quantity
+    || a.category.localeCompare(b.category, "vi")
+    || a.rule_name.localeCompare(b.rule_name, "vi"),
+  )
+  const classTotals = Object.fromEntries(classNames.map((name) => [name, 0]))
+  matrixRows.forEach((row) => {
+    classNames.forEach((name) => {
+      classTotals[name] += Number(row.values[name] || 0)
+    })
+  })
+
+  return { rows: matrixRows, class_totals: classTotals }
+}
+
+async function loadViolationStatistics(weekId) {
+  const weekResult = await pool.query(
+    `SELECT id, week_number, start_date, end_date FROM schedule_weeks WHERE id = $1 LIMIT 1`,
+    [weekId],
+  )
+  const week = weekResult.rows[0]
+  if (!week) {
+    const error = new Error("Week not found")
+    error.status = 404
+    throw error
+  }
+
+  const previousWeekResult = await pool.query(
+    `SELECT id, week_number, start_date, end_date
+     FROM schedule_weeks
+     WHERE start_date < $1
+     ORDER BY start_date DESC, id DESC
+     LIMIT 1`,
+    [week.start_date],
+  )
+  const previousWeek = previousWeekResult.rows[0] || null
+
+  const [classesResult, rowsResult, signedSessionsResult, previousTotalResult] = await Promise.all([
+    pool.query(
+      `
+        SELECT name AS class_name, grade
+        FROM classes
+        WHERE is_active = 1
+           OR name IN (
+             SELECT DISTINCT duty_class
+             FROM duty_sessions
+             WHERE week_id = $1 AND status = 'signed'
+           )
+        ORDER BY grade ASC, name ASC
+      `,
+      [weekId],
+    ),
+    pool.query(
+      `
+        SELECT
+          s.date,
+          s.duty_class AS class_name,
+          COALESCE(c.grade, 0) AS grade,
+          v.rule_id,
+          COALESCE(r.category, 'Khác') AS category,
+          COALESCE(r.name, 'Lỗi không xác định') AS rule_name,
+          SUM(${effectiveViolationQuantitySql("v")}) AS quantity
+        FROM duty_sessions s
+        JOIN duty_violations v ON v.session_id = s.id
+        LEFT JOIN rules r ON r.id = v.rule_id
+        LEFT JOIN classes c ON c.name = s.duty_class
+        WHERE s.week_id = $1
+          AND s.status = 'signed'
+        GROUP BY s.date, s.duty_class, c.grade, v.rule_id, r.category, r.name
+        HAVING SUM(${effectiveViolationQuantitySql("v")}) > 0
+        ORDER BY s.date ASC, category ASC, rule_name ASC, s.duty_class ASC
+      `,
+      [weekId],
+    ),
+    pool.query(
+      `
+        SELECT date, COUNT(*)::int AS count
+        FROM duty_sessions
+        WHERE week_id = $1 AND status = 'signed'
+        GROUP BY date
+        ORDER BY date ASC
+      `,
+      [weekId],
+    ),
+    previousWeek
+      ? pool.query(
+          `
+            SELECT COALESCE(SUM(${effectiveViolationQuantitySql("v")}), 0) AS total_quantity
+            FROM duty_sessions s
+            JOIN duty_violations v ON v.session_id = s.id
+            WHERE s.week_id = $1 AND s.status = 'signed'
+          `,
+          [previousWeek.id],
+        )
+      : Promise.resolve({ rows: [{ total_quantity: 0 }] }),
+  ])
+
+  const classes = classesResult.rows.map((item) => ({
+    class_name: String(item.class_name),
+    grade: Number(item.grade || 0),
+  })).sort((a, b) => {
+    const aa = parseClassNatural(a.class_name)
+    const bb = parseClassNatural(b.class_name)
+    return aa.g - bb.g || aa.num - bb.num || aa.name.localeCompare(bb.name, "vi")
+  })
+  const rows = rowsResult.rows.map((item) => ({ ...item, quantity: Number(item.quantity || 0), grade: Number(item.grade || 0) }))
+  const matrix = makeViolationMatrix(rows, classes)
+  const totalQuantity = rows.reduce((sum, item) => sum + item.quantity, 0)
+  const byClass = classes.map((item) => ({
+    ...item,
+    total_quantity: Number(matrix.class_totals[item.class_name] || 0),
+  })).sort((a, b) => b.total_quantity - a.total_quantity || a.class_name.localeCompare(b.class_name, "vi"))
+  const gradeMap = new Map()
+  byClass.forEach((item) => {
+    if (!gradeMap.has(item.grade)) gradeMap.set(item.grade, 0)
+    gradeMap.set(item.grade, gradeMap.get(item.grade) + item.total_quantity)
+  })
+  const byGrade = [10, 11, 12].map((grade) => ({ grade, total_quantity: Number(gradeMap.get(grade) || 0) }))
+  const byRule = matrix.rows.map((item) => ({
+    rule_id: item.rule_id,
+    category: item.category,
+    rule_name: item.rule_name,
+    total_quantity: item.total_quantity,
+  })).sort((a, b) => b.total_quantity - a.total_quantity || a.rule_name.localeCompare(b.rule_name, "vi"))
+  const dayMap = new Map(signedSessionsResult.rows.map((item) => [String(item.date), 0]))
+  rows.forEach((item) => dayMap.set(item.date, Number(dayMap.get(item.date) || 0) + item.quantity))
+  const byDay = Array.from(dayMap, ([date, total_quantity]) => ({ date, total_quantity })).sort((a, b) => a.date.localeCompare(b.date))
+  const rowsByDay = new Map()
+  rows.forEach((item) => {
+    if (!rowsByDay.has(item.date)) rowsByDay.set(item.date, [])
+    rowsByDay.get(item.date).push(item)
+  })
+  const previousTotal = Number(previousTotalResult.rows[0]?.total_quantity || 0)
+
+  return {
+    week,
+    previous_week: previousWeek ? { ...previousWeek, total_quantity: previousTotal } : null,
+    classes,
+    summary: {
+      total_quantity: totalQuantity,
+      affected_class_count: byClass.filter((item) => item.total_quantity > 0).length,
+      rule_count: byRule.length,
+      signed_session_count: signedSessionsResult.rows.reduce((sum, item) => sum + Number(item.count || 0), 0),
+      peak_date: byDay.length ? byDay.reduce((top, item) => item.total_quantity > top.total_quantity ? item : top) : null,
+      previous_delta: previousWeek ? totalQuantity - previousTotal : null,
+    },
+    by_grade: byGrade,
+    by_class: byClass,
+    by_rule: byRule,
+    by_day: byDay,
+    matrix,
+    days: byDay.map((item) => ({
+      ...item,
+      matrix: makeViolationMatrix(rowsByDay.get(item.date) || [], classes),
+    })),
+  }
+}
+
+function addViolationMatrixSheet(workbook, title, subtitle, matrix, classes) {
+  const sheet = workbook.addWorksheet(title)
+  const baseFont = { name: "Times New Roman", size: 11 }
+  const header = ["STT", "Nhóm lỗi", "Tên lỗi", "Tổng", ...classes.map((item) => item.class_name)]
+  sheet.columns = [
+    { width: 7 },
+    { width: 20 },
+    { width: 38 },
+    { width: 11 },
+    ...classes.map(() => ({ width: 10 })),
+  ]
+  const finalColumn = excelColumnName(header.length)
+  sheet.mergeCells(`A1:${finalColumn}1`)
+  sheet.getCell("A1").value = "THỐNG KÊ VI PHẠM NỀ NẾP"
+  sheet.getCell("A1").font = { ...baseFont, size: 14, bold: true }
+  sheet.getCell("A1").alignment = { horizontal: "center", vertical: "middle" }
+  sheet.mergeCells(`A2:${finalColumn}2`)
+  sheet.getCell("A2").value = subtitle
+  sheet.getCell("A2").font = { ...baseFont, bold: true }
+  sheet.getCell("A2").alignment = { horizontal: "center", vertical: "middle" }
+  const headerRow = sheet.getRow(4)
+  headerRow.values = header
+  headerRow.font = { ...baseFont, bold: true }
+  headerRow.alignment = { horizontal: "center", vertical: "middle", wrapText: true }
+  headerRow.height = 32
+  headerRow.eachCell((cell) => {
+    cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFD9EAF7" } }
+  })
+  const largestTotal = Math.max(1, ...matrix.rows.map((item) => Number(item.total_quantity || 0)))
+  matrix.rows.forEach((item, index) => {
+    const row = sheet.getRow(index + 5)
+    row.values = [index + 1, item.category, item.rule_name, item.total_quantity, ...classes.map((entry) => Number(item.values[entry.class_name] || 0))]
+    row.height = 20
+    const ratio = Number(item.total_quantity || 0) / largestTotal
+    const totalCell = row.getCell(4)
+    totalCell.font = { ...baseFont, bold: true }
+    totalCell.fill = {
+      type: "pattern",
+      pattern: "solid",
+      fgColor: { argb: ratio >= 0.7 ? "FFF4CCCC" : ratio >= 0.35 ? "FFFFE699" : "FFE2F0D9" },
+    }
+  })
+  const totalRow = sheet.getRow(matrix.rows.length + 5)
+  totalRow.values = ["", "", "TỔNG", matrix.rows.reduce((sum, item) => sum + item.total_quantity, 0), ...classes.map((entry) => Number(matrix.class_totals[entry.class_name] || 0))]
+  totalRow.font = { ...baseFont, bold: true }
+  totalRow.eachCell((cell) => {
+    cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFFFF2CC" } }
+  })
+  sheet.eachRow({ includeEmpty: false }, (row) => {
+    row.eachCell((cell, columnNumber) => {
+      cell.font = cell.font ? { ...baseFont, bold: Boolean(cell.font.bold) } : { ...baseFont }
+      cell.alignment = { horizontal: columnNumber <= 3 ? "left" : "center", vertical: "middle", wrapText: true }
+      cell.border = {
+        top: { style: "thin", color: { argb: "FFB7C9D6" } },
+        left: { style: "thin", color: { argb: "FFB7C9D6" } },
+        bottom: { style: "thin", color: { argb: "FFB7C9D6" } },
+        right: { style: "thin", color: { argb: "FFB7C9D6" } },
+      }
+    })
+  })
+  sheet.pageSetup = { orientation: "landscape", fitToPage: true, fitToWidth: 1, fitToHeight: 0 }
+  return sheet
+}
+
+function styleReportTable(sheet, startRow, startColumn, headers, rows, widths) {
+  widths.forEach((width, index) => {
+    sheet.getColumn(startColumn + index).width = width
+  })
+  const headerRow = sheet.getRow(startRow)
+  headers.forEach((header, index) => {
+    const cell = headerRow.getCell(startColumn + index)
+    cell.value = header
+    cell.font = { name: "Times New Roman", size: 11, bold: true }
+    cell.alignment = { horizontal: "center", vertical: "middle", wrapText: true }
+    cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFD9EAF7" } }
+  })
+  rows.forEach((values, rowIndex) => {
+    const row = sheet.getRow(startRow + rowIndex + 1)
+    values.forEach((value, columnIndex) => {
+      const cell = row.getCell(startColumn + columnIndex)
+      cell.value = value
+      cell.font = { name: "Times New Roman", size: 11 }
+      cell.alignment = { horizontal: columnIndex === 0 ? "left" : "center", vertical: "middle", wrapText: true }
+    })
+  })
+  for (let rowIndex = startRow; rowIndex < startRow + Math.max(1, rows.length + 1); rowIndex += 1) {
+    for (let columnIndex = startColumn; columnIndex < startColumn + headers.length; columnIndex += 1) {
+      sheet.getRow(rowIndex).getCell(columnIndex).border = {
+        top: { style: "thin", color: { argb: "FFB7C9D6" } },
+        left: { style: "thin", color: { argb: "FFB7C9D6" } },
+        bottom: { style: "thin", color: { argb: "FFB7C9D6" } },
+        right: { style: "thin", color: { argb: "FFB7C9D6" } },
+      }
+    }
+  }
+}
+
+function addViolationReportSheet(workbook, statistics) {
+  const sheet = workbook.addWorksheet("Báo cáo")
+  const baseFont = { name: "Times New Roman", size: 11 }
+  const weekTitle = `Tuần ${statistics.week.week_number}: ${formatVietnameseDate(statistics.week.start_date)} - ${formatVietnameseDate(statistics.week.end_date)}`
+  sheet.columns = [{ width: 29 }, { width: 14 }, { width: 4 }, { width: 20 }, { width: 14 }, { width: 4 }, { width: 34 }, { width: 14 }]
+  sheet.mergeCells("A1:H1")
+  sheet.getCell("A1").value = "BÁO CÁO"
+  sheet.getCell("A1").font = { ...baseFont, size: 15, bold: true }
+  sheet.getCell("A1").alignment = { horizontal: "center", vertical: "middle" }
+  sheet.mergeCells("A2:H2")
+  sheet.getCell("A2").value = weekTitle
+  sheet.getCell("A2").font = { ...baseFont, bold: true }
+  sheet.getCell("A2").alignment = { horizontal: "center", vertical: "middle" }
+
+  const metrics = [
+    ["Tổng lượt vi phạm", statistics.summary.total_quantity],
+    ["Lớp có phát sinh", statistics.summary.affected_class_count],
+    ["Lỗi đã phát sinh", statistics.summary.rule_count],
+    ["Phiếu đã ký", statistics.summary.signed_session_count],
+  ]
+  metrics.forEach(([label, value], index) => {
+    const column = index * 2 + 1
+    const labelCell = sheet.getRow(4).getCell(column)
+    const valueCell = sheet.getRow(5).getCell(column)
+    sheet.mergeCells(4, column, 4, column + 1)
+    sheet.mergeCells(5, column, 5, column + 1)
+    labelCell.value = label
+    labelCell.font = { ...baseFont, bold: true }
+    labelCell.alignment = { horizontal: "center", vertical: "middle" }
+    labelCell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFD9EAF7" } }
+    valueCell.value = value
+    valueCell.font = { ...baseFont, size: 14, bold: true }
+    valueCell.alignment = { horizontal: "center", vertical: "middle" }
+  })
+
+  styleReportTable(sheet, 8, 1, ["Khối", "Tổng lượt"], statistics.by_grade.map((item) => [`Khối ${item.grade}`, item.total_quantity]), [29, 14])
+  styleReportTable(sheet, 8, 4, ["Lớp cần lưu ý", "Tổng lượt"], statistics.by_class.filter((item) => item.total_quantity > 0).slice(0, 10).map((item) => [item.class_name, item.total_quantity]), [20, 14])
+  styleReportTable(sheet, 8, 7, ["Lỗi cần quán triệt", "Tổng lượt"], statistics.by_rule.slice(0, 10).map((item) => [item.rule_name, item.total_quantity]), [34, 14])
+  styleReportTable(sheet, 21, 1, ["Ngày", "Tổng lượt"], statistics.by_day.map((item) => [formatVietnameseDate(item.date), item.total_quantity]), [29, 14])
+  const comparisonText = statistics.previous_week
+    ? `So với tuần ${statistics.previous_week.week_number}: ${statistics.summary.previous_delta > 0 ? "+" : ""}${statistics.summary.previous_delta} lượt vi phạm.`
+    : "Chưa có dữ liệu tuần trước để đối chiếu."
+  sheet.mergeCells("D21:H21")
+  sheet.getCell("D21").value = "Nhận định nhanh"
+  sheet.getCell("D21").font = { ...baseFont, bold: true }
+  sheet.getCell("D21").alignment = { horizontal: "center", vertical: "middle" }
+  sheet.getCell("D21").fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFD9EAF7" } }
+  sheet.mergeCells("D22:H24")
+  sheet.getCell("D22").value = comparisonText
+  sheet.getCell("D22").font = baseFont
+  sheet.getCell("D22").alignment = { horizontal: "left", vertical: "middle", wrapText: true }
+  ;["D21", "D22"].forEach((address) => {
+    sheet.getCell(address).border = {
+      top: { style: "thin", color: { argb: "FFB7C9D6" } },
+      left: { style: "thin", color: { argb: "FFB7C9D6" } },
+      bottom: { style: "thin", color: { argb: "FFB7C9D6" } },
+      right: { style: "thin", color: { argb: "FFB7C9D6" } },
+    }
+  })
+  sheet.getRow(1).height = 25
+  sheet.getRow(2).height = 20
+  sheet.getRow(5).height = 28
+  sheet.pageSetup = { orientation: "landscape", fitToPage: true, fitToWidth: 1, fitToHeight: 1 }
+}
+
+async function exportViolationStatisticsWorkbook(res, statistics) {
+  const workbook = new ExcelJS.Workbook()
+  const weekTitle = `Tuần ${statistics.week.week_number}: ${formatVietnameseDate(statistics.week.start_date)} - ${formatVietnameseDate(statistics.week.end_date)}`
+  addViolationReportSheet(workbook, statistics)
+  addViolationMatrixSheet(workbook, "Tổng hợp", weekTitle, statistics.matrix, statistics.classes)
+  statistics.days.forEach((day) => {
+    addViolationMatrixSheet(workbook, shortDaySheetName(day.date), `Ngày ${formatVietnameseDate(day.date)} | ${weekTitle}`, day.matrix, statistics.classes)
+  })
+  const buffer = await workbook.xlsx.writeBuffer()
+  res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+  res.setHeader("Content-Disposition", `attachment; filename="thong_ke_vi_pham_tuan_${statistics.week.week_number || statistics.week.id}.xlsx"`)
+  res.send(Buffer.from(buffer))
+}
+
 function exportExcelWorkbookForPeriod(res, opts) {
   const { fileName, periodTitleByGrade, periodLine2, rowsByGrade } = opts
   const workbook = new ExcelJS.Workbook()
@@ -3289,6 +3667,36 @@ router.post(
         })
       },
     )
+  },
+)
+
+router.get(
+  "/admin/week/:id/violation-statistics",
+  requireLogin,
+  requireRole(["admin"]),
+  async (req, res) => {
+    const weekId = Number(req.params.id)
+    if (!Number.isInteger(weekId) || weekId <= 0) return res.status(400).json({ error: "Invalid week" })
+    try {
+      res.json(await loadViolationStatistics(weekId))
+    } catch (error) {
+      res.status(error.status || 500).json({ error: error.message || "Không thể tải thống kê vi phạm" })
+    }
+  },
+)
+
+router.get(
+  "/admin/week/:id/violation-statistics/export",
+  requireLogin,
+  requireRole(["admin"]),
+  async (req, res) => {
+    const weekId = Number(req.params.id)
+    if (!Number.isInteger(weekId) || weekId <= 0) return res.status(400).json({ error: "Invalid week" })
+    try {
+      await exportViolationStatisticsWorkbook(res, await loadViolationStatistics(weekId))
+    } catch (error) {
+      if (!res.headersSent) res.status(error.status || 500).json({ error: error.message || "Không thể xuất thống kê vi phạm" })
+    }
   },
 )
 

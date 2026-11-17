@@ -23,6 +23,7 @@ import AdminYearSummary from "./pages/admin/AdminYearSummary"
 import AdminTimetable from "./pages/admin/AdminTimetable"
 import AdminSystemSettings from "./pages/admin/AdminSystemSettings"
 import AdminAbsenceEvidences from "./pages/admin/AdminAbsenceEvidences"
+import AdminViolationStatistics from "./pages/admin/AdminViolationStatistics"
 
 import CodoDashboard from "./pages/co_do/CodoDashboard"
 import CodoLayout from "./pages/co_do/CodoLayout"
@@ -89,6 +90,7 @@ export default function App(){
           <Route path="year-summary" element={<AdminYearSummary/>}/>
           <Route path="system-settings" element={<AdminSystemSettings/>}/>
           <Route path="absence-evidences" element={<AdminAbsenceEvidences/>}/>
+          <Route path="violation-statistics" element={<AdminViolationStatistics/>}/>
           {/* mọi route admin sai */}
           <Route path="*" element={<NotFound/>}/>
         </Route>

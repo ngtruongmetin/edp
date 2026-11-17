@@ -21,6 +21,7 @@ const shortcutItems = [
   { label: "Lịch trực", hint: "Tạo tuần và phân công trực", path: "/admin/schedule" },
   { label: "Phiếu trực", hint: "Theo dõi phiếu đã tạo", path: "/admin/duty" },
   { label: "Tổng kết tuần", hint: "Kết quả thi đua tuần", path: "/admin/weekly-summary" },
+  { label: "Thống kê vi phạm", hint: "Phân tích nề nếp theo tuần", path: "/admin/violation-statistics" },
   { label: "Tổng kết tháng", hint: "Điểm thi đua theo tháng", path: "/admin/month-summary" },
   { label: "Tổng kết học kỳ", hint: "Báo cáo học kỳ", path: "/admin/semester-summary" },
   { label: "Tổng kết năm học", hint: "Báo cáo năm học", path: "/admin/year-summary" },

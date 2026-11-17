@@ -234,11 +234,10 @@ function GvcnFloatingAssistantFab({ onOpen, disabled }: { onOpen: () => void; di
       onPointerUp={handlePointerUp}
       onPointerCancel={handlePointerCancel}
       disabled={disabled}
-      className={`fixed z-40 flex h-16 w-16 items-center justify-center rounded-full border border-white/45 bg-white/24 text-[#2e77df] backdrop-blur-2xl shadow-[0_18px_45px_rgba(46,119,223,0.22),inset_0_1px_0_rgba(255,255,255,0.65)] transition-[transform,left,top,box-shadow] duration-300 ease-out ${
-        isDragging
+      className={`fixed z-40 flex h-16 w-16 items-center justify-center rounded-full border border-white/45 bg-white/24 text-[#2e77df] backdrop-blur-2xl shadow-[0_18px_45px_rgba(46,119,223,0.22),inset_0_1px_0_rgba(255,255,255,0.65)] transition-[transform,left,top,box-shadow] duration-300 ease-out ${isDragging
           ? "scale-110 shadow-[0_28px_56px_rgba(46,119,223,0.28),inset_0_1px_0_rgba(255,255,255,0.72)]"
           : "active:scale-[0.97]"
-      } disabled:cursor-not-allowed disabled:opacity-55`}
+        } disabled:cursor-not-allowed disabled:opacity-55`}
       style={{ left: position.x, top: position.y, touchAction: "none" }}
       aria-label="Mở phân tích nề nếp bằng AI"
     >
@@ -416,9 +415,9 @@ export default function GvcnDashboard() {
       setWeek(
         res.data.week
           ? {
-              ...res.data.week,
-              base_points: Number(res.data.base_points || 120),
-            }
+            ...res.data.week,
+            base_points: Number(res.data.base_points || 120),
+          }
           : null,
       )
       setSessions(res.data.sessions || [])
@@ -654,9 +653,8 @@ export default function GvcnDashboard() {
                         <div className="mt-0.5 text-xs text-gray-500">
                           Tổng điểm:{" "}
                           <span
-                            className={`font-semibold ${
-                              Number(s.total_score) >= 0 ? "text-emerald-700" : "text-red-600"
-                            }`}
+                            className={`font-semibold ${Number(s.total_score) >= 0 ? "text-emerald-700" : "text-red-600"
+                              }`}
                           >
                             {Number(s.total_score) > 0 ? `+${s.total_score}` : String(s.total_score)}
                           </span>{" "}
@@ -766,9 +764,8 @@ export default function GvcnDashboard() {
                       <div className="rounded-2xl bg-slate-50 p-3">
                         <div className="text-[11px] text-gray-500">Tổng điểm</div>
                         <div
-                          className={`mt-0.5 text-sm font-semibold ${
-                            total >= 0 ? "text-emerald-700" : "text-red-600"
-                          }`}
+                          className={`mt-0.5 text-sm font-semibold ${total >= 0 ? "text-emerald-700" : "text-red-600"
+                            }`}
                         >
                           {total > 0 ? `+${total}` : String(total)}
                         </div>
@@ -807,7 +804,7 @@ export default function GvcnDashboard() {
                         <div className="mt-0.5 text-xs text-gray-500">
                           {v.category} | {violationQuantityLabel(v)} ({v.score_delta})
                         </div>
-                        {v.note ? (
+                        {v.note && !String(v.note).toUpperCase().includes("HẠNG CHÓT") ? (
                           <div className="mt-1 text-xs text-gray-600">Ghi chú: {v.note}</div>
                         ) : null}
                       </div>
